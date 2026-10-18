@@ -2,6 +2,14 @@
 #
 # Instala el toolchain de Dreamcast (sh-elf-gcc + arm-eabi-gcc) y KallistiOS, para M1b.
 #
+#   SOLO PARA WINDOWS CON MSYS2. Es bash, pero comprueba $MSYSTEM y usa pacman, asi que
+#   no vale en Linux ni en macOS: para esos, KallistiOS trae sus propias guias en
+#   utils/kos-chain/doc/ (debian.md, alpine.md, macos.md, bsd.md, cygwin.md).
+#
+#   SI ESTE SCRIPT FALLA, hay una guia manual paso a paso en docs/instalar-sdk.md, con
+#   los mismos pasos por separado, una comprobacion despues de cada uno y una tabla de
+#   sintomas. Cada paso se puede repetir, asi que se retoma donde se rompio.
+#
 #   COMO SE EJECUTA
 #
 #     1. Abre el shell de MSYS2 **UCRT64** (C:\msys64\ucrt64.exe) o **MINGW64**
@@ -77,7 +85,11 @@ while [ $# -gt 0 ]; do
         --skip-pacman) SKIP_PACMAN=1 ;;
         --distclean)   DO_DISTCLEAN=1 ;;
         --jobs)        JOBS="$2"; shift ;;
-        -h|--help)     sed -n '2,70p' "$0"; exit 0 ;;
+        # imprime la cabecera de comentarios, sin el '#', hasta la primera linea de
+        # codigo: asi no hay que mantener un rango de lineas a mano
+        -h|--help)     awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next}
+                            NR>1 {exit}' "$0"
+                       exit 0 ;;
         *)             echo "opcion desconocida: $1 (usa --help)" >&2; exit 2 ;;
     esac
     shift

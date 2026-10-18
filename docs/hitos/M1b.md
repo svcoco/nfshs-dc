@@ -83,8 +83,14 @@ GD-ROM (`/cd`) o de un romdisk, no del sistema de archivos del PC. De los cuatro
 ## 3. El toolchain: decidido, y el script esta escrito
 
 **Decision de Jorge (2026-10-18): dc-chain dentro del MSYS2 que ya existe.** La
-instalacion la lanza el **por separado**, con
-[`dc/tools/install-kos.sh`](../../dc/tools/install-kos.sh).
+instalacion la lanza el **por separado**, de dos formas que llevan al mismo sitio:
+
+- [`dc/tools/install-kos.sh`](../../dc/tools/install-kos.sh) — automatico, de una pasada.
+- [`docs/instalar-sdk.md`](../instalar-sdk.md) — **la misma cosa paso a paso**, con una
+  comprobacion despues de cada paso y una tabla de sintomas. Es el respaldo si el script
+  falla: cada paso es independiente y se retoma donde se rompio.
+
+Las dos cosas son **solo para Windows con MSYS2** (comprueban `$MSYSTEM` y usan `pacman`).
 
 El script esta escrito contra el **procedimiento real del repositorio de KallistiOS**
 (consultado el 2026-10-18), no contra el wiki, que esta desactualizado en tres puntos que

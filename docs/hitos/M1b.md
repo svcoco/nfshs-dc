@@ -80,9 +80,58 @@ GD-ROM (`/cd`) o de un romdisk, no del sistema de archivos del PC. De los cuatro
   de arrastrar `stdio` al binario de consola.
 - `host.c` solo los usa para el informe.
 
-## 3. Decision pendiente: como se instala el toolchain
+## 3. El toolchain: decidido, y el script esta escrito
 
-Tres caminos, y la eleccion la toma Jorge porque instala software en su maquina:
+**Decision de Jorge (2026-10-18): dc-chain dentro del MSYS2 que ya existe.** La
+instalacion la lanza el **por separado**, con
+[`dc/tools/install-kos.sh`](../../dc/tools/install-kos.sh).
+
+El script esta escrito contra el **procedimiento real del repositorio de KallistiOS**
+(consultado el 2026-10-18), no contra el wiki, que esta desactualizado en tres puntos que
+habrian hecho fallar una instalacion a ciegas:
+
+| El wiki dice | La realidad |
+|---|---|
+| el constructor esta en `utils/dc-chain` | se llama **`utils/kos-chain`** |
+| se clona con `git://git.code.sf.net/p/cadcdev/...` | el protocolo `git://` esta **retirado**; el desarrollo vive en **GitHub** |
+| hay que editar y correr `packages/fixup-sh4-newlib.sh` | ese script **ya no existe**: el arreglo es automatico (`auto_fixup_newlib` vale 1 por omision) |
+
+Lo que el script instala, con las rutas de fabrica de KallistiOS (no son una eleccion
+nuestra: salen de `Makefile.dreamcast.cfg`, `Makefile.aica.cfg` y `doc/environ.sh.sample`):
+
+```
+/opt/toolchains/dc/kos/        KallistiOS            (C:\msys64\opt\toolchains\dc\...)
+/opt/toolchains/dc/kos-ports/  librerias portadas (se clona, no se compila)
+/opt/toolchains/dc/sh-elf/     toolchain SH-4, la CPU
+/opt/toolchains/dc/arm-eabi/   toolchain ARM7, el AICA (KOS no enlaza sin el)
+```
+
+Perfil **estable** para Dreamcast: binutils 2.45.1, **gcc 15.2.0**, newlib 4.6.0, con
+`--with-endian=little`, multilib `m4-single,m4-single-only` y `thread_model=kos`. El
+`-m4-single` que pide CLAUDE.md §3 es el valor por omision, asi que no hay nada que
+ajustar.
+
+Tres cosas que el script hace a proposito distinto de la documentacion, y por que:
+
+1. **No hace `pacman -Syuu` por omision** (queda detras de `--upgrade`). En esta maquina
+   el gcc 16.2 de UCRT64 es con el que esta **validado M1a**; una actualizacion completa
+   puede moverlo y entonces un fallo nuevo no se sabria atribuir al SH-4 o al x86.
+2. **Pasa `makejobs=-jN`.** Los `.cfg` de fabrica lo dejan vacio, o sea compilacion en
+   serie.
+3. **No crea `Makefile.cfg`.** Usa `make platform=dreamcast` y `make platform=aica`, que
+   el Makefile de `kos-chain` soporta, para que las dos arquitecturas salgan de sus
+   ficheros de fabrica y no quede un archivo local que se quede viejo.
+
+Modo seguro para mirar antes de instalar: `bash dc/tools/install-kos.sh --check`, que no
+descarga ni instala nada. Detecta tambien el error facil de lanzarlo desde el **Git Bash**
+de Git for Windows, que pone el mismo `MSYSTEM=MINGW64` que MSYS2 pero no tiene `pacman`.
+
+**El script no se ha ejecutado en la sesion en que se escribio**, asi que esta verificado
+en sintaxis y en su modo `--check`, no de punta a punta.
+
+### Los tres caminos que se consideraron
+
+Para dejar constancia de por que se eligio el primero:
 
 | Camino | Coste | A favor | En contra |
 |---|---|---|---|
@@ -90,15 +139,15 @@ Tres caminos, y la eleccion la toma Jorge porque instala software en su maquina:
 | **DreamSDK** (instalador de Windows) | minutos | rapido, trae `sh-elf-gcc` ya construido | monta su propio entorno MSYS en paralelo al que ya hay, y su KOS puede ir por detras de upstream |
 | **Docker** | descarga de imagen | reproducible y aislado | hace falta Docker Desktop; el ciclo de edicion-compilacion se vuelve mas incomodo |
 
-**Recomendacion: dc-chain dentro del MSYS2 existente.** El proyecto va a vivir mucho
-tiempo y conviene estar sobre KOS de upstream, con un solo entorno que mantener. El coste
-es una compilacion larga que no necesita vigilancia.
+Se eligio el primero: el proyecto va a vivir mucho tiempo y conviene estar sobre KOS de
+upstream, con un solo entorno que mantener. El coste es una compilacion larga que no
+necesita vigilancia.
 
 ## 4. Orden de trabajo propuesto
 
 | # | Paso | Cierra con |
 |---|---|---|
-| 0 | Instalar KOS + `sh-elf-gcc`; anotar versiones | `sh-elf-gcc --version` responde; versiones en este archivo |
+| 0 | Instalar KOS + `sh-elf-gcc` con `dc/tools/install-kos.sh` (lo lanza Jorge aparte) | `sh-elf-gcc --version` responde; el script deja las versiones en `/opt/toolchains/dc/versiones-sdk.txt`, que se pegan **aqui** |
 | 1 | **Medir el tamano**: compilar `dc/gen/` con `-ml -m4-single -Os` | `.text` real de SH-4, comparado con los 3,93 MB de x86-64 |
 | 2 | `ps1rt` en SH-4: compilar y pasar las **227 pruebas unitarias** en Dreamcast | pruebas en verde sobre Flycast |
 | 3 | `platform/dc/`: archivos (GD-ROM o romdisk), pad, timers, VSync, salida de texto | el juego arranca y avanza frames, con contadores en pantalla |

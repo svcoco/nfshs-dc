@@ -282,8 +282,105 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             let grab = grabbed.clone();
             let started = std::time::Instant::now();
             let ram_at: Option<u32> = std::env::var("BOOT_RAM_FRAME").ok().and_then(|f| f.parse().ok());
+            // --- test diferencial del port en C (dc/test/diff) -------------------------
+            // NFSHS_DIFF_OUT: vuelca el estado por frame en el formato de
+            // dc/src/host/dump.c, para comparar con el lado C.
+            // NFSHS_DIFF_SCRIPT: entrada guionizada en el mismo formato que lee el host
+            // en C ("<campo> <botones>", "#end N"), para que los dos lados reciban
+            // exactamente la misma secuencia.
+            let mut diff_out: Option<std::io::BufWriter<std::fs::File>> = std::env::var("NFSHS_DIFF_OUT")
+                .ok()
+                .map(|path| {
+                    use std::io::Write;
+                    let mut f = std::io::BufWriter::new(std::fs::File::create(&path).expect("NFSHS_DIFF_OUT"));
+                    f.write_all(b"NFSD").expect("cabecera");
+                    for v in [1u32, 4096, 512, 0] {
+                        f.write_all(&v.to_le_bytes()).expect("cabecera");
+                    }
+                    f
+                });
+            let mut diff_steps: Vec<(u32, u16)> = Vec::new();
+            let mut diff_end = 0u32;
+            if let Ok(path) = std::env::var("NFSHS_DIFF_SCRIPT") {
+                let text = std::fs::read_to_string(&path).expect("NFSHS_DIFF_SCRIPT");
+                for line in text.lines() {
+                    let l = line.trim();
+                    if let Some(rest) = l.strip_prefix("#end") {
+                        diff_end = rest.trim().parse().unwrap_or(0);
+                        continue;
+                    }
+                    if l.is_empty() || l.starts_with('#') {
+                        continue;
+                    }
+                    let mut it = l.split_whitespace();
+                    let Some(at) = it.next().and_then(|t| t.parse::<u32>().ok()) else { continue };
+                    let mut buttons = 0u16;
+                    for name in it.next().unwrap_or("-").split([',', '+']) {
+                        use ps1::race::pad;
+                        buttons |= match name.trim().to_ascii_uppercase().as_str() {
+                            "SELECT" => pad::SELECT, "START" => pad::START,
+                            "UP" => pad::UP, "RIGHT" => pad::RIGHT,
+                            "DOWN" => pad::DOWN, "LEFT" => pad::LEFT,
+                            "L1" => pad::L1, "R1" => pad::R1,
+                            "L2" => pad::L2, "R2" => pad::R2,
+                            "TRIANGLE" => pad::TRIANGLE, "CIRCLE" => pad::CIRCLE,
+                            "CROSS" => pad::CROSS, "SQUARE" => pad::SQUARE,
+                            _ => 0,
+                        };
+                    }
+                    diff_steps.push((at, buttons));
+                }
+            }
             let on_frame: ps1::host::FrameFn = Box::new(move |c, info| {
                 frame += 1;
+                if let Some(out) = diff_out.as_mut() {
+                    use std::io::Write;
+                    let mut rec: Vec<u8> = Vec::with_capacity(4636);
+                    rec.extend_from_slice(&frame.to_le_bytes());
+                    rec.extend_from_slice(&c.ticks.to_le_bytes());
+                    // NFSHS_FRAMEDUMP="frame:archivo": la segunda pasada del test
+                    // diferencial. Los hashes por pagina dicen *que* pagina cambia; para
+                    // ver *que bytes*, hay que volcar los 2 MB en crudo en este mismo
+                    // punto (la frontera del frame), no en una frontera de llamada.
+                    if let Ok(spec) = std::env::var("NFSHS_FRAMEDUMP") {
+                        if let Some((at, path)) = spec.split_once(':') {
+                            if at.parse::<u32>().map_or(false, |a| a == frame) {
+                                std::fs::write(path, &c.m.ram).ok();
+                                println!("RAM volcada en la frontera del frame {frame} -> {path}");
+                            }
+                        }
+                    }
+                    for v in c.r {
+                        rec.extend_from_slice(&v.to_le_bytes());
+                    }
+                    rec.extend_from_slice(&c.hi.to_le_bytes());
+                    rec.extend_from_slice(&c.lo.to_le_bytes());
+                    for v in c.cop0 {
+                        rec.extend_from_slice(&v.to_le_bytes());
+                    }
+                    for v in c.gte_regs {
+                        rec.extend_from_slice(&v.to_le_bytes());
+                    }
+                    rec.extend_from_slice(&c.cont.to_le_bytes());
+                    rec.extend_from_slice(&(c.stack.len() as u32).to_le_bytes());
+                    // FNV-1a de 64 bits por pagina de 4 KB, igual que el lado C
+                    for page in c.m.ram.chunks(4096) {
+                        let mut h: u64 = 0xCBF2_9CE4_8422_2325;
+                        for &b in page {
+                            h ^= b as u64;
+                            h = h.wrapping_mul(0x0000_0100_0000_01B3);
+                        }
+                        rec.extend_from_slice(&h.to_le_bytes());
+                    }
+                    out.write_all(&rec).expect("volcado");
+                }
+                if !diff_steps.is_empty() {
+                    if diff_end != 0 && frame >= diff_end {
+                        return None;
+                    }
+                    let b = diff_steps.iter().rev().find(|(n, _)| *n <= frame).map_or(0, |(_, b)| *b);
+                    return Some([b.into(), 0.into()]);
+                }
                 if Some(frame) == ram_at {
                     let _ = std::fs::create_dir_all("re/boot");
                     let _ = std::fs::write("re/boot/fe_ram.bin", &c.m.ram);
@@ -314,6 +411,19 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             let t0 = std::time::Instant::now();
             let r = ps1::race::call(&mut cpu, 0x800A_52A4, &[]);
             println!("main returned: {r:?}");
+            if let Ok(path) = std::env::var("NFSHS_CALLCOUNT") {
+                let host = cpu.host.as_mut().expect("host");
+                let host = unsafe { &mut *(host.as_mut() as *mut dyn ps1::Host as *mut ps1::host::GameHost) };
+                let mut v: Vec<(u32, u64, u64)> = host.call_counts.iter().map(|(a, (n, f))| (*a, *n, *f)).collect();
+                v.sort();
+                let mut out = String::new();
+                for (a, n, f) in v {
+                    out.push_str(&format!("{a:#010x} {n} {f}
+"));
+                }
+                std::fs::write(&path, out)?;
+                println!("call counts -> {path}");
+            }
             println!("{:?}: {} calls, {} interpreted, {} backward branches", t0.elapsed(), cpu.calls, cpu.interpreted, cpu.ticks);
             if let Some((_, dir)) = shot {
                 let mut r = None;

@@ -99,6 +99,13 @@ impl GameHost {
     /// Frames of the race's loading screen for the fields the loading has taken since the
     /// last one (the original shows it while it reads the track from the CD).
     pub(super) fn loading_frames(&mut self, c: &mut Cpu) {
+        // En modo diff (NFSHS_DIFF_OUT) no se emiten: son frames en los que el juego no
+        // ejecuta nada (ticks y llamadas congelados), el host solo mantiene la pantalla
+        // viva mientras carga. El port en C no los genera, asi que incluirlos
+        // desalinearia las secuencias de frames sin aportar informacion.
+        if std::env::var_os("NFSHS_DIFF_OUT").is_some() {
+            return;
+        }
         while self.from_main && self.loading_shown + FIELD <= self.clock && self.frame.on_frame.is_some() && c.tick_limit != 0 {
             self.loading_shown += FIELD;
             let mut overlay = self.loading.clone();
@@ -136,6 +143,13 @@ impl GameHost {
     /// A game frame is done (race loop top or the front end's flip): hand this frame's state
     /// to the frame callback and take the pad input for the next.
     pub(super) fn frame_top(&mut self, c: &mut Cpu) -> Option<[Pad; 2]> {
+        self.frame_src_n += 1;
+        if std::env::var_os("NFSHS_FRAMESRC").is_some() && self.frame_src_n <= 10 {
+            // a stdout, para que el orden con los demas prints sea fiable
+            println!("FRAMETOP {} via {}: ticks {} llamadas {} interp {} reloj {} idles {}",
+                     self.frame_src_n, self.frame_src, c.ticks, c.calls, c.interpreted,
+                     self.clock, self.idles);
+        }
         self.otags = 0;
         // the recorded HUD views (in drawing order; overlays are kept last-drawn first): all
         // but the world's, or a paused game's menu view over the last full frame's HUD

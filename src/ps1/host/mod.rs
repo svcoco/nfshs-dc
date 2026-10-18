@@ -110,6 +110,13 @@ pub struct GameHost {
     /// Virtual PS1 clock in 1/1920 s units (one 128 Hz timer tick = 15, one 60 Hz field = 32).
     pub clock: u64,
     pub rcnt: u32,
+    /// Quien llamo a frame_top (diagnostico): 1 flip del FE, 2 systemtask, 3 video.
+    pub frame_src: u32,
+    /// Cuantas veces se ha entrado en frame_top (diagnostico).
+    pub frame_src_n: u32,
+    ram_dumped: bool,
+    /// NFSHS_CALLCOUNT: llamadas por direccion que ha visto el host.
+    pub call_counts: HashMap<u32, (u64, u64)>,   /* (cuenta, numero de la 1a llamada) */
     pub log: Vec<String>,
     /// 1024x512 16-bit VRAM, filled by the game's LoadImage/ClearImage/MoveImage.
     pub vram: Vec<u16>,
@@ -385,6 +392,10 @@ impl GameHost {
             draw_envs: HashMap::new(),
             from_main: false,
             rcnt: 0,
+            frame_src: 0,
+            frame_src_n: 0,
+            ram_dumped: false,
+            call_counts: HashMap::new(),
             log: Vec::new(),
             vram: vec![0; VRAM_W * VRAM_H],
             vram_dirty: true,
@@ -470,6 +481,14 @@ impl GameHost {
     /// second) through the frame callback. Any button stops it; Start (or the game's flag
     /// 0x80052EBE) marks it skipped (0x80052EBC), as the original's loop does.
     fn play_movie(&mut self, c: &mut Cpu, index: u32) {
+        // NFSHS_DIFF_NO_MOVIE: no reproducir nada. El reproductor llama a frame_top una
+        // vez por campo mientras pasa la pelicula, asi que genera frames en los que el
+        // juego no ejecuta nada; el port en C no reproduce video (es M5) y por tanto no
+        // los genera. Para el test diferencial los dos lados tienen que saltarse el
+        // video, o las secuencias de frames no son comparables.
+        if std::env::var_os("NFSHS_DIFF_NO_MOVIE").is_some() {
+            return;
+        }
         let name_at = c.m.r32(0x8005_2E68 + 4 * index);
         if name_at == 0 || self.frame.on_frame.is_none() {
             return;
@@ -489,6 +508,7 @@ impl GameHost {
             for _ in 0..fields_per_frame {
                 self.overlay.clear();
                 self.overlay.push(OverlayCmd::Movie { file: file.clone(), frame: k, fps });
+                self.frame_src = 3;
                 let Some(pads) = self.frame_top(c) else { break 'play };
                 let buttons = pads[0].buttons | pads[1].buttons;
                 if buttons != 0 {
@@ -531,6 +551,36 @@ impl Host for GameHost {
     }
 
     fn call(&mut self, c: &mut Cpu, addr: u32) -> bool {
+        // NFSHS_CALLCOUNT: cuenta por direccion todo lo que ve el host, para poder
+        // diferenciarlo contra la tabla del port en C y ver que funcion se llama un
+        // numero distinto de veces.
+        {
+            let n = c.calls;
+            let e = self.call_counts.entry(addr).or_insert((0u64, n));
+            e.0 += 1;
+            // NFSHS_CALLWIN="lo,hi": la secuencia de llamadas en esa ventana, para
+            // comparar con la del port en C y ver donde se separan.
+            // NFSHS_RAMDUMP="llamada:archivo": vuelca los 2 MB al llegar a esa llamada,
+            // para bisecar donde empieza a divergir la RAM frente al port en C.
+            if !self.ram_dumped {
+                if let Ok(spec) = std::env::var("NFSHS_RAMDUMP") {
+                    if let Some((at, path)) = spec.split_once(':') {
+                        if at.parse::<u64>().map_or(false, |a| n >= a) {
+                            self.ram_dumped = true;
+                            let _ = std::fs::write(path, &c.m.ram);
+                            println!("RAM volcada en la llamada {n} -> {path}");
+                        }
+                    }
+                }
+            }
+            if let Ok(w) = std::env::var("NFSHS_CALLWIN") {
+                let v: Vec<u64> = w.split(',').filter_map(|t| t.parse().ok()).collect();
+                if v.len() == 2 && n >= v[0] && n <= v[1] {
+                    println!("CALL {n} {addr:#x} ra {:#x} sp {:#x} ticks {} prof {}",
+                             c.r[31], c.r[29], c.ticks, c.stack.len());
+                }
+            }
+        }
         let (a0, a1, a2, a3) = (c.r[4], c.r[5], c.r[6], c.r[7]);
         // the commands recorded since the last host call went into the entry current then
         while self.overlay_ot.len() < self.overlay.len() {
@@ -574,6 +624,15 @@ impl Host for GameHost {
             return true;
         }
         if (0x8005_11B0..=0x8005_1528).contains(&addr) {
+            // En modo diff, los VIDEO_* devuelven 0 igual que el stub del port en C
+            // (dc/src/host/video.c): el modulo de video de la referencia reserva un
+            // bloque en el heap del juego con una llamada anidada y devuelve el
+            // puntero, lo que por si solo desplaza toda la secuencia de llamadas. El
+            // video de verdad es M5; aqui se neutraliza en los dos lados, como el SPU.
+            if std::env::var_os("NFSHS_DIFF_OUT").is_some() {
+                c.r[2] = 0;
+                return true;
+            }
             let clock = self.clock;
             let file = if addr == 0x8005_1380 { c.m.cstr(a1) } else { String::new() };
             let mut videos = std::mem::take(&mut self.videos);

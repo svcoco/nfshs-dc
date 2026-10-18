@@ -1,0 +1,42 @@
+# Entrada guionizada: del front end a una carrera, en unidades de FRAME.
+# Formato: "<frame> <botones>"; los botones se mantienen hasta la linea siguiente.
+# "-" es ninguno. Nombres: SELECT START UP RIGHT DOWN LEFT L2 R2 L1 R1
+# TRIANGLE CIRCLE CROSS SQUARE (tambien vale 0x1234).
+#
+# OJO: los pasos van por **numero de frame**, no por campo de video (campo ~= 375 +
+# frame). El guion anterior estaba en campos y sus pulsaciones tempranas caian antes del
+# primer frame registrado, porque en modo diff los frames de carga se saltan.
+#
+# La navegacion no se adivino: se derivo con `--textlog` y `dc/test/diff/screens.py`,
+# que dicen que pantalla hay y que opcion esta resaltada (la resaltada se dibuja en otra
+# x). El camino es:
+#
+#   [game setup]  arranca en "game options"  -> UP x2 -> "one player"
+#   [race type]   arranca en "test drive"    -> aceptar
+#       test drive y no "single race" a proposito: una carrera normal exige **tener** un
+#       coche ("you must buy a car from the car dealer"), y unlock_everything solo marca
+#       disponible y desbloqueado, no la propiedad. Con la tarjeta vacia, test drive es
+#       el camino a una carrera.
+#   [track select] germany / landstrasse     -> aceptar
+#   [car select]                             -> aceptar -> carrera
+0   -
+20  UP
+26  -
+36  UP
+42  -
+60  CROSS
+66  -
+110 CROSS
+116 -
+170 CROSS
+176 -
+230 CROSS
+236 -
+290 CROSS
+296 -
+350 CROSS
+356 -
+# ya en carrera: acelerar y mantener, para que la fisica y el HUD trabajen
+420 CROSS
+
+#end 900

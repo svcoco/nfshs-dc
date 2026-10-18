@@ -1,0 +1,431 @@
+# CLAUDE.md: NFS High Stakes → Dreamcast (nfshs-dc)
+
+Port de *Need for Speed: High Stakes* de PS1 (NTSC-U, SLUS-00826) a Sega Dreamcast. La base es
+[nfshs-rs](https://github.com/bsimovic93/nfshs-rs) (bsimovic93): una recompilación estática de
+NFS4.EXE + FRONT.BIN a Rust, con un runtime mínimo de PS1 y un renderer wgpu nuevo.
+
+El port **regenera la recompilación en C** para KallistiOS (sh-elf-gcc, SH-4) y **dibuja el 3D
+de forma nativa con el PowerVR**.
+
+Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación como en los
+mensajes. Los identificadores de código van en inglés.
+
+Última actualización: 2026-10-18. Estado: **M0 y M1a cerrados. El test diferencial pasa
+con 120 frames idénticos en el front end y 231 en la carrera (RAM, registros, GTE y
+ticks), con cinco bugs reales encontrados. Siguiente: M1b (cross-compilar a SH-4), que
+está bloqueado por el toolchain: no hay KallistiOS en la máquina.**
+
+El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
+`bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y
+todo el trabajo del port va en la rama **`dc`**. El C vive en el árbol **`dc/`** (sección 8).
+
+---
+
+## 1. Cómo retomar (léeme primero)
+
+1. Lee las secciones 3 (decisiones) y 6 (M0) de este archivo. No reabras decisiones ya
+   tomadas salvo que Jorge lo pida.
+2. Comprueba que estás en la rama `dc` y verifica los hashes de `gamedata/` (sección 6).
+3. Corre `python -I dc/tools/recomp/m0_stats.py`. Si los números no coinciden con la
+   sección 6, para y avisa antes de seguir. (`codegen_metrics.py` da las cifras del
+   dimensionado del backend C.)
+4. Continúa con **M1b** (sección 9). Mantén la lista de tareas y deja las cifras nuevas en
+   `docs/hitos/` (ya están las de M0 en `docs/hitos/M0.md`).
+
+## 2. Qué es la recompilación estática (resumen)
+
+Antes de compilar, `tools/recomp.py` traduce cada función MIPS a una función en el lenguaje
+de destino, `f_XXXXXXXX(c)`. Esa función opera sobre un estado de CPU (`c.r[32]`, hi, lo,
+cop0, registros del GTE) y sobre la RAM de PS1, que es un arreglo de 2 MB más 1 KB de
+scratchpad.
+
+El traductor trata cada caso así:
+- **Slots de retardo:** se reordenan al traducir, con semántica exacta.
+- **Llamadas directas (`jal`):** se convierten en una llamada directa en el lenguaje de
+  destino.
+- **Funciones de la lista HLE (`hle_funcs.txt`):** las sustituye el host (libgpu, libcd,
+  libpad, libmcrd, SPU, archivos).
+- **Hooks (`hook_funcs.txt`):** siempre se llaman a través de `Cpu::call`, para que el host
+  pueda observarlas.
+- **Saltos indirectos o código no cubierto:** pasan por `dispatch` y `dispatch_at` y, si no
+  hay función recompilada, por un intérprete MIPS de respaldo (`interp.rs`).
+- **Continuaciones (`c.cont`):** cubren las funciones que siguen de largo hasta la
+  siguiente.
+
+No es un emulador: no se emula la BIOS, la GPU, el CD ni el DMA. El juego corre en su
+propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió dibujar
+(cámara, chunks de pista, coches, props, overlay 2D) y el renderer lo dibuja.
+
+## 3. Decisiones tomadas
+
+- **Lenguaje:** se regenera en **C** (`recomp.py --lang c`). Rust en Dreamcast solo existe
+  de forma experimental (gccrs o rustc_codegen_gcc), así que no se usa.
+- **Runtime:** `ps1rt` se porta a C. El host va en C sobre KOS.
+- **Render:** el PVR renderiza de forma nativa (no se reproduce el OT con un GTE por
+  software). `Render_RenderPlayerView` (0x800B4024) sigue siendo HLE: el juego decide qué
+  se ve y el host lo dibuja desde los assets.
+- **Limitaciones del PVR:** no tiene shaders ni blending sustractivo. El ×2 de color de PS1,
+  la niebla y el haz nocturno de los faros se calculan por vértice en el SH-4. Las sombras
+  y los reflejos sustractivos necesitan una alternativa.
+- **Assets:** se hornean en el PC con una herramienta de build que reutiliza `src/formats`
+  (Rust) de nfshs-rs. Las texturas quedan twiddled y paletizadas cuando conviene (el PVR
+  tiene 1024 entradas de paleta), y las mallas quedan listas para dibujar.
+- **Audio:** se convierte antes de compilar (ADPCM de PS1 a formato AICA), en **M3**. En
+  M1 y M2 el SPU es un stub que acepta escrituras y mantiene el volumen de voz.
+- **Vídeo (en M2a):** 480p a 31 kHz (VGA) y 480i a 15 kHz. Se renderiza a 640×480 en
+  ambos, el modo se elige con `vid_check_cable` (se puede forzar) y las coordenadas 2D se
+  escalan ×2.
+- **FPS (decisión de Jorge, 2026-10-18): sin tope artificial.**
+  - **Mínimo conservador: 30 fps sostenidos.** El original en PS1 tiene el tope en 30 y
+    baja hasta 8 en los momentos malos, así que 30 sostenidos ya es una mejora sobre él.
+  - **Ideal: 60 fps**, si la lógica del juego lo permite. Y hay evidencia medida de que lo
+    permite: en la referencia corre a **un flip por campo (60 Hz)** en front end y en
+    carrera, con el contador de simulación avanzando de forma constante, porque la física
+    va atada al root counter de 128 Hz y no al frame. Llegar ahí sería un «NFS HS Plus».
+  - **No se pone cap en el host de Dreamcast:** corre lo que el hardware dé. El techo son
+    los 60 Hz del campo de vídeo, que es un límite de la pantalla, no nuestro.
+  - Sigue sin haber **interpolación** ni frames inventados: los frames que se dibujen son
+    pasos reales de la lógica del juego.
+  - No se mide el fps del original: es un hecho conocido y medirlo no aporta (ver
+    `docs/hitos/M0.md`).
+- **Datos:** el usuario siempre aporta su disco original. El repo no contiene datos de EA
+  ni C generado. El pack de texturas nuevas es arte propio, va en un repo aparte y
+  reemplaza texturas por nombre de 4 caracteres en PSH, manteniendo los UV.
+- **Licencia:** nfshs-rs **no tiene LICENSE** (comprobado 2026-10-17), pero su repositorio
+  es público y admite forks, y los Términos de Servicio de GitHub conceden por ello licencia
+  para reproducir el contenido *en GitHub a través del fork*. Este repo es ese fork, así que
+  su historia de git es la atribución al autor. **No habrá distribución fuera de GitHub**
+  (ni imágenes GDI/CDI ni binarios en otros sitios), que es justo lo que esa cláusula no
+  cubriría. Con eso, derivar código suyo dentro del fork —`ps1rt` en C incluido— queda
+  cubierto y no hay nada pendiente.
+
+## 4. Hitos
+
+| Hito | Objetivo | Criterio de salida |
+|---|---|---|
+| M0 | Cifras de viabilidad | **Hecho.** Funciones, tamaño de código y RAM medidos (`docs/hitos/M0.md`). El «fps original (VSync)» quedó resuelto como mal planteado: el juego no se marca el ritmo con `VSync(N)` y la cadencia la impone el host; su lógica apunta a 60 Hz con un flip por campo, y el fps real del original es un hecho de rendimiento del hardware que necesitaría DuckStation |
+| M1a | Backend C + ps1rt en C, en PC (x86) | **Hecho (2026-10-18).** Test diferencial contra la versión Rust: **120 frames idénticos** en el front end y **231** en la carrera (incluida la transición), comparando 512 hashes de página, los 32 registros, hi, lo, cop0, los 64 del GTE, `cont` y ticks. **Cinco bugs reales** encontrados, todos de integración host/juego. Pruebas unitarias 227/227. El manejador de `Render_RenderPlayerView` queda para M2b (`docs/hitos/M1a.md`) |
+| M1b | Cross-compilar a SH-4 (KOS, `-m4-single`) + host mínimo (archivos, pad, timers, VSync, BIOS) | Compila y ejecuta en DC (Flycast y hardware): el front end y la lógica de carrera avanzan sin cuelgues, con contadores y estado del coche en pantalla; tamaño del ELF y RAM medidos |
+| M2a | Grabación en C + modos 480p/480i + 2D en PVR + espejo de VRAM y texturas | Front end navegable y legible en ambos modos |
+| M2b | Pista y cielo en PVR (transformación en SH-4 con FTRV, recorte por plano cercano) | Una pista recorrible; ms/frame y polígonos medidos |
+| M2c | Coches, props y efectos | Carrera completa de un jugador |
+| M3 | Optimización (codegen, SH-4 a mano en hooks, LOD) + audio SPU→AICA | **30 fps sostenidos** en carrera como mínimo, sin tope por arriba (60 es el objetivo ideal); música, motor y efectos |
+| M4 "Enhancements" | Escalado de texturas horneado en el PC | Texturas de pista, coches y HUD escaladas dentro del presupuesto de VRAM, con respaldo a las originales |
+| M5 | Motor NFSHS preparado: VMU, rumble, FMV, 2P, pulido, build con el disco del usuario, packs de texturas externos | Motor jugable de punta a punta con el disco del usuario y un pack de texturas distribuido aparte |
+
+## 5. Arquitectura objetivo
+
+```
+Disco del usuario ──► herramienta de build (PC)
+                        ├─ recomp.py --lang c ──► gen/*.c (no se versiona)
+                        ├─ bake: PSH/GRP/GEO/VIV ──► baked/ (PVR twiddled, mallas, audio en M3)
+                        └─ mkdisc ──► 1ST_READ.BIN + IP.BIN ──► GDI/CDI
+Dreamcast:
+  gen/*.c (lógica del juego, sin cambios)
+    └─ ps1rt (CPU, RAM de 2 MB, GTE, BIOS HLE, intérprete de respaldo)
+         └─ host (reemplazos de libgpu/libcd/libpad/libmcrd/SPU + grabación del frame)
+              └─ render PVR (pista, coches, props, overlay 2D) + platform/dc (KOS)
+```
+
+La interfaz entre la grabación y el renderer debe ser estable (equivalente a `FrameInfo`),
+para poder comparar contra el renderer wgpu de referencia en PC.
+
+## 6. Datos verificados de M0 (estático)
+
+Archivos del disco de Jorge:
+
+| Archivo | Bytes | MD5 | SHA-1 |
+|---|---|---|---|
+| NFS4.EXE (PS-X EXE) | 1 245 184 | `befb56d758c0ed24921ac89dd81bb1e8` | `a5e2f0c5c4a630dc627509ed541907e9cd97c3a9` |
+| FRONT.BIN (imagen cruda) | 281 048 | `eb5dc78e6da024a4835496293bafc412` | `db9f8467d12000b49197a37cf6df7df68e0eff52` |
+
+- **NFS4.EXE:** texto en 0x80010000–0x8013F800, entry 0x800E4C38, sp 0x801FFFF0. Los
+  primeros 277 KB (0x80010000–0x80055560) están en **ceros**: ahí se carga FRONT.BIN.
+- **FRONT.BIN:** ocupa 0x80010000–0x800549D8 y cabe en ese hueco con ≈2,9 KB de sobra.
+  Empieza con datos ("SimpleMem", "FE Data Stream"), y el 91 % es código.
+- **Compatibilidad:** las 119 direcciones de `hle_funcs.txt` y las 53 de `hook_funcs.txt`
+  coinciden con inicios de función. Es la misma versión que usa nfshs-rs.
+
+| | FRONT.BIN | NFS4.EXE | Total |
+|---|---|---|---|
+| Funciones recompiladas | 994 | 2 680 | **3 674** |
+| Instrucciones MIPS únicas | 63 757 (249 KB) | 181 761 (710 KB) | **245 518 (959 KB)** |
+| Mediana / máx. de función | 30 / 3 207 | 34 / 1 957 | 33 / 3 207 (0x8002E504) |
+| `jal` | 3 827 | 7 746 | 11 573 |
+| `jr` (no `ra`) / `jalr` | 18 / 160 | 81 / 426 | 99 / 586 |
+| Loads + stores | 31,6 % | 32,3 % | 32,1 % |
+| Instrucciones GTE (cop2) | 0 | 809 | 809 |
+| Llamadas cruzadas | 931 hacia NFS4.EXE | 22 hacia FRONT.BIN | todas resueltas |
+
+- El backend Rust actual genera 28,8 MB de fuente (≈514 000 líneas, 48 partes) en unos 2 s.
+- **Estimación (sin validar):** el código en SH-4 ocuparía entre 2,9 y 5,9 MB con -O2
+  (12–24 bytes por instrucción MIPS, máscara de memoria incluida). A eso se suman 2 MB de
+  RAM de PS1 y 1 MB de espejo de VRAM, de un total de 16 MB. El punto a vigilar es la
+  I-cache de 8 KB.
+  - **Referencia medida (2026-10-18, x86-64, gcc 16.2):** el `.text` del mismo árbol
+    generado pesa **7,59 MB con `-O2` y 3,93 MB con `-Os`** (−48 %; `-O1` sale peor que
+    `-O2`), o sea 32,4 y 16,8 bytes por instrucción MIPS. No es el número de SH-4, pero la
+    cifra de `-Os` cae dentro del rango estimado. El de SH-4 es la primera medición de
+    M1b, y es la que decide si hace falta trocear el código en overlays.
+- **M0 cerrado (2026-10-18).** Las dos cifras que faltaban están en `docs/hitos/M0.md`:
+  - **RAM:** en carrera el juego tiene en uso ~**1,84 MB de los 2 MB** (1 214 KB de texto,
+    616 KB de heap y pila, 12 KB de BSS), y escribe 265 de 512 páginas de 4 KB. La **pila
+    usa solo 12 KB**, dato útil para M1b.
+  - **Framerate:** la pregunta estaba mal planteada. El juego **no** se marca el ritmo con
+    `VSync(N)` (0 call sites con argumento 0) y la cadencia la impone el host. Lo medido:
+    su lógica apunta a **60 Hz, un flip por campo de vídeo**. El fps real del original es
+    un hecho de rendimiento del hardware y necesitaría DuckStation; la pregunta que importa
+    para el port es la equivalente en Dreamcast, y se mide en M1b y M3.
+
+### Trampas conocidas del recompilador
+
+- `recomp.py` lee `../gamedata/NFS4.EXE` y `../gamedata/FRONT.BIN` relativos a `tools/`,
+  así que hay que ejecutarlo desde `tools/`. El directorio `re/` es opcional (solo aporta
+  nombres de símbolos).
+- **Sin el FRONT.BIN real, las cifras salen mal.** Con un FRONT.BIN vacío, el recompilador
+  crea 34 funciones espurias en el hueco de ceros, y `func_end` las extiende hasta su tope
+  de 0x8000 bytes (8 192 instrucciones de ceros).
+- Al sumar `func_end - start` por función se cuenta de más, porque las extensiones se
+  solapan (colas compartidas, tablas de salto extendidas hasta el siguiente inicio).
+  Cuenta siempre las **instrucciones únicas**.
+- `hle_funcs.txt` tiene 119 direcciones únicas, no tantas como líneas.
+- En `ps1rt/src/lib.rs`, el comentario de `gte_regs` dice que los comandos del GTE no se
+  ejecutan, pero `Cpu::gte` sí los ejecuta (`gte_command`). El GTE en C es necesario.
+
+## 7. Repo base: archivos clave de nfshs-rs
+
+| Ruta | Qué es |
+|---|---|
+| `tools/recomp.py` (≈480 líneas) | Recompilador. Funciones clave: `all_starts`, `collect`, `func_end`, `calls_of`, `gen_function`, `call_expr`, `collect_entry_points`. Escribe `part_XX.rs` y `lib.rs` con `RANGES`, `dispatch`, `dispatch_at` y la lista HLE |
+| `tools/hle_funcs.txt`, `tools/hook_funcs.txt` | Listas de HLE y de hooks; se reutilizan tal cual |
+| `crates/ps1rt/src/lib.rs` (512) | `Cpu`, memoria, `call` (vectores BIOS A0/B0/C0, luego el host, luego código recompilado), `cont`, timers e IRQ |
+| `crates/ps1rt/src/interp.rs` (260) | Intérprete MIPS de respaldo |
+| `crates/ps1rt/src/gte.rs` (477) | GTE completo según psx-spx |
+| `crates/ps1rt/src/bios.rs` (230) | BIOS HLE |
+| `src/ps1/host/*` | Reemplazos de librerías y grabación del frame (`frame.rs`, `views.rs`, `overlay.rs`, `gpu.rs`, `files.rs`, `system.rs`, `game.rs`) |
+| `src/ps1/race.rs`, `src/game/original.rs` | Hilo del juego y paso de 60 Hz |
+| `src/ps1/spu.rs`, `src/ps1/memcard.rs` | Modelo del SPU y memory card de 128 KB |
+| `src/render/mod.rs` + `shader.wgsl` | Renderer de referencia: atlas, reverse-Z, ×2, color key, STP, niebla/depth cue, haz nocturno, pases sustractivos |
+| `src/formats/*`, `docs/FORMATS.md` | Formatos PSH/GRP/GEO/VIV y otros |
+
+Ejecutar la referencia en PC: `cargo build --release`, después
+`./target/release/nfshs extract <imagen.bin> gamedata`, después
+`cd tools && python recomp.py ../crates/nfs4rc/src --all` y otra vez `cargo build --release`.
+
+## 8. Entorno y estructura del repo
+
+El repo **no es nuevo**: es el fork de nfshs-rs. El árbol Rust se deja intacto (sigue
+siendo la referencia ejecutable y el oráculo del test diferencial) y el port en C vive en
+`dc/`, para que `cargo` siga funcionando y los merges desde `upstream` no choquen.
+
+```
+nfshs-dc/                        # fork; rama dc
+├── CLAUDE.md
+├── Cargo.toml, Cargo.lock, README.md, TODO.txt   # del upstream
+├── crates/ps1rt/, crates/nfs4rc/ # referencia Rust (nfs4rc/src/ es generado, ignorado)
+├── src/, tools/, bugs/           # del upstream: host, renderer, formats, recomp.py
+├── docs/
+│   ├── hitos/M0.md               # cifras medidas
+│   └── arquitectura/             # vistas por capas, As-Is y To-Be separados
+├── dc/                           # EL PORT EN C
+│   ├── Makefile                  # targets: m0, metrics, gen, pc, dc, bake, disc, diff
+│   ├── src/ps1rt/                # PORTABLE: cpu, mem, gte, bios, interp
+│   ├── src/host/                 # PORTABLE: HLE de librerías, SPU stub, grabación
+│   ├── src/render/               # PORTABLE: pista, coches, props; visibilidad
+│   ├── src/platform/dc/          # KOS: pvr, vídeo, pad, VMU, AICA, cd, timers
+│   ├── src/platform/pc/          # x86: harness para M1a
+│   ├── tools/recomp/             # m0_stats.py, codegen_metrics.py, backend C
+│   ├── tools/bake/, tools/mkdisc/
+│   ├── test/diff/, test/unit/
+│   └── gen/  build/  baked/      # en .gitignore
+└── gamedata/                     # en .gitignore; lo aporta Jorge
+```
+
+- `dc/src/ps1rt/`, `dc/src/host/` y `dc/src/render/` **no incluyen cabeceras de KOS**. Así
+  M1a corre en x86 y M1b solo cambia `dc/src/platform/`.
+- Archivos del juego: `gamedata/NFS4.EXE` y `gamedata/FRONT.BIN` (verifica los hashes de la
+  sección 6). Jorge los aporta y **nunca se versionan**. Como `gamedata/` es hermano de
+  `tools/`, el `../gamedata` que usa `recomp.py` resuelve sin tocar nada.
+- Toolchain de DC: KallistiOS con sh-elf-gcc. Para probar: Flycast y hardware real (el
+  medio de carga, SD/ODE o GDI, está por decidir).
+- Disco: todo en C: (49 GB libres el 2026-10-17). El externo `D:\dreamcast-dev` queda como
+  copia de seguridad.
+
+## 9. M1a (hecho) y próximo trabajo: M1b
+
+**Lo que sigue describe M1a, que está cerrado**, porque documenta lo que se construyó y
+cómo. El trabajo actual es **M1b** y vive en `docs/hitos/M1b.md`; el resumen está al final
+de esta sección.
+
+### M1a: backend C + ps1rt en C, en x86
+
+1. **Backend C en `recomp.py`** (opción `--lang c`, sin romper la salida Rust):
+   - Una función C por función MIPS: `void f_XXXXXXXX(Cpu *c)`. Los bloques básicos
+     pasan a etiquetas con `goto`; los `jr reg` locales (tablas de salto), a un `switch`
+     sobre la dirección.
+   - Mismas semánticas que la versión Rust: slots de retardo, `call_expr` (llamada directa
+     si la función es conocida y no es hook; si no, `ps1_call(c, addr)`), continuaciones
+     con `c->cont`, `collect_entry_points`.
+   - Acceso a memoria con macros o funciones `inline` `r8/r16/r32/w8/w16/w32`: ruta
+     rápida con máscara `& 0x1FFFFF` sobre RAM plana; ruta lenta solo para scratchpad
+     (0x1F800000) e IO.
+   - Emitir `dispatch.c` con la tabla dirección→función (ordenada, búsqueda binaria) y
+     `RANGES` para `dispatch_at`.
+   - Partir en N archivos (`part_XX.c`), como en Rust, para no castigar al compilador.
+2. **ps1rt en C** (`src/ps1rt/`), traducido a partir de lib.rs, interp.rs, gte.rs y
+   bios.rs, **después de confirmar la licencia con el autor**. Si no hay permiso,
+   reescribir desde psx-spx usando nfshs-rs solo como oráculo de pruebas.
+3. **Host mínimo en x86** (`platform/pc`): archivos desde `gamedata/`, VSync y timers,
+   pad con entrada guionizada, GPU y SPU como stubs que aceptan escrituras.
+4. **Test diferencial** (`test/diff/`): ejecutar la versión Rust y la C con la misma
+   secuencia de entrada y comparar la RAM de 2 MB (o un hash por región) en cada paso de
+   60 Hz. El primer frame que diverja indica la función a revisar.
+5. Registrar en `docs/hitos/M1a.md` el tamaño de `gen/*.c`, el tiempo de compilación y el
+   tamaño del binario x86.
+
+**Criterio de salida:** front end y una carrera de prueba, N frames idénticos en RAM entre
+C y Rust.
+
+**Estado: cerrado el 2026-10-18.** Cumple el criterio con **120 frames idénticos** en el
+front end y **231 en la carrera** (incluida la transición desde los menús), comparando 512
+hashes de página de 4 KB, los 32 registros, hi, lo, cop0, los 64 del GTE, `cont` y ticks,
+con los dos lados llegando al mismo frame en la misma llamada. Pruebas unitarias de
+`ps1rt`: **227/227**. Detalle, los cinco bugs y las cifras en `docs/hitos/M1a.md`.
+
+El frame 232 —el primer frame de carrera— diverge **solo en los registros del GTE**, por el
+manejador de `Render_RenderPlayerView` (`0x800B4024`), que no está portado: 183 líneas y
+**18 de las 33 llamadas anidadas** de la capa de observación de la referencia. **Decisión
+de Jorge: se corta ahí**, porque esas 18 llamadas son la grabación de geometría que M2b y
+M2c escriben de todas formas con el PVR delante, y portarlas solo para el test sería
+andamio. Los cinco bugs que encontró el test estaban todos en la integración host/juego, y
+esa clase ya está barrida por los 231 frames.
+
+Deuda anotada, no olvidada (está desarrollada en `docs/hitos/M1a.md`): el manejador de
+`0x800B4024` (va a M2b), los **cuatro ayudantes del HUD**, `CAR_CONE_WIDTH = 2` (mejora de
+la referencia que escribe en RAM; si se porta, detrás de una opción apagada por omisión,
+como `--unlock`) y la **pila de diagnóstico** del port clavada en 0.
+
+**Para comparar, se neutralizan en los dos lados** las conveniencias del host de la
+referencia, no solo en el port: el SPU (`src/ps1/diffspu.rs`) y los `VIDEO_*`.
+**`unlock_everything` sí se porta** (`--unlock` en el port, que es el comportamiento por
+omisión de la referencia): parecía cosmético, pero marcar pistas y coches como disponibles
+**da acceso a carreras**, y sin ello los dos lados no son comparables. No marca la
+propiedad del coche, así que el guion entra por *test drive*. Si el Dreamcast lo ofrece
+como opción al jugador, es una decisión de producto de M5.
+
+### Próximo trabajo: M1b (cross-compilar a SH-4)
+
+Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
+
+1. **Está bloqueado por el toolchain.** No hay KallistiOS ni `sh-elf-gcc` en la máquina
+   (comprobado el 2026-10-18). La recomendación es **dc-chain dentro del MSYS2 que ya
+   existe**, para estar sobre KOS de upstream con un solo entorno; el coste es una
+   compilación larga y desatendida. Es una decisión de Jorge: instala software.
+2. **La primera medición es el tamaño del código**, antes de escribir plataforma: en
+   Dreamcast el `1ST_READ.BIN` se carga entero en RAM. Medido en x86-64: `.text` del árbol
+   generado = **7,59 MB con `-O2` y 3,93 MB con `-Os`** (−48 %; `-O1` es peor que `-O2`).
+   La estimación de M0 para SH-4 era 2,9–5,9 MB y la medida de `-Os` cae dentro, pero el
+   número de SH-4 **hay que medirlo**.
+3. **La auditoría del código portable contra los peligros del SH-4 ya está hecha** y
+   despeja dos riesgos con datos: **0 accesos desalineados** y **0 en el borde de la RAM**
+   en 900 frames de carrera, sin casts puntero↔entero y sin `double` salvo un `printf`. Lo
+   que queda por hacer es abstraer `FILE`/`fopen` (está en cuatro archivos del host, dos de
+   ellos solo del test diferencial) y tener en cuenta que el **intérprete de respaldo no es
+   código muerto**: 21 378 entradas en 900 frames.
+
+## 10. Reglas para Claude Code en este proyecto
+
+- **Mide, no supongas.** Toda cifra que vaya a la documentación sale de ejecutar algo, y
+  las estimaciones se marcan como tales. Si una cifra parece redonda o rara (como 8 192),
+  investígala antes de reportarla.
+- No subas al repo `gamedata/`, `gen/`, `baked/` ni nada derivado del disco.
+- Derivar código de nfshs-rs dentro de este fork está cubierto (ver §3, Licencia). Lo que
+  no se hace es **publicar nada derivado fuera de GitHub**.
+- No cambies las decisiones de la sección 3 por tu cuenta. Proponlas a Jorge.
+- Escribe la documentación en español, de forma concisa. En los diagramas de
+  arquitectura, Jorge prefiere vistas por capas y separar el As-Is del To-Be.
+- Al cerrar un hito, actualiza la tabla de la sección 4, la sección 6 o 9 y
+  `docs/estrategia.md`.
+
+## 11. Riesgos y decisiones abiertas
+
+- **Riesgos:**
+  - **CPU del SH-4:** tiene que correr la lógica recompilada más la transformación de la
+    pista.
+  - **I-cache:** con 3–6 MB de código, los fallos de caché pesarán.
+  - **VRAM del PVR:** hay riesgo de thrash, porque PS1 sube texturas y CLUTs de forma
+    dinámica.
+  - **Audio:** hay que mapear las subidas DMA del driver EA a las muestras convertidas.
+  - **FMV:** STR/MDEC.
+- **Abiertas:**
+  - **M4:** factor de escala de las texturas (2× como base), método y formato.
+  - **Alcance:** si la primera versión incluye 2P y FMV.
+  - **Pruebas en hardware:** qué medio de carga usar.
+  - *(cerrada 2026-10-18: el objetivo de fps es 30 sostenidos, ver §3. No se mide el
+    fps del original.)*
+  - **Autor de nfshs-rs:** contacto sobre la licencia y una posible colaboración.
+
+---
+
+## Apéndice A: `tools/recomp/m0_stats.py`
+
+Reproduce las cifras de la sección 6. Ejecútalo desde el directorio de `recomp.py`, con
+`../gamedata/NFS4.EXE` y `../gamedata/FRONT.BIN` presentes. Salida esperada: `TOTAL: 3674
+funciones, 245518 instr (959 KB)` y `HLE ... 119/119; hooks: 53/53`.
+
+```python
+"""M0: cifras de la imagen combinada NFS4.EXE + FRONT.BIN (ejecutar desde tools/)."""
+import sys
+sys.argv = ['m0_stats']
+import recomp
+
+e = recomp.e
+OV0, OV1 = 0x80010000, 0x80010000 + len(recomp._front)
+hle = {int(l.split()[0], 16) for l in open('hle_funcs.txt') if l.strip() and not l.startswith('#')}
+recomp.HLE_SET |= hle
+funcs = recomp.collect(recomp.all_starts())
+
+# regiones de ceros >= 1 KB (hueco del overlay si falta FRONT.BIN, BSS, relleno)
+runs, a = [], e.base
+while a < e.end:
+    if e.word(a) == 0:
+        b = a
+        while b < e.end and e.word(b) == 0:
+            b += 4
+        if (b - a) // 4 >= 256:
+            runs.append((a, b))
+        a = b
+    else:
+        a += 4
+in_zero = lambda p: any(x <= p < y for x, y in runs)
+real = [f for f in funcs if not in_zero(f)]
+print(f'recompilador: {len(funcs)} funciones; espurias en ceros: {len(funcs) - len(real)}')
+
+
+def stats(fs, name):
+    cov = set()
+    for f in fs:
+        cov.update(p for p in range(f, recomp.func_end(f), 4) if not in_zero(p))
+    c = dict(jal=0, jr=0, jalr=0, ld=0, st=0, cop2=0)
+    for pc in cov:
+        w = e.word(pc); op = w >> 26
+        if op == 0:
+            c['jr'] += (w & 63) == 8 and ((w >> 21) & 31) != 31
+            c['jalr'] += (w & 63) == 9
+        elif op == 3: c['jal'] += 1
+        elif op in (0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x32): c['ld'] += 1
+        elif op in (0x28, 0x29, 0x2a, 0x2b, 0x2e, 0x3a): c['st'] += 1
+        elif op == 0x12: c['cop2'] += 1
+    sz = sorted((recomp.func_end(f) - f) // 4 for f in fs) or [0]
+    print(f'{name}: {len(fs)} funciones, {len(cov)} instr ({len(cov) * 4 / 1024:.0f} KB), '
+          f'mediana {sz[len(sz) // 2]}, max {sz[-1]}, {c}')
+
+
+stats([f for f in real if OV0 <= f < OV1], 'FRONT.BIN')
+stats([f for f in real if f >= OV1], 'NFS4.EXE')
+stats(real, 'TOTAL')
+starts = set(recomp.all_starts())
+hooks = [int(l.split()[0], 16) for l in open('hook_funcs.txt') if l.strip() and not l.startswith('#')]
+print(f'HLE que son inicio de función: {len(hle & starts)}/{len(hle)}; '
+      f'hooks: {sum(h in starts for h in hooks)}/{len(hooks)}')
+```

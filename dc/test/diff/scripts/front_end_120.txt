@@ -1,0 +1,5 @@
+# Front end sin tocar nada, 120 frames: la evidencia barata de que la identidad
+# aguanta en el tiempo y no solo en los dos primeros frames.
+0 -
+
+#end 120

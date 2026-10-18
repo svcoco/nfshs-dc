@@ -21,7 +21,9 @@ impl GameHost {
                 // InterruptCallback(line, handler): the previous handler
                 self.callbacks.insert("interrupt", a1);
                 let slot = c.irq_callbacks.get_mut(a0 as usize);
-                slot.map_or(0, |h| std::mem::replace(h, a1))
+                let prev = slot.map_or(0, |h| std::mem::replace(h, a1));
+                eprintln!("InterruptCallback(linea={a0:#x}, manejador={a1:#x}) -> {prev:#x} (llamada {}, ra={:#x})", c.calls, c.r[31]);
+                prev
             }
             0x800F_3208 => {
                 // DMACallback(channel, handler): the previous handler
@@ -87,6 +89,7 @@ impl GameHost {
             0x800E_77F0 => {
                 if self.frame.on_frame.is_some() && c.r[31] == MAIN_LOOP_YIELD_RA {
                     // top of the original race loop
+                    self.frame_src = 2;
                     let _ = self.frame_top(c);
                 } else {
                     // yield inside a wait loop: let time pass until the next timer tick

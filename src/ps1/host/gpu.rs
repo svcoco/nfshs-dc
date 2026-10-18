@@ -148,6 +148,7 @@ impl GameHost {
                 // the front end's frames end in the engine's flip (Draw_ flip: VSync, PutDispEnv,
                 // DrawOTag per view)
                 if self.mode == Mode::FrontEnd && self.frame.on_frame.is_some() && c.r[31] == FLIP_PUT_DISP_ENV_RA {
+                    self.frame_src = 1;
                     let _ = self.frame_top(c);
                 }
                 a0

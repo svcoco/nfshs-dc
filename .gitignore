@@ -6,3 +6,11 @@ __pycache__/
 /NFS4.CPE
 /NFS4.MAP
 /NFS4.SYM
+
+# Port a Dreamcast: nada derivado del disco se versiona
+/dc/gen/
+/dc/build/
+/dc/baked/
+# Salida del test diferencial: volcados de la RAM del juego (c_ram.bin son los 2 MB
+# literales), hashes por frame y registros de ejecucion. Derivado del disco: fuera.
+/dc/test/diff/out/

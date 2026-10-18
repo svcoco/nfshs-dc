@@ -1,0 +1,27 @@
+# Este repo se clona en Windows con core.autocrlf=true, que convierte a CRLF al hacer
+# checkout. Para la mayoria de archivos da igual, pero hay cuatro clases donde un \r
+# arrastrado rompe cosas de verdad, y en un clon nuevo, no en el que ya funciona:
+#
+#   *.sh        bash puede tolerar CRLF o no segun la version; los heredocs y los
+#               valores de variable con \r al final fallan de formas confusas
+#               (p. ej. un nombre de paquete "mingw-w64-x86_64\r" que pacman no
+#               encuentra). Afecta a dc/tools/install-kos.sh.
+#   Makefile    make pasa la receta al shell tal cual, con el \r incluido
+#   *.mk        igual
+#   scripts de entrada del test diferencial: los parsea dc/src/host/pad.c token a
+#               token, y "UP\r" no coincide con "UP"
+#
+# Se fijan a LF explicitamente. El resto se deja en manos de text=auto.
+
+* text=auto
+
+*.sh            text eol=lf
+Makefile        text eol=lf
+*.mk            text eol=lf
+dc/test/diff/scripts/*.txt text eol=lf
+
+# Binarios: que git no los toque
+*.png           binary
+*.pdf           binary
+*.bin           binary
+*.d1            binary

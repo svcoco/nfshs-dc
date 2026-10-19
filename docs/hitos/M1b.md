@@ -122,8 +122,9 @@ Tres cosas que el script hace a proposito distinto de la documentacion, y por qu
 1. **No hace `pacman -Syuu` por omision** (queda detras de `--upgrade`). En esta maquina
    el gcc 16.2 de UCRT64 es con el que esta **validado M1a**; una actualizacion completa
    puede moverlo y entonces un fallo nuevo no se sabria atribuir al SH-4 o al x86.
-2. **Pasa `makejobs=-jN`.** Los `.cfg` de fabrica lo dejan vacio, o sea compilacion en
-   serie.
+2. **Pasa `makejobs=N`** (el numero solo, sin `-j`: `init.mk` hace
+   `jobs_arg = -j$(makejobs)`), para poder bajarlo a 1 al diagnosticar. No hace falta
+   para ir en paralelo: con `makejobs` sin definir, `init.mk` ya usa todos los nucleos.
 3. **No crea `Makefile.cfg`.** Usa `make platform=dreamcast` y `make platform=aica`, que
    el Makefile de `kos-chain` soporta, para que las dos arquitecturas salgan de sus
    ficheros de fabrica y no quede un archivo local que se quede viejo.

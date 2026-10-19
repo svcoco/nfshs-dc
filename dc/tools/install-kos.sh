@@ -250,18 +250,23 @@ info "perfil estable:   $(grep -hE '^(binutils|gcc|newlib)_ver=' \
 # El Makefile de kos-chain lee Makefile.cfg si existe y, si no, Makefile.$(platform).cfg
 # cuando se le pasa `platform=` por linea de comandos. Aprovechamos eso para no crear
 # ningun Makefile.cfg: asi las dos arquitecturas salen de sus ficheros de fabrica y no
-# hay un archivo local que se quede viejo. `makejobs` por linea de comandos pisa el
-# valor vacio del .cfg, que compilaria en serie.
+# hay un archivo local que se quede viejo.
+#
+# OJO con `makejobs`: es **solo el numero**, porque init.mk hace `jobs_arg = -j$(makejobs)`.
+# Pasarle "-j8" produce "-j-j8", y entonces make no reconoce la opcion y vuelca su ayuda
+# en pantalla en vez de compilar. (Lo aprendimos fallando.) Dejarlo sin definir tampoco
+# compila en serie: init.mk cae en `-j$(getconf _NPROCESSORS_ONLN)`, o sea todos los
+# nucleos. Se pasa explicito solo para poder bajarlo con --jobs 1 al diagnosticar.
 #
 # Hacen falta las DOS: sh-elf para la CPU SH-4 y arm-eabi para el ARM7 del AICA (el
 # procesador de sonido). KallistiOS no enlaza sin la segunda.
 
 paso "3. Construyendo el toolchain SH-4 (sh-elf) - esto es lo que tarda"
 info "binutils + gcc (dos pasadas) + newlib, con $JOBS hilos"
-( cd "$CHAIN" && run make platform=dreamcast makejobs="-j$JOBS" )
+( cd "$CHAIN" && run make platform=dreamcast makejobs="$JOBS" )
 
 paso "4. Construyendo el toolchain ARM del AICA (arm-eabi)"
-( cd "$CHAIN" && run make platform=aica makejobs="-j$JOBS" )
+( cd "$CHAIN" && run make platform=aica makejobs="$JOBS" )
 
 for gcc_bin in "$DC_ROOT/sh-elf/bin/sh-elf-gcc" "$DC_ROOT/arm-eabi/bin/arm-eabi-gcc"; do
     [ -x "$gcc_bin" ] || error "no se genero $gcc_bin. Mira los logs en $CHAIN/logs/"

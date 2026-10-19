@@ -151,7 +151,7 @@ Si no existe, KallistiOS ha movido el constructor de sitio: mira que hay en
 
 ```sh
 cd /opt/toolchains/dc/kos/utils/kos-chain
-make platform=dreamcast makejobs=-j$(nproc)
+make platform=dreamcast makejobs=$(nproc)
 ```
 
 Dos cosas que conviene entender de ese comando:
@@ -160,8 +160,14 @@ Dos cosas que conviene entender de ese comando:
   `Makefile.cfg` si existe y, si no, `Makefile.$(platform).cfg` cuando le pasas `platform=`
   por linea de comandos. Asi las dos arquitecturas salen de sus ficheros de fabrica y no
   queda un archivo local que se quede viejo.
-- **`makejobs=-jN`** porque los `.cfg` de fabrica lo dejan **vacio**, o sea compilacion en
-  serie. Por linea de comandos pisa el valor del fichero.
+- **`makejobs=N` es solo el numero**, sin `-j`. `scripts/init.mk` hace
+  `jobs_arg = -j$(makejobs)`, asi que si le pasas `-j8` acaba construyendo `-j-j8`, make
+  no reconoce la opcion y **vuelca su ayuda en pantalla** en vez de compilar. Es un fallo
+  facil de cometer y el mensaje no dice que ha pasado.
+  Dejarlo sin poner tampoco compila en serie: `init.mk` cae en
+  `-j$(getconf _NPROCESSORS_ONLN)`, o sea todos los nucleos. O sea que **`make
+  platform=dreamcast` a secas ya va en paralelo**; se pasa explicito solo para poder
+  bajarlo a `makejobs=1` si hay que diagnosticar un fallo.
 
 Lo que construye es el perfil **estable**: binutils 2.45.1, **gcc 15.2.0**, newlib 4.6.0,
 con `--with-endian=little`, multilib `m4-single,m4-single-only` y `thread_model=kos`. El
@@ -180,7 +186,7 @@ Si falla, los registros de cada componente estan en
 
 ```sh
 cd /opt/toolchains/dc/kos/utils/kos-chain
-make platform=aica makejobs=-j$(nproc)
+make platform=aica makejobs=$(nproc)
 ```
 
 **Comprueba:**
@@ -277,6 +283,7 @@ make platform=aica      distclean
 |---|---|
 | `pacman: command not found` con `$MSYSTEM` puesto | Estas en el **Git Bash** de Git for Windows, no en MSYS2. Abre `C:\msys64\ucrt64.exe` |
 | `Cannot create temporary file in C:\WINDOWS\: Permission denied` | gcc busca su temporal en `TMP`/`TEMP` y no los tiene. Pasa al invocar `make` desde un shell que no los exporta. Arreglo: `export TMPDIR=/tmp TMP=/tmp TEMP=/tmp` (ojo: en **comandos separados**, porque `export A=/tmp B=$A` deja `B` con el valor **viejo** de `A`) |
+| **make vuelca su pagina de ayuda** y luego `Error 1` en `binutils.mk` (o en cualquier otro componente) | Le has pasado una opcion que no entiende. Casi siempre es `makejobs` con el `-j` incluido: `init.mk` hace `jobs_arg = -j$(makejobs)`, asi que `makejobs=-j8` produce `-j-j8`. Usa **solo el numero**: `makejobs=8`, o no lo pongas |
 | El paso 6 o 7 se para a mitad | Mira `kos-chain/logs/`, que tiene un registro por componente. Los pasos se pueden **relanzar**: `make platform=... ` retoma lo que falte |
 | `configure: error: no acceptable C compiler` | Falta `$PKG-toolchain` del paso 3, o estas en el shell MSYS pelado en vez de UCRT64/MINGW64 |
 | Errores raros de dependencias al instalar paquetes | Actualizacion parcial. Haz `pacman -Syuu`, reabre la terminal, repite, y **revalida el lado x86** (ver el apartado del paso 3) |

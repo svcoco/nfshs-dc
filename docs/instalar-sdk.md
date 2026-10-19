@@ -1,5 +1,10 @@
 # Instalar el SDK de Dreamcast a mano (Windows + MSYS2)
 
+> **Revision 2026-10-19.** Si la copia que estas leyendo no lleva esta linea, **esta
+> vieja**: los comandos de los pasos 6 y 7 cambiaron. Vuelve a abrir el archivo desde el
+> repo antes de seguir. (Paso justo eso: una guia corregida en el repo no sirve de nada si
+> tienes la version anterior en pantalla.)
+
 Guia paso a paso para dejar `sh-elf-gcc` y KallistiOS funcionando. Es la alternativa
 manual a [`dc/tools/install-kos.sh`](../dc/tools/install-kos.sh), que hace esto mismo
 seguido: **si el script falla, sigue esta guia desde el paso donde se rompio**, porque
@@ -151,23 +156,18 @@ Si no existe, KallistiOS ha movido el constructor de sitio: mira que hay en
 
 ```sh
 cd /opt/toolchains/dc/kos/utils/kos-chain
-make platform=dreamcast makejobs=$(nproc)
+make platform=dreamcast
 ```
 
-Dos cosas que conviene entender de ese comando:
+**Asi, tal cual, sin nada mas.** Ya compila en paralelo con todos los nucleos: `init.mk`
+usa `-j$(getconf _NPROCESSORS_ONLN)` cuando no le dices otra cosa. No le anadas `-j` ni
+`makejobs`; si crees que necesitas tocar eso, lee
+[«Sobre `makejobs`»](#sobre-makejobs-y-por-que-esta-guia-no-lo-usa) antes.
 
-- **`platform=dreamcast`** evita crear un `Makefile.cfg`. El Makefile de `kos-chain` lee
-  `Makefile.cfg` si existe y, si no, `Makefile.$(platform).cfg` cuando le pasas `platform=`
-  por linea de comandos. Asi las dos arquitecturas salen de sus ficheros de fabrica y no
-  queda un archivo local que se quede viejo.
-- **`makejobs=N` es solo el numero**, sin `-j`. `scripts/init.mk` hace
-  `jobs_arg = -j$(makejobs)`, asi que si le pasas `-j8` acaba construyendo `-j-j8`, make
-  no reconoce la opcion y **vuelca su ayuda en pantalla** en vez de compilar. Es un fallo
-  facil de cometer y el mensaje no dice que ha pasado.
-  Dejarlo sin poner tampoco compila en serie: `init.mk` cae en
-  `-j$(getconf _NPROCESSORS_ONLN)`, o sea todos los nucleos. O sea que **`make
-  platform=dreamcast` a secas ya va en paralelo**; se pasa explicito solo para poder
-  bajarlo a `makejobs=1` si hay que diagnosticar un fallo.
+`platform=dreamcast` evita crear un `Makefile.cfg`. El Makefile de `kos-chain` lee
+`Makefile.cfg` si existe y, si no, `Makefile.$(platform).cfg` cuando le pasas `platform=`
+por linea de comandos. Asi las dos arquitecturas salen de sus ficheros de fabrica y no
+queda un archivo local que se quede viejo.
 
 Lo que construye es el perfil **estable**: binutils 2.45.1, **gcc 15.2.0**, newlib 4.6.0,
 con `--with-endian=little`, multilib `m4-single,m4-single-only` y `thread_model=kos`. El
@@ -186,8 +186,19 @@ Si falla, los registros de cada componente estan en
 
 ```sh
 cd /opt/toolchains/dc/kos/utils/kos-chain
-make platform=aica makejobs=$(nproc)
+make platform=aica
 ```
+
+Igual que el paso 6: **sin anadirle nada**.
+
+Este paso **no se puede saltar** aunque no te interese el sonido todavia. KOS compila
+`kernel/arch/dreamcast/sound/arm/stream.drv` desde fuente y lo convierte a C con `bin2c`,
+asi que sin el toolchain ARM el `make` del paso 9 no termina. No hay binario precompilado.
+
+Ojo a que el perfil del AICA es **mucho mas viejo** que el del SH-4: binutils 2.47 pero
+**gcc 8.5.0** (de 2021), frente al 15.2.0 del SH-4. Si este paso falla dentro de gcc y no
+de binutils, esa diferencia es la primera sospecha, porque compilar fuentes de gcc
+antiguas con un host gcc moderno es un fallo conocido.
 
 **Comprueba:**
 
@@ -276,6 +287,66 @@ make platform=aica      distclean
 ```
 
 ---
+
+## Si un paso falla a mitad
+
+Los pasos 6 y 7 se **relanzan tal cual**: `make platform=...` retoma lo que falte y no
+vuelve a descargar lo que ya tiene. No hace falta borrar nada ni empezar de cero.
+
+El orden interno de cada uno es **binutils -> gcc (pasada 1) -> newlib -> gcc (pasada 2)**,
+y hay un log por componente en `logs/`. Para saber por donde se quedo:
+
+```sh
+cd /opt/toolchains/dc/kos/utils/kos-chain
+ls -lt logs/ | head -5
+```
+
+El primero de la lista es el que estaba corriendo cuando fallo. Su **tamano** ya dice
+mucho: los de gcc pesan megabytes cuando van bien, asi que un log de unos pocos KB es
+una parada temprana, casi siempre en `configure` o antes de compilar nada.
+
+Para ver el fallo:
+
+```sh
+L=$(ls -t logs/*.log | head -1); echo "== $L =="
+tail -30 "$L"
+```
+
+Usa `tail`, no solo `grep error:`. Hay fallos que **no** escriben la palabra «error» en
+ningun sitio: el del `makejobs` mal escrito es justo uno de esos, y un `grep` vuelve vacio
+aunque el log tenga el problema delante.
+
+Si quieres el mensaje limpio, relanza el paso en serie. Tarda mas, pero no tienes ocho
+trabajos escribiendo a la vez:
+
+```sh
+make platform=aica makejobs=1
+```
+
+## Sobre `makejobs`, y por que esta guia no lo usa
+
+`makejobs` **no hace falta**: sin el, `scripts/init.mk` ya usa todos los nucleos
+(`-j$(getconf _NPROCESSORS_ONLN)`). Dejarlo vacio **no** compila en serie, que es lo que
+parece al leer el `.cfg`.
+
+Y escribirlo mal cuesta caro, porque `init.mk` hace:
+
+```make
+ifdef makejobs
+  jobs_arg = -j$(makejobs)
+```
+
+o sea que **es el numero solo**. Si le pasas `makejobs=-j8`, sale `-j-j8`; make no
+reconoce esa opcion, **vuelca su pagina de ayuda** y aborta con `Error 1` en el primer
+componente, sin que aparezca por ningun lado cual era el problema. Como la ayuda de make
+no contiene la palabra «error», un `grep error:` sobre el log tambien sale vacio y
+despista todavia mas.
+
+La unica razon legitima para ponerlo es **bajarlo** al diagnosticar:
+
+```sh
+make platform=aica makejobs=1
+```
 
 ## Si algo falla
 

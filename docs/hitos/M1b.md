@@ -289,6 +289,48 @@ Dreamcast se queda negra**. La salida esta ahi, pero en la ventana "Flycast Seri
 envoltura fuerza `fb` por eso: en hardware sin cable serie ni dcload esa ventana no
 existe.
 
+## 4ter. La capa de archivos: los datos no caben (2026-10-19)
+
+Al ir a escribir `platform/dc/` salio un problema que no es de plataforma sino de
+**tamano de los datos**, y cambia el plan del paso 3.
+
+**Lo medido:**
+
+| | |
+|---|---|
+| `gamedata/` completo | **1,3 GB** (de los cuales 700 MB son la imagen `.bin` del disco original y 56 MB los FMV; datos de juego, ~600 MB) |
+| Lo que monta el front end | **zzzFE.viv, 28,7 MB**, y `files.c` lo leia **entero a memoria** |
+| Lo que lee de verdad una carrera entera | **3,87 MB** en 266 lecturas, 102 aperturas, 3 BIGF montados |
+| Con solo NFS4.EXE + FRONT.BIN | el juego carga FRONT.BIN, **falla al montar zzzFE.viv y se queda girando**: watchdog a los 10 000 001 saltos hacia atras, **0 frames** |
+
+Dos consecuencias:
+
+1. **El romdisk no sirve.** Vive en RAM, asi que meter zzzFE.viv en el ELF es meter 28,7
+   MB en una maquina de 16. Y con los dos archivos sueltos el juego no avanza ni un frame.
+   La recomendacion anterior de «`/rd` para arrancar y `/cd` para la build real» **era
+   mia y estaba mal**: la di sin haber mirado el tamano de los datos.
+2. **Leer archivos enteros no se sostiene**, sea cual sea el medio.
+
+**Arreglado (lo segundo):** el montaje de BIGF ahora **abre el archivo y lee a demanda**.
+Solo queda residente el directorio, que esta al principio y es contiguo. El formato lo
+dice en la cabecera: `"BIGF"`, +4 tamano, +8 numero de entradas, +12 tamano del
+directorio; comprobado en ZZZFE.VIV (435 entradas, directorio de 8 559 bytes, primera
+entrada en 0x2170, justo detras).
+
+| Archivo | En disco | Residente antes | Residente ahora |
+|---|---|---|---|
+| ZZZFE.VIV | 28 733 748 | 28 733 748 | **31 320** |
+| ZZZZZENG.VIV | 53 698 916 | 53 698 916 | **43 848** |
+
+Sin cambio de comportamiento: el test diferencial sigue dando **120 frames identicos** y
+la misma divergencia en el 232, las **227** pruebas unitarias pasan, y el arbol portable
+sigue compilando para SH-4 **sin un solo aviso**.
+
+**Lo que queda, y es decision de Jorge:** hace falta un **disco**. KOS ya trae compilados
+`makeip.exe`, `scramble.exe`, `elf2bin` y `genromfs` en `utils/`; lo unico que falta es un
+generador de ISO, y `xorriso` esta en el repo `msys` de MSYS2 (`pacman -S xorriso`). Eso
+adelanta a M1b el `mkdisc` que estaba planeado para M2.
+
 ## 5. Lo que no se mide aqui
 
 El **fps** no es criterio de M1b. El objetivo de 30 fps sostenidos (CLAUDE.md §3) se mide

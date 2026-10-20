@@ -21,6 +21,8 @@ void files_free(FileLayer *fl)
     for (i = 0; i < FILES_MAX; i++)
         free(fl->open[i].data);
     for (i = 0; i < MOUNTS_MAX; i++) {
+        if (fl->mounts[i].fh != NULL)
+            fclose(fl->mounts[i].fh);
         free(fl->mounts[i].blob);
         free(fl->mounts[i].ent);
     }
@@ -85,34 +87,74 @@ static int eq_nocase(const char *a, const char *b)
     return *a == *b;
 }
 
+/* Lee n bytes del montaje desde el offset off. Si el BIGF esta abierto como archivo
+ * (lo normal), hace seek y lee solo eso; si vino de un blob en memoria, copia. Acota
+ * siempre contra el tamano real del archivo. */
+static int mount_read(const Mount *mo, uint32_t off, void *dst, uint32_t n)
+{
+    if (off > mo->size || n > mo->size - off)
+        return 0;
+    if (mo->fh != NULL) {
+        if (fseek(mo->fh, (long)off, SEEK_SET) != 0)
+            return 0;
+        return fread(dst, 1u, (size_t)n, mo->fh) == (size_t)n;
+    }
+    if (mo->blob == NULL)
+        return 0;
+    memcpy(dst, mo->blob + off, n);
+    return 1;
+}
+
 /* Lee el archivo del disco extraido, o lo saca de un BIGF montado. Devuelve el buffer
  * (que el llamante libera) o NULL. */
-static uint8_t *lookup(GameHost *h, const char *name, uint32_t *size)
+/* Abre el archivo del disco extraido (gamedata en PC, /cd o /rd en Dreamcast) y da su
+ * tamano, SIN leerlo. Lo usan tanto lookup() como el montaje de BIGF, que no quiere el
+ * contenido. Devuelve 0 si no esta. */
+static int disk_open(GameHost *h, const char *name, FILE **out, uint32_t *size)
 {
-    FileLayer *fl = &h->files;
     char norm[256], path[1024];
     FILE *f;
-    uint8_t *buf;
     long n;
-    uint32_t m, k;
 
     normalize(name, norm, sizeof(norm));
     snprintf(path, sizeof(path), "%s/%s", h->gamedata, norm);
     f = fopen(path, "rb");
-    if (f != NULL) {
-        if (fseek(f, 0, SEEK_END) == 0 && (n = ftell(f)) >= 0) {
-            rewind(f);
-            buf = (uint8_t *)malloc((size_t)n > 0u ? (size_t)n : 1u);
-            if (buf != NULL && (n == 0 || fread(buf, 1, (size_t)n, f) == (size_t)n)) {
-                fclose(f);
-                *size = (uint32_t)n;
-                return buf;
-            }
-            free(buf);
+    if (f == NULL)
+        return 0;
+    if (fseek(f, 0, SEEK_END) != 0 || (n = ftell(f)) < 0) {
+        fclose(f);
+        return 0;
+    }
+    rewind(f);
+    *out = f;
+    *size = (uint32_t)n;
+    return 1;
+}
+
+static uint8_t *lookup(GameHost *h, const char *name, uint32_t *size)
+{
+    FileLayer *fl = &h->files;
+    char norm[256];
+    FILE *f;
+    uint8_t *buf;
+    uint32_t n, m, k;
+
+    /* Si esta en el disco se lee entero: son los sueltos (NFS4.EXE, FRONT.BIN...) y
+     * son pequenos. Los BIGF no pasan por aqui, los monta FILE_addbigsync. Si esta
+     * pero no se deja leer, se devuelve fallo sin mirar los montajes, como siempre. */
+    if (disk_open(h, name, &f, &n)) {
+        buf = (uint8_t *)malloc(n > 0u ? (size_t)n : 1u);
+        if (buf != NULL && (n == 0u || fread(buf, 1, (size_t)n, f) == (size_t)n)) {
+            fclose(f);
+            *size = n;
+            return buf;
         }
+        free(buf);
         fclose(f);
         return NULL;
     }
+
+    normalize(name, norm, sizeof(norm));
 
     /* no esta en el disco: buscar en los BIGF montados, del mas reciente al mas
      * antiguo y por el nombre base, sin distinguir mayusculas */
@@ -128,7 +170,11 @@ static uint8_t *lookup(GameHost *h, const char *name, uint32_t *size)
                     buf = (uint8_t *)malloc(sz > 0u ? sz : 1u);
                     if (buf == NULL)
                         return NULL;
-                    memcpy(buf, mo->blob + mo->ent[k].off, sz);
+                    /* a demanda: solo estos bytes, no los 28 MB del archivo */
+                    if (!mount_read(mo, mo->ent[k].off, buf, sz)) {
+                        free(buf);
+                        return NULL;
+                    }
                     *size = sz;
                     return buf;
                 }
@@ -223,17 +269,22 @@ static uint32_t be32(const uint8_t *p)
            ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
-static uint32_t mount_bigf(GameHost *h, uint8_t *blob, uint32_t size)
+/* Monta un BIGF. Recibe el archivo ABIERTO (fh) o, en el caso raro de que viniera de
+ * dentro de otro montaje, su blob. Solo deja residente el directorio.
+ *
+ * Formato (todo big-endian): "BIGF", +4 tamano del archivo, +8 numero de entradas,
+ * +12 tamano del directorio. Luego, por entrada: offset, tamano y el nombre terminado
+ * en cero. Comprobado en ZZZFE.VIV: 435 entradas, directorio de 8559 bytes y la
+ * primera entrada en 0x2170, justo despues.
+ *
+ * En caso de fallo deja el hueco limpio; cerrar fh o liberar blob es del llamante. */
+static uint32_t mount_bigf(GameHost *h, FILE *fh, uint8_t *blob, uint32_t size)
 {
     FileLayer *fl = &h->files;
-    uint32_t count, o, i, m;
+    uint8_t head[16], *dir = NULL;
+    uint32_t count, dir_n, o, i, m;
     Mount *mo = NULL;
 
-    if (size < 16u || memcmp(blob, "BIGF", 4) != 0)
-        return 0;
-    count = be32(blob + 8);
-    if (count > MOUNT_ENTRIES_MAX)
-        return 0;
     for (m = 0; m < MOUNTS_MAX; m++)
         if (fl->mounts[m].handle == 0u) {
             mo = &fl->mounts[m];
@@ -241,42 +292,63 @@ static uint32_t mount_bigf(GameHost *h, uint8_t *blob, uint32_t size)
         }
     if (mo == NULL)
         return 0;
+    memset(mo, 0, sizeof(*mo));
+    mo->fh = fh;
+    mo->blob = blob;
+    mo->size = size;
+
+    if (size < 16u || !mount_read(mo, 0u, head, 16u) || memcmp(head, "BIGF", 4) != 0)
+        goto fail;
+    count = be32(head + 8);
+    dir_n = be32(head + 12);
+    if (count > MOUNT_ENTRIES_MAX)
+        goto fail;
+    /* El campo +12 viene del archivo, asi que no se da por bueno: si no cuadra, se lee
+     * un trozo acotado del principio y la pasada de abajo se encarga de validar. */
+    if (dir_n < 16u || dir_n > size)
+        dir_n = (size < 0x100000u) ? size : 0x100000u;
+
+    dir = (uint8_t *)malloc(dir_n);
+    if (dir == NULL || !mount_read(mo, 0u, dir, dir_n))
+        goto fail;
 
     mo->ent = (MountEntry *)malloc(sizeof(MountEntry) * (count > 0u ? count : 1u));
     if (mo->ent == NULL)
-        return 0;
+        goto fail;
+
     o = 16u;
     mo->n = 0u;
     for (i = 0; i < count; i++) {
         uint32_t off, sz, len = 0;
-        if (o + 8u > size) {
-            free(mo->ent);
-            mo->ent = NULL;
-            return 0;
-        }
-        off = be32(blob + o);
-        sz = be32(blob + o + 4u);
+        if (o + 8u > dir_n)
+            goto fail;
+        off = be32(dir + o);
+        sz = be32(dir + o + 4u);
         o += 8u;
-        while (o + len < size && blob[o + len] != 0u)
+        while (o + len < dir_n && dir[o + len] != 0u)
             len++;
-        if (o + len >= size || off > size || sz > size - off) {
-            free(mo->ent);
-            mo->ent = NULL;
-            return 0;
-        }
+        /* el nombre tiene que caber en el directorio y la entrada dentro del archivo */
+        if (o + len >= dir_n || off > size || sz > size - off)
+            goto fail;
         if (len >= FILE_NAME_MAX)
             len = FILE_NAME_MAX - 1u;
-        memcpy(mo->ent[mo->n].name, blob + o, len);
+        memcpy(mo->ent[mo->n].name, dir + o, len);
         mo->ent[mo->n].name[len] = '\0';
         mo->ent[mo->n].off = off;
         mo->ent[mo->n].size = sz;
         mo->n++;
         o += len + 1u;         /* ya pasado el terminador del nombre */
     }
-    mo->blob = blob;
-    mo->blob_size = size;
+
+    free(dir);
     mo->handle = fl->next_handle++;
     return mo->handle;
+
+fail:
+    free(dir);
+    free(mo->ent);
+    memset(mo, 0, sizeof(*mo));
+    return 0;
 }
 
 /* ---- despacho ---- */
@@ -328,8 +400,22 @@ int host_file_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
     }
     case 0x800EB354u:                       /* FILE_addbigsync(nombre, modo, prio, &handle) */
         guest_cstr(c, a0, name, sizeof(name));
-        data = lookup(h, name, &size);
-        handle = (data != NULL) ? mount_bigf(h, data, size) : 0u;
+        /* El BIGF NO se lee entero: se abre, se monta su directorio y se deja abierto
+         * (ver Mount en files.h). Solo si no esta como archivo suelto se recurre al
+         * camino antiguo, que es un BIGF dentro de otro montaje. */
+        {
+            FILE *bf = NULL;
+            uint32_t bsz = 0;
+            data = NULL;
+            if (disk_open(h, name, &bf, &bsz)) {
+                handle = mount_bigf(h, bf, NULL, bsz);
+                if (handle == 0u)
+                    fclose(bf);
+            } else {
+                data = lookup(h, name, &size);
+                handle = (data != NULL) ? mount_bigf(h, NULL, data, size) : 0u;
+            }
+        }
         if (handle == 0u) {
             free(data);
             fl->mounts_failed++;
@@ -349,6 +435,8 @@ int host_file_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
         uint32_t m;
         for (m = 0; m < MOUNTS_MAX; m++)
             if (fl->mounts[m].handle == a0) {
+                if (fl->mounts[m].fh != NULL)
+                    fclose(fl->mounts[m].fh);
                 free(fl->mounts[m].blob);
                 free(fl->mounts[m].ent);
                 memset(&fl->mounts[m], 0, sizeof(fl->mounts[m]));

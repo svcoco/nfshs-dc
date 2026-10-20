@@ -13,6 +13,8 @@
 
 #include "ps1rt.h"
 
+#include <stdio.h>
+
 #define FILES_MAX          64u     /* archivos abiertos a la vez */
 #define FILE_OPS_MAX       64u     /* operaciones asincronas vivas */
 #define MOUNTS_MAX          4u     /* archivos BIGF montados (FILE_addbigsync) */
@@ -38,10 +40,21 @@ typedef struct {
     uint32_t off, size;
 } MountEntry;
 
+/* Un BIGF montado. El archivo se queda ABIERTO y las entradas se leen a demanda, en
+ * vez de traerse el archivo entero a memoria.
+ *
+ * No es una optimizacion: zzzFE.viv, el del front end, son **28 MB**, y el Dreamcast
+ * tiene 16 en total. De el solo hacen falta residentes los 8,5 KB del directorio (435
+ * entradas), que esta al principio y es contiguo. Medido: el juego lee 3,87 MB en toda
+ * una carrera, repartidos en 266 lecturas.
+ *
+ * `blob` es el camino antiguo y solo se usa cuando el BIGF no venia de un archivo del
+ * disco sino de dentro de otro montaje; entonces `fh` es NULL. */
 typedef struct {
     uint32_t    handle;            /* 0: libre */
-    uint8_t    *blob;
-    uint32_t    blob_size;
+    FILE       *fh;                /* abierto mientras viva el montaje; NULL si blob */
+    uint8_t    *blob;              /* solo si fh == NULL */
+    uint32_t    size;              /* del archivo completo, para acotar los offsets */
     MountEntry *ent;               /* reservadas al montar */
     uint32_t    n;
 } Mount;

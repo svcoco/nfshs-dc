@@ -30,7 +30,7 @@ export TMPDIR
 export TMP  := $(TMPDIR)
 export TEMP := $(TMPDIR)
 
-.PHONY: help m0 metrics gen gen-rust parity test genobj pc dc bake disc diff clean
+.PHONY: help m0 metrics gen gen-rust parity test genobj pc dc dc-check dc-test dc-size bake disc diff clean
 
 help:
 	@echo "Analisis y generacion (Python, funcionan ya):"
@@ -88,10 +88,56 @@ $(BUILD)/nfshs-dc: genobj $(PS1RT_SRCS) $(HOST_SRCS) $(PC_SRCS)
 	@mkdir -p $(BUILD) $(TMPDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(PS1RT_SRCS) $(HOST_SRCS) $(PC_SRCS) $(BUILD)/gen/*.o
 
+# ---------------------------------------------------------------- Dreamcast (M1b)
+#
+# Hace falta el entorno de KallistiOS en el shell:
+#     source /opt/toolchains/dc/kos/environ.sh
+# `kos-cc` envuelve sh-elf-gcc con los flags y las librerias de KOS (-ml -m4-single
+# incluidos), asi que no hay que repetirlos aqui.
+KOS_BASE  ?= /opt/toolchains/dc/kos
+KOS_CC_W  := $(KOS_BASE)/utils/build_wrappers/kos-cc
+DCBUILD   := $(BUILD)/dc
+# -Os y no -O2 a proposito: medido en SH-4, -Os deja el codigo generado en 3,43 MB
+# frente a 7,85 MB, y con 8 KB de I-cache eso puede ser ademas mas rapido. La
+# eleccion definitiva se decide midiendo ms/frame (docs/hitos/M1b.md, seccion 1).
+DCFLAGS   := -std=c11 -Os -fwrapv -fno-strict-aliasing -Wall -Wextra
+DCTEST_OBJS := $(DCBUILD)/run_tests.o $(DCBUILD)/test_main.o                $(patsubst src/ps1rt/%.c,$(DCBUILD)/%.o,$(PS1RT_SRCS))
+
+dc-check:
+	@test -x "$(KOS_CC_W)" || { 	  echo "No encuentro kos-cc en $(KOS_CC_W)."; 	  echo "Instala el SDK (docs/instalar-sdk.md) o pon KOS_BASE=<ruta>."; exit 1; }
+
+# Pruebas unitarias de ps1rt corriendo en SH-4. Produce un ELF que Flycast arranca
+# directamente; el resultado sale por dcload/serie si los hay, y si no a pantalla.
+dc-test: $(DCBUILD)/run_tests.elf
+	@echo "listo: dc/$< -- arrancalo con Flycast o mandalo al hardware"
+
+$(DCBUILD)/%.o: src/ps1rt/%.c
+	@mkdir -p $(DCBUILD) $(TMPDIR)
+	$(KOS_CC_W) $(DCFLAGS) -Isrc/ps1rt -c $< -o $@
+
+# El runner es portable y define main(); se renombra para que el main de verdad sea
+# el de la envoltura de KOS.
+$(DCBUILD)/run_tests.o: test/unit/run_tests.c
+	@mkdir -p $(DCBUILD) $(TMPDIR)
+	$(KOS_CC_W) $(DCFLAGS) -Isrc/ps1rt -Dmain=ps1rt_tests_main -c $< -o $@
+
+$(DCBUILD)/test_main.o: src/platform/dc/test_main.c
+	@mkdir -p $(DCBUILD) $(TMPDIR)
+	$(KOS_CC_W) $(DCFLAGS) -Isrc/ps1rt -c $< -o $@
+
+$(DCBUILD)/run_tests.elf: dc-check $(DCTEST_OBJS)
+	$(KOS_CC_W) $(DCTEST_OBJS) -o $@
+	@sh-elf-size $@
+
+# Tamano del codigo generado compilado para SH-4. Es la medicion del paso 1 de M1b.
+dc-size: dc-check $(GEN)/parts.mk
+	@mkdir -p $(DCBUILD)/gen $(TMPDIR)
+	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(GENFLAGS)" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
+	@sh-elf-size -t $(DCBUILD)/gen/*.o | tail -1
+
 dc:
-	@echo "Pendiente: necesita KallistiOS con sh-elf-gcc (-ml -m4-single), que todavia"
-	@echo "no esta instalado en esta maquina. El plan, el presupuesto de tamano medido y"
-	@echo "la auditoria del codigo portable estan en docs/hitos/M1b.md."
+	@echo "Pendiente: el juego completo en Dreamcast es el paso 3 de M1b (platform/dc)."
+	@echo "Ya funcionan: 'make dc-test' (ps1rt en SH-4) y 'make dc-size' (tamano)."
 	@exit 1
 
 bake:

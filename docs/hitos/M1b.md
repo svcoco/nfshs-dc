@@ -218,7 +218,7 @@ necesita vigilancia.
 |---|---|---|
 | 0 | Instalar KOS + `sh-elf-gcc` | **Hecho (2026-10-19).** Versiones abajo |
 | 1 | **Medir el tamano**: compilar `dc/gen/` con `-ml -m4-single -Os` | **Hecho (2026-10-19): 3,43 MB.** Sin overlays (seccion 1) |
-| 2 | `ps1rt` en SH-4: compilar y pasar las **227 pruebas unitarias** en Dreamcast | pruebas en verde sobre Flycast |
+| 2 | `ps1rt` en SH-4: compilar y pasar las **227 pruebas unitarias** en Dreamcast | **Compila y enlaza (2026-10-19)**; falta ejecutarlo: hace falta Flycast o hardware |
 | 3 | `platform/dc/`: archivos (GD-ROM o romdisk), pad, timers, VSync, salida de texto | el juego arranca y avanza frames, con contadores en pantalla |
 | 4 | Front end y logica de carrera avanzando sin cuelgues | N frames sin panico, en Flycast **y en hardware** |
 | 5 | Medir: tamano del ELF, RAM en uso, ms/frame | cifras en este archivo; comparacion con el presupuesto de la seccion 1 |
@@ -226,6 +226,28 @@ necesita vigilancia.
 El paso 2 es el que aprovecha M1a de verdad: las 227 comprobaciones de `ps1rt` son
 independientes de la plataforma, asi que separan limpiamente "el runtime esta mal en SH-4"
 de "el host de DC esta mal".
+
+## 4bis. `ps1rt` en SH-4 (paso 2, parte compilada)
+
+`make -C dc dc-test` produce `build/dc/run_tests.elf`:
+
+- Los 7 modulos de `ps1rt` (`alu`, `bios`, `cpu`, `gte`, `interp`, `mem`, `panic`) mas el
+  runner compilan con `kos-cc -std=c11 -Os -Wall -Wextra` **sin un solo aviso**.
+- Enlaza: `text 229 108 · data 5 792 · bss 2 124 456`. El bss son los 2 MB de RAM de PS1
+  mas el scratchpad y el relleno del borde, o sea lo esperado.
+- Las cuatro `_Static_assert` de `ps1rt.h` pasan en SH-4: `int` de 32 bits, `>>` con signo
+  aritmetico, conversion `u32 -> i32` y **`__ORDER_LITTLE_ENDIAN__`**. Esta ultima no es
+  trivial: el SH-4 existe en las dos endianness y confirma que `-ml` esta puesto.
+- Esto no contradice la auditoria de la seccion 2, la confirma: los peligros que quedaban
+  (`long` de 4 bytes, `int64_t` del GTE) son de **host y de velocidad**, no de compilacion.
+
+La envoltura de arranque es [`dc/src/platform/dc/test_main.c`](../../dc/src/platform/dc/test_main.c):
+el runner portable se compila con `-Dmain=ps1rt_tests_main` y KOS llama al `main` de
+verdad. La salida va a dcload o al cable serie si los hay y, si no, al framebuffer, que
+existe siempre; al terminar espera a START para que el resultado se pueda leer.
+
+**Falta ejecutarlo**, y para eso hace falta un emulador (Flycast arranca el `.elf`
+directamente) o mandarlo al hardware. En esta maquina no hay ninguno de los dos.
 
 ## 5. Lo que no se mide aqui
 

@@ -99,15 +99,31 @@ Dependencias de libc del codigo portable: `stdio.h` (11), `string.h` (5), `stdli
 que la separacion de CLAUDE.md §8 (nada de cabeceras de KOS en `ps1rt/`, `host/` y
 `render/`) se sostiene sin tocar esos modulos.
 
-**Lo que si hay que abstraer:** `FILE *` y `fopen` aparecen en `host/files.c`,
-`host/dump.c`, `host/pad.c` y `host/host.c`. En Dreamcast los archivos del juego salen del
-GD-ROM (`/cd`) o de un romdisk, no del sistema de archivos del PC. De los cuatro:
+### Correccion (2026-10-19): no habia nada que abstraer
 
-- `files.c` es el que importa: es la capa de archivos del juego.
-- `dump.c` y `pad.c` son del **test diferencial** (volcado por frame y guion de entrada):
-  en DC no hacen falta, y conviene que queden detras de una compilacion condicional en vez
-  de arrastrar `stdio` al binario de consola.
-- `host.c` solo los usa para el informe.
+Una version anterior de esta seccion decia que habia **que abstraer `FILE *` y `fopen`**,
+porque aparecen en `host/files.c`, `host/dump.c`, `host/pad.c` y `host/host.c`. Era una
+suposicion escrita antes de tener el SDK, y es **falsa**: KOS implementa los syscalls de
+newlib (`newlib_open.c`, `newlib_read.c`, `newlib_lseek.c`, `newlib_close.c`...) sobre su
+VFS, con montajes `/cd` (GD-ROM), `/rd` (romdisk), `/pc` (dcload), `/ram` y `/vmu`.
+Comprobado enlazando un `fopen("/cd/NFS4.EXE", "rb")` con `kos-cc`.
+
+Detras de esos cuatro sitios habia **tres problemas distintos**, y solo dos eran trabajo:
+
+| Sitio | Que era de verdad | Que se hizo |
+|---|---|---|
+| `files.c` | No era `FILE`, era **donde viven los datos**. Y resulta que ya tomaba el prefijo de `h->gamedata`, que se pasa en `host_init` | **Nada.** En Dreamcast se le pasa `/rd` o `/cd` y ya esta |
+| `host.c` leyendo `hle_funcs.txt` | **Dato de compilacion**, no de usuario: 130 lineas y 119 direcciones unicas que no cambian, parseadas con `sscanf` al arrancar | Se **hornea** a `gen/hle_table.c` con `tools/recomp/bake_hle.py`. `host_init(h, NULL, ...)` usa la tabla horneada; con una ruta, lee el `.txt` (la via de PC) |
+| `dump.c`, `pad_load_script`, `host_call_counts` | Solo existen para el **test diferencial**, y **escriben** archivos. El GD-ROM es de solo lectura | Detras de `PS1_DIAG` (1 por omision, `-DPS1_DIAG=0` en la build de DC). No por portabilidad: por no llevar peso muerto |
+
+**El arbol portable compila entero para SH-4 sin un solo aviso** (`ps1rt` + los 12 archivos
+del host con `PS1_DIAG=0` + la tabla horneada), con `-Os -Wall -Wextra`. El unico aviso que
+salio fue real y se arreglo: en SH-4 (newlib) **`uint32_t` es `long unsigned int`**, no
+`unsigned int`, asi que un `%u` sin cast avisa. Dos sitios, los dos en `host.c:284`.
+
+Sin regresion en PC: el test diferencial sigue dando **120 frames identicos** en el front
+end y **231** en la carrera, con la divergencia del frame 232 en el mismo sitio de siempre
+(los registros del GTE, `Render_RenderPlayerView`, que va a M2b).
 
 ## 3. El toolchain: instalado y verificado (2026-10-19)
 

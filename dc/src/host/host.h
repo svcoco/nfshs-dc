@@ -1,8 +1,10 @@
 /* Host del port: los reemplazos de alto nivel (HLE) de las funciones de NFS4.EXE que
  * manejan el hardware de la PS1.
  *
- * La lista de direcciones es la misma que usa el recompilador, tools/hle_funcs.txt, y
- * se lee en ejecucion para que no pueda quedar desincronizada con el C generado.
+ * La lista de direcciones es la misma que usa el recompilador, tools/hle_funcs.txt.
+ * En PC se lee en ejecucion, para que no pueda quedar desincronizada con el C
+ * generado. En Dreamcast se usa la tabla horneada (ver HostHleBaked abajo), que sale
+ * del mismo archivo en tiempo de compilacion y no puede desincronizarse tampoco.
  *
  * Estado: andamio de medicion. Todavia no hay ninguna funcion implementada; lo que
  * hace es registrar que pide el juego, en que orden y cuantas veces, porque eso es lo
@@ -15,6 +17,17 @@
 #include "files.h"
 
 #include <stdio.h>
+
+/* Diagnostico y soporte del test diferencial: volcado de estado por frame, guiones de
+ * entrada y tabla de llamadas. Todo eso ESCRIBE archivos, y en Dreamcast no hay donde
+ * (el GD-ROM es de solo lectura) ni a quien le sirva. Se compila fuera con -DPS1_DIAG=0
+ * y asi no se arrastra ni el codigo ni los `FILE *`.
+ *
+ * No es portabilidad: `fopen` funciona en KOS, sobre su VFS (/cd, /rd, /pc, /vmu).
+ * Es no llevar peso muerto. */
+#ifndef PS1_DIAG
+#define PS1_DIAG 1
+#endif
 
 #define HOST_HLE_MAX 256u
 #define PAD_SCRIPT_MAX 256u
@@ -110,7 +123,9 @@ typedef struct {
     uint64_t pad_end;         /* campo en el que termina el guion (0: sin fin) */
 
     /* ---- volcado para el test diferencial ---- */
+#if PS1_DIAG
     FILE    *dump;
+#endif
     uint64_t dump_frames;
     uint64_t pad_writes;
 
@@ -176,6 +191,7 @@ void pad_write(GameHost *h, Cpu *c);
 void host_frame_top(GameHost *h, Cpu *c);
 #define RA_FLIP_PUT_DISP_ENV 0x800BF164u
 #define RA_MAIN_LOOP_YIELD   0x800B7AA4u
+#if PS1_DIAG
 /* Carga un guion de entrada; 0 si no pudo leerlo o no lo entiende. */
 int  pad_load_script(GameHost *h, const char *path);
 
@@ -184,15 +200,28 @@ int  dump_open(GameHost *h, const char *path);
 void dump_frame(GameHost *h, const Cpu *c);
 int  dump_ram(const Cpu *c, const char *path);
 void dump_close(GameHost *h);
+#endif
 
-/* Carga tools/hle_funcs.txt y deja el host listo. Devuelve 0 si no pudo leer el
- * archivo. */
+/* La tabla HLE horneada desde tools/hle_funcs.txt por dc/tools/recomp/bake_hle.py,
+ * en dc/gen/hle_table.c. Ya viene sin duplicados y ordenada por direccion. */
+typedef struct {
+    uint32_t    addr;
+    const char *name;
+} HostHleBaked;
+extern const HostHleBaked host_hle_baked[];
+extern const uint32_t     host_hle_baked_n;
+
+/* Deja el host listo con la lista de funciones HLE. Si hle_funcs_path es NULL usa la
+ * tabla horneada (lo que hace Dreamcast); si no, lee ese archivo (lo que hace el host
+ * de PC, que lo tiene al lado). Devuelve 0 si se queda sin lista. */
 int  host_init(GameHost *h, const char *hle_funcs_path, const char *gamedata);
 void host_attach(GameHost *h, Cpu *c);
 /* Informe de lo que el juego pidio, en orden de primera aparicion. */
 void host_report(const GameHost *h, const Cpu *c);
+#if PS1_DIAG
 /* Tabla "direccion cuenta" de las HLE llamadas, para diferenciarla contra la
  * referencia. Devuelve 0 si no pudo escribir el archivo. */
 int  host_call_counts(GameHost *h, const char *path);
+#endif
 
 #endif /* PS1_HOST_H */

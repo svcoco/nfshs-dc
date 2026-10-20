@@ -336,10 +336,14 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
    midiendo con el juego corriendo.
 3. **La auditoría del código portable contra los peligros del SH-4 ya está hecha** y
    despeja dos riesgos con datos: **0 accesos desalineados** y **0 en el borde de la RAM**
-   en 900 frames de carrera, sin casts puntero↔entero y sin `double` salvo un `printf`. Lo
-   que queda por hacer es abstraer `FILE`/`fopen` (está en cuatro archivos del host, dos de
-   ellos solo del test diferencial) y tener en cuenta que el **intérprete de respaldo no es
-   código muerto**: 21 378 entradas en 900 frames.
+   en 900 frames de carrera, sin casts puntero↔entero y sin `double` salvo un `printf`.
+   Lo de «abstraer `FILE`/`fopen`» que decía aquí **era falso** y queda retirado: KOS
+   implementa los syscalls de newlib sobre su VFS (`/cd`, `/rd`, `/pc`, `/vmu`), así que
+   `fopen` funciona. Lo que sí se hizo (2026-10-19) fue hornear `hle_funcs.txt` a
+   `gen/hle_table.c` y dejar el volcado y los guiones del test diferencial detrás de
+   `PS1_DIAG`. **El árbol portable compila entero para SH-4 sin un solo aviso.** Queda
+   presente que el **intérprete de respaldo no es código muerto**: 21 378 entradas en 900
+   frames.
 
 ## 10. Reglas para Claude Code en este proyecto
 

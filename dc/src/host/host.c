@@ -11,23 +11,38 @@ static int cmp_addr(const void *a, const void *b)
     return (x < y) ? -1 : (x > y) ? 1 : 0;
 }
 
-int host_init(GameHost *h, const char *hle_funcs_path, const char *gamedata)
+/* Mete una entrada si la direccion no estaba ya. La lista tiene direcciones repetidas
+ * (130 lineas, 119 unicas) y se queda la PRIMERA, en las dos vias por igual: si una se
+ * quedara con la ultima, los nombres del informe no coincidirian entre PC y DC. */
+static int hle_add(GameHost *h, uint32_t addr, const char *name)
 {
-    FILE *fh;
+    uint32_t i;
+
+    for (i = 0; i < h->hle_n; i++)
+        if (h->hle[i].addr == addr)
+            return 1;                      /* duplicada: no es un error */
+    if (h->hle_n >= HOST_HLE_MAX)
+        return 0;
+    h->hle[h->hle_n].addr = addr;
+    snprintf(h->hle[h->hle_n].name, sizeof(h->hle[h->hle_n].name), "%s",
+             (name != NULL && name[0] != '\0') ? name : "(sin nombre)");
+    h->hle_n++;
+    return 1;
+}
+
+/* Lee tools/hle_funcs.txt. Es la via del host de PC, que tiene el archivo al lado. */
+static int hle_load_file(GameHost *h, const char *path)
+{
+    FILE *fh = fopen(path, "r");
     char line[256];
 
-    memset(h, 0, sizeof(*h));
-    h->gamedata = gamedata;
-    h->next_event = 0xF0000001u;   /* como en la referencia */
-    files_init(&h->files);
-
-    fh = fopen(hle_funcs_path, "r");
     if (fh == NULL)
         return 0;
     while (fgets(line, (int)sizeof(line), fh) != NULL) {
         unsigned long addr;
         char name[48];
         char *p = line;
+
         while (*p == ' ' || *p == '\t')
             p++;
         if (*p == '#' || *p == '\n' || *p == '\r' || *p == '\0')
@@ -35,28 +50,41 @@ int host_init(GameHost *h, const char *hle_funcs_path, const char *gamedata)
         name[0] = '\0';
         if (sscanf(p, "%lx %47[^\r\n]", &addr, name) < 1)
             continue;
-        /* la lista tiene direcciones repetidas: 130 lineas, 119 direcciones unicas */
-        {
-            uint32_t i;
-            int dup = 0;
-            for (i = 0; i < h->hle_n; i++)
-                if (h->hle[i].addr == (uint32_t)addr) {
-                    dup = 1;
-                    break;
-                }
-            if (dup)
-                continue;
-        }
-        if (h->hle_n >= HOST_HLE_MAX) {
+        if (!hle_add(h, (uint32_t)addr, name)) {
             fclose(fh);
             return 0;
         }
-        h->hle[h->hle_n].addr = (uint32_t)addr;
-        snprintf(h->hle[h->hle_n].name, sizeof(h->hle[h->hle_n].name), "%s",
-                 name[0] ? name : "(sin nombre)");
-        h->hle_n++;
     }
     fclose(fh);
+    return 1;
+}
+
+/* La tabla horneada en dc/gen/hle_table.c. Es la via de Dreamcast: mismo archivo de
+ * origen, pero resuelto al compilar, sin llevar un .txt en el disco ni parsearlo. */
+static int hle_load_baked(GameHost *h)
+{
+    uint32_t i;
+
+    for (i = 0; i < host_hle_baked_n; i++)
+        if (!hle_add(h, host_hle_baked[i].addr, host_hle_baked[i].name))
+            return 0;
+    return 1;
+}
+
+int host_init(GameHost *h, const char *hle_funcs_path, const char *gamedata)
+{
+    memset(h, 0, sizeof(*h));
+    h->gamedata = gamedata;
+    h->next_event = 0xF0000001u;   /* como en la referencia */
+    files_init(&h->files);
+
+    if (hle_funcs_path != NULL) {
+        if (!hle_load_file(h, hle_funcs_path))
+            return 0;
+    } else if (!hle_load_baked(h)) {
+        return 0;
+    }
+
     qsort(h->hle, h->hle_n, sizeof(h->hle[0]), cmp_addr);
     return h->hle_n > 0;
 }
@@ -105,12 +133,14 @@ static int host_call(Cpu *c, void *self, uint32_t addr)
     uint32_t ret = 0;
 
     note_seen(h, c, addr);
+#if PS1_DIAG
     if (h->ram_at_call != 0u && !h->ram_dumped && c->calls >= h->ram_at_call) {
         h->ram_dumped = 1;
         if (dump_ram(c, h->ram_at_path))
             printf("RAM volcada en la llamada %llu -> %s\n",
                    (unsigned long long)c->calls, h->ram_at_path);
     }
+#endif
     if (h->win_lo != 0u && c->calls >= h->win_lo && c->calls <= h->win_hi)
         printf("CALL %llu %#x ra %#x sp %#x ticks %llu prof %u\n",
                (unsigned long long)c->calls,
@@ -210,6 +240,7 @@ static int cmp_first(const void *a, const void *b)
     return (x < y) ? -1 : (x > y) ? 1 : 0;
 }
 
+#if PS1_DIAG
 int host_call_counts(GameHost *h, const char *path)
 {
     FILE *f = fopen(path, "w");
@@ -242,6 +273,7 @@ int host_call_counts(GameHost *h, const char *path)
     fclose(f);
     return 1;
 }
+#endif /* PS1_DIAG */
 
 void host_report(const GameHost *h, const Cpu *c)
 {
@@ -249,7 +281,10 @@ void host_report(const GameHost *h, const Cpu *c)
     uint32_t i, n = 0;
 
     printf("\n=== lo que el juego le pidio al host ===\n");
-    printf("HLE en la lista: %u    distintas llamadas: %u\n", h->hle_n, h->seen_n);
+    /* los casts no son decorado: en SH-4 (newlib) uint32_t es `long unsigned int`,
+     * no `unsigned int`, asi que %u sin cast avisa al cruzar a Dreamcast */
+    printf("HLE en la lista: %u    distintas llamadas: %u\n",
+           (unsigned)h->hle_n, (unsigned)h->seen_n);
 
     sorted = (HleFunc *)malloc(sizeof(HleFunc) * (h->hle_n ? h->hle_n : 1u));
     if (sorted == NULL)

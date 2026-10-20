@@ -17,6 +17,10 @@ CPPFLAGS += -Isrc/ps1rt -I$(GEN)
 # el codigo generado dispara estos avisos por construccion, no son problemas reales
 GENFLAGS := -Wno-unused-label -Wno-unused-variable -Wno-unused-but-set-variable             -Wno-unused-value -Wno-unused-parameter
 
+# La tabla HLE horneada desde tools/hle_funcs.txt (ver tools/recomp/bake_hle.py). Es
+# codigo generado, asi que vive en gen/ y no se versiona, igual que las partes.
+HLE_TABLE  := $(GEN)/hle_table.c
+
 PS1RT_SRCS := $(wildcard src/ps1rt/*.c)
 HOST_SRCS  := $(wildcard src/host/*.c)
 PC_SRCS    := $(wildcard src/platform/pc/*.c)
@@ -30,7 +34,7 @@ export TMPDIR
 export TMP  := $(TMPDIR)
 export TEMP := $(TMPDIR)
 
-.PHONY: help m0 metrics gen gen-rust parity test genobj pc dc dc-check dc-test dc-size bake disc diff clean
+.PHONY: help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-test dc-size bake disc diff clean
 
 help:
 	@echo "Analisis y generacion (Python, funcionan ya):"
@@ -58,8 +62,16 @@ m0:
 metrics:
 	$(PYTHON) -I tools/recomp/codegen_metrics.py
 
-gen:
+gen: $(HLE_TABLE)
 	$(PYTHON) -I tools/recomp/recomp.py $(GEN) --lang c --all
+
+# Hornea tools/hle_funcs.txt a C. En PC el host puede leer el .txt, pero en Dreamcast
+# no tiene sentido llevarlo en el disco: son 119 direcciones que no cambian.
+gen-hle: $(HLE_TABLE)
+
+$(HLE_TABLE): tools/recomp/bake_hle.py $(ROOT)/tools/hle_funcs.txt
+	@mkdir -p $(GEN)
+	$(PYTHON) -I tools/recomp/bake_hle.py $(GEN)
 
 gen-rust:
 	$(PYTHON) -I tools/recomp/recomp.py $(ROOT)/crates/nfs4rc/src --lang rust --all
@@ -84,9 +96,9 @@ pc: $(BUILD)/nfshs-dc
 	@echo "listo: $(BUILD)/nfshs-dc"
 
 # Enlaza el C generado con ps1rt, el host y el arnes de x86.
-$(BUILD)/nfshs-dc: genobj $(PS1RT_SRCS) $(HOST_SRCS) $(PC_SRCS)
+$(BUILD)/nfshs-dc: genobj $(HLE_TABLE) $(PS1RT_SRCS) $(HOST_SRCS) $(PC_SRCS)
 	@mkdir -p $(BUILD) $(TMPDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(PS1RT_SRCS) $(HOST_SRCS) $(PC_SRCS) $(BUILD)/gen/*.o
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(PS1RT_SRCS) $(HOST_SRCS) $(PC_SRCS) $(HLE_TABLE) $(BUILD)/gen/*.o
 
 # ---------------------------------------------------------------- Dreamcast (M1b)
 #

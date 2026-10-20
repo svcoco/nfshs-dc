@@ -20,6 +20,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Lectura del guion de entrada: solo para el test diferencial. PAD_NAMES, name_bit
+ * y parse_buttons no los usa nadie mas, asi que entran en el mismo guardado. */
+#if PS1_DIAG
+
 /* Bits del mando digital de PS1, en el orden del hardware. */
 static const struct {
     const char *name;
@@ -136,6 +140,7 @@ int pad_load_script(GameHost *h, const char *path)
     fclose(f);
     return 1;
 }
+#endif /* PS1_DIAG */
 
 /* Frontera de frame del juego: se cuenta, se aplica la entrada y se vuelca el estado.
  * La referencia hace estas tres cosas en su frame_top, y por eso aqui tambien. */
@@ -158,7 +163,9 @@ void host_frame_top(GameHost *h, Cpu *c)
      * incluia los botones de este frame y el de la referencia los del anterior, y en el
      * frame 1 salian dos paginas distintas (los dos buffers del pad) aunque la RAM fuera
      * identica en la frontera de la llamada. Era un fallo del instrumento, no del port. */
+#if PS1_DIAG
     dump_frame(h, c);
+#endif
     pad_write(h, c);
     /* fin del guion: parada ordenada, para que el arnes imprima su informe */
     if (h->pad_end != 0u && h->frames >= h->pad_end)

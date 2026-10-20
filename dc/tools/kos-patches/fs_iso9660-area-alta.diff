@@ -1,0 +1,28 @@
+--- a/kernel/arch/dreamcast/fs/fs_iso9660.c
++++ b/kernel/arch/dreamcast/fs/fs_iso9660.c
+@@ -344,11 +344,21 @@
+         return -1;
+     }
+ 
+-    if((i = cdrom_read_toc(&toc, false)) != 0)
+-        return i;
++    /* nfshs-dc: KOS de serie solo mira el area de BAJA densidad, que es donde esta el
++       sistema de archivos en un CD-R o un CDI, el formato que usa el homebrew. En un
++       GD-ROM de verdad los datos van en la de ALTA (LBA 45000 en adelante) y la baja
++       solo lleva pistas de aviso, asi que ahi no encuentra nada.
+ 
+-    if(!(session_base = cdrom_locate_data_track(&toc)))
+-        return -1;
++       Se intenta primero la alta y se cae a la baja si no hay pista de datos: asi
++       valen los dos formatos y no se rompe nada de lo que ya funcionaba. */
++    if((i = cdrom_read_toc(&toc, true)) != 0 ||
++            !(session_base = cdrom_locate_data_track(&toc))) {
++        if((i = cdrom_read_toc(&toc, false)) != 0)
++            return i;
++
++        if(!(session_base = cdrom_locate_data_track(&toc)))
++            return -1;
++    }
+ 
+     /* Check for joliet extensions */
+     joliet = 0;

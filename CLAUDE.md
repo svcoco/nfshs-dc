@@ -10,11 +10,12 @@ de forma nativa con el PowerVR**.
 Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación como en los
 mensajes. Los identificadores de código van en inglés.
 
-Última actualización: 2026-10-19. Estado: **M0 y M1a cerrados. En M1b van los pasos 0, 1
-y 2: toolchain instalado (sh-elf-gcc 15.2.0, KOS `8e704086`), el código generado ocupa
-**3,43 MB de `.text` en SH-4 con `-Os`** (no hacen falta overlays), y `ps1rt` pasa
-**227/227 pruebas unitarias corriendo en SH-4** (Flycast 2.6). Siguiente: el paso 3,
-`platform/dc/` — archivos, pad, timers, VSync y salida de texto.**
+Última actualización: 2026-10-19. Estado: **M0 y M1a cerrados. M1b casi cerrado: el
+front end de NFS High Stakes **corre en Dreamcast a 69–78 fps** (2 844 frames, 0 fallos
+de archivo, leyendo del GD-ROM), con `ps1rt` pasando **227/227** pruebas en SH-4 y el
+código generado en **3,43 MB de `.text`** con `-Os` (sin overlays). Falta: la lógica de
+carrera y **arrancar con BIOS real** (hoy solo con REIOS), que es lo que bloquea probar
+en hardware.**
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y
@@ -372,7 +373,14 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
 - **Abiertas:**
   - **M4:** factor de escala de las texturas (2× como base), método y formato.
   - **Alcance:** si la primera versión incluye 2P y FMV.
+  - **Arranque con BIOS real (abierta desde 2026-10-19):** el disco arranca con REIOS
+    (la BIOS emulada de Flycast) pero con la BIOS real la consola reconoce el disco y
+    cae al menú, probablemente por su comprobación de licencia. Bloquea las pruebas en
+    hardware. El camino habitual del homebrew es generar un **CDI** con `cdi4dc`.
   - **Pruebas en hardware:** qué medio de carga usar.
+  - **Parche local a KallistiOS:** `fs_iso9660.c` solo lee el área de baja densidad y el
+    port necesita la de alta (552 MB de datos no caben en los 92 MB de la baja). El
+    parche está en `dc/tools/kos-patches/`; habría que proponerlo aguas arriba.
   - *(cerrada 2026-10-18: el objetivo de fps es 30 sostenidos, ver §3. No se mide el
     fps del original.)*
   - **Autor de nfshs-rs:** contacto sobre la licencia y una posible colaboración.

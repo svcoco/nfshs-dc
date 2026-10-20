@@ -235,8 +235,8 @@ necesita vigilancia.
 | 0 | Instalar KOS + `sh-elf-gcc` | **Hecho (2026-10-19).** Versiones abajo |
 | 1 | **Medir el tamano**: compilar `dc/gen/` con `-ml -m4-single -Os` | **Hecho (2026-10-19): 3,43 MB.** Sin overlays (seccion 1) |
 | 2 | `ps1rt` en SH-4: compilar y pasar las **227 pruebas unitarias** en Dreamcast | **Hecho (2026-10-19): 227/227 en Flycast 2.6** |
-| 3 | `platform/dc/`: archivos (GD-ROM o romdisk), pad, timers, VSync, salida de texto | el juego arranca y avanza frames, con contadores en pantalla |
-| 4 | Front end y logica de carrera avanzando sin cuelgues | N frames sin panico, en Flycast **y en hardware** |
+| 3 | `platform/dc/`: archivos (GD-ROM), pad, timers, salida de texto | **Hecho (2026-10-19)**: arranca, lee del GD-ROM y avanza frames con contadores en pantalla |
+| 4 | Front end y logica de carrera avanzando sin cuelgues | **Front end hecho**: 2 844 frames a 69-78 fps en Flycast, 0 fallos de archivo. Falta la carrera y **falta el hardware**, que necesita arrancar con BIOS real |
 | 5 | Medir: tamano del ELF, RAM en uso, ms/frame | cifras en este archivo; comparacion con el presupuesto de la seccion 1 |
 
 El paso 2 es el que aprovecha M1a de verdad: las 227 comprobaciones de `ps1rt` son
@@ -330,6 +330,102 @@ sigue compilando para SH-4 **sin un solo aviso**.
 `makeip.exe`, `scramble.exe`, `elf2bin` y `genromfs` en `utils/`; lo unico que falta es un
 generador de ISO, y `xorriso` esta en el repo `msys` de MSYS2 (`pacman -S xorriso`). Eso
 adelanta a M1b el `mkdisc` que estaba planeado para M2.
+
+## 4quater. El juego corriendo en Dreamcast (pasos 3 y 4, 2026-10-19)
+
+**Resultado: el front end de NFS High Stakes avanza en Dreamcast a 69-78 fps, con cero
+fallos de archivo.** Medido en Flycast 2.6:
+
+```
+frame   2703   77.22 fps   media 31.33   interp 205188
+frame   2763   69.12 fps
+frame   2823   78.22 fps
+[88s] ticks 17803621  llamadas 1203638  interp 215980  frames 2844
+      archivos 42 ok / 0 fallidos   BIGF 1 ok / 0 fallidos
+      montaje[0]: handle 0x104  entradas 435  tam 28733748
+```
+
+Dos avisos de lectura, porque la cifra se presta a malentendido:
+
+- **No se dibuja nada.** El PVR es M2. Esto es la **logica** del juego avanzando, que es
+  exactamente lo que pide el criterio de salida de M1b.
+- Los 31 fps de media arrastran los ~30 s de carga inicial desde el GD-ROM, que en
+  Flycast es lenta. El numero que importa es el del tramo.
+- `interp 215980`: el interprete de respaldo **se usa de verdad**, como ya decia la
+  auditoria de la seccion 2. No es codigo muerto.
+
+### El disco: como se monta y por que
+
+`dc/tools/mkdisc/mkdisc.sh` produce un GDI. La estructura de un GD-ROM tiene dos areas
+y la pieza clave es saber que va en cual:
+
+```
+  BAJA DENSIDAD (LBA 0 .. 44999)        ALTA DENSIDAD (LBA 45000 .. ~549000)
+  pista 1 (datos) + pista 2 (audio)     pista 3: EL JUEGO
+  relleno, nadie las lee                 ┌──────────────────────────────┐
+                                         │ sector 0..15  IP.BIN (32 KB) │
+                                         │ sector 16     ISO9660 "CD001"│
+                                         │ 1ST_READ.BIN  3 839 684      │
+                                         │ NFS4.EXE, FRONT.BIN, 646 mas │
+                                         └──────────────────────────────┘
+```
+
+Conviene no confundir las dos capas que hay superpuestas:
+
+| Arranque de Dreamcast | Datos de PS1 |
+|---|---|
+| `IP.BIN` dice que cargar | `NFS4.EXE` es el ejecutable de PS1 |
+| `1ST_READ.BIN` se carga en 0x8C010000 y la consola salta ahi. **Es el port**: ps1rt + host + las 3 674 funciones + KOS | `FRONT.BIN` es el overlay del front end |
+| | Los abre nuestro `main` con `fopen("/cd/...")`, como cualquier dato |
+
+El ISO se construye con **`-C 0,45000`**, y no es decorativo: `fs_iso9660.c` de KOS lee
+los extents tal cual y su `biread()` traduce a FAD sumando 150, asi que los extents
+tienen que valer (FAD de la pista) - 150 = 45000 para una pista que empieza en el FAD
+45150. Sin eso el bootstrap no encuentra `1ST_READ.BIN` y la consola cae al menu.
+
+### Parche a KallistiOS (decision de Jorge, 2026-10-19)
+
+`fs_iso9660.c` de KOS llama a `cdrom_read_toc(&toc, false)`: **solo mira el area de baja
+densidad**, que es donde esta el sistema de archivos en un CD-R o un CDI, el formato del
+homebrew. En un GD-ROM los datos van en la de alta, y ahi no encuentra nada
+(`fs_iso9660: disc is not iso9660`).
+
+Y en la baja no caben: 45000 sectores x 2048 = **92 MB de techo**, contra **552 MB** de
+datos del juego.
+
+El parche esta en [`dc/tools/kos-patches/fs_iso9660-area-alta.diff`](../../dc/tools/kos-patches/fs_iso9660-area-alta.diff):
+intenta primero la alta y cae a la baja si no hay pista de datos, con lo que siguen
+valiendo los dos formatos. Hay que aplicarlo sobre `$KOS_BASE` y recompilar KOS.
+
+### Pendiente: arranque con BIOS real
+
+Hoy **solo arranca con REIOS**, la BIOS emulada de Flycast
+(`-config config:UseReios=yes`). Con la BIOS real de Dreamcast el disco se reconoce (lee
+el ID `T-00000` de nuestra IP.BIN) pero la consola cae al menu, probablemente por su
+comprobacion de licencia. **Hay que resolverlo antes de probar en hardware**, y es una
+tarea abierta, no un detalle: el camino habitual del homebrew es generar un **CDI** con
+`cdi4dc`, que no esta instalado.
+
+### Tres trampas que costaron tiempo, por si vuelven
+
+1. **Objetos viejos con structs nuevos.** La regla del Makefile para Dreamcast no
+   declaraba dependencias de cabeceras, asi que al cambiar un campo de `GameHost` solo
+   se recompilaba el `.c` tocado. Los modulos veian **layouts distintos del mismo
+   struct** y el host se comportaba de forma incoherente **sin dar un solo error**: el
+   sintoma era `addbigsync` llamado 1 vez con los dos contadores de montaje a 0, y
+   `next_handle` valiendo `0xd` cuando `files_init` lo pone a `0x100`. Arreglado con
+   `-MMD -MP` y un `-include` de los `.d`. El host de PC nunca lo sufrio porque compila
+   todas las fuentes de una sola invocacion de gcc, **y por eso el test diferencial
+   seguia en verde mientras el Dreamcast fallaba**.
+2. **`xorriso` ignora los `-m` si van detras de las rutas.** La imagen salio con 1,3 GB
+   en vez de 552 MB, porque se llevo la imagen original del CD entera.
+3. **El SPU de PS1 choca con el AICA de KOS.** `dc/spu.h` de KOS declara su propio
+   `spu_init` y su propio `SPU_RAM_SIZE`. Son cosas distintas con el mismo nombre; el
+   stub del port pasa a `ps1_spu_*` / `PS1_SPU_*`.
+
+Y una del entorno, no del codigo: el `emu.cfg` de Flycast tenia **`Dynarec.Enabled = no`**,
+o sea interpretando el SH-4. Con eso el juego iba a ~150 000 ticks/s y no llegaba a
+ningun frame. El guion de pruebas lo fuerza con `-config config:Dynarec.Enabled=yes`.
 
 ## 5. Lo que no se mide aqui
 

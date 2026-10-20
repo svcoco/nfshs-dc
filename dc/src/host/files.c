@@ -18,8 +18,11 @@ void files_init(FileLayer *fl)
 void files_free(FileLayer *fl)
 {
     uint32_t i;
-    for (i = 0; i < FILES_MAX; i++)
+    for (i = 0; i < FILES_MAX; i++) {
+        if (fl->open[i].fh != NULL)
+            fclose(fl->open[i].fh);
         free(fl->open[i].data);
+    }
     for (i = 0; i < MOUNTS_MAX; i++) {
         if (fl->mounts[i].fh != NULL)
             fclose(fl->mounts[i].fh);
@@ -196,17 +199,56 @@ static OpenFile *find_file(FileLayer *fl, uint32_t handle)
     return NULL;
 }
 
-static uint32_t add_file(Cpu *c, FileLayer *fl, uint8_t *data, uint32_t size)
+/* Localiza un archivo del juego y lo deja listo para leerse A DEMANDA, sin traer su
+   contenido. Primero suelto en el disco; si no, dentro de los BIGF montados, del mas
+   reciente al mas antiguo y por el nombre base, sin distinguir mayusculas (el mismo
+   orden que hacia lookup()). Devuelve 0 si no esta. */
+static int open_src(GameHost *h, const char *name, OpenFile *o)
+{
+    FileLayer *fl = &h->files;
+    char norm[256];
+    FILE *f;
+    uint32_t n, m, k;
+
+    memset(o, 0, sizeof(*o));
+    if (disk_open(h, name, &f, &n)) {
+        o->fh = f;
+        o->base = 0u;
+        o->size = n;
+        return 1;
+    }
+
+    normalize(name, norm, sizeof(norm));
+    {
+        const char *base = basename_of(norm);
+        for (m = MOUNTS_MAX; m > 0u; m--) {
+            Mount *mo = &fl->mounts[m - 1u];
+            if (mo->handle == 0u)
+                continue;
+            for (k = 0; k < mo->n; k++)
+                if (eq_nocase(mo->ent[k].name, base)) {
+                    o->mo = mo;
+                    o->base = mo->ent[k].off;
+                    o->size = mo->ent[k].size;
+                    return 1;
+                }
+        }
+    }
+    return 0;
+}
+
+static uint32_t add_file(Cpu *c, FileLayer *fl, const OpenFile *src)
 {
     uint32_t i;
     for (i = 0; i < FILES_MAX; i++)
         if (fl->open[i].handle == 0u) {
+            fl->open[i] = *src;
             fl->open[i].handle = fl->next_handle++;
-            fl->open[i].data = data;
-            fl->open[i].size = size;
             return fl->open[i].handle;
         }
-    free(data);
+    if (src->fh != NULL)
+        fclose(src->fh);
+    free(src->data);
     ps1_panic(c, "demasiados archivos abiertos a la vez");
 }
 
@@ -214,10 +256,10 @@ static void drop_file(FileLayer *fl, uint32_t handle)
 {
     OpenFile *o = find_file(fl, handle);
     if (o != NULL) {
+        if (o->fh != NULL)
+            fclose(o->fh);
         free(o->data);
-        o->handle = 0u;
-        o->data = NULL;
-        o->size = 0u;
+        memset(o, 0, sizeof(*o));
     }
 }
 
@@ -246,10 +288,15 @@ static FileOp *find_op(FileLayer *fl, uint32_t op)
     return NULL;
 }
 
-/* Copia un trozo del archivo a la RAM del invitado y devuelve cuantos bytes fueron. */
+/* Copia un trozo del archivo a la RAM del invitado y devuelve cuantos bytes fueron.
+   Lee del disco por tramos a traves de un buffer de rebote: asi no hace falta tener el
+   archivo entero en memoria ni reservar nada por lectura. 16 KB cubre de una pasada la
+   lectura tipica del juego (medido: 3,87 MB en 266 lecturas, ~14 KB de media). */
 static uint32_t read_into(Cpu *c, OpenFile *o, uint32_t off, uint32_t addr, uint32_t want)
 {
-    uint32_t n;
+    static uint8_t bounce[16384];
+    uint32_t n, done = 0;
+
     if (o == NULL)
         return 0;
     if (off > o->size)
@@ -257,8 +304,29 @@ static uint32_t read_into(Cpu *c, OpenFile *o, uint32_t off, uint32_t addr, uint
     n = o->size - off;
     if (want < n)
         n = want;
-    ps1_write_bytes(c, addr, o->data + off, n);
-    return n;
+
+    if (o->data != NULL) {
+        ps1_write_bytes(c, addr, o->data + off, n);
+        return n;
+    }
+
+    while (done < n) {
+        uint32_t chunk = n - done;
+        if (chunk > sizeof(bounce))
+            chunk = (uint32_t)sizeof(bounce);
+        if (o->mo != NULL) {
+            if (!mount_read(o->mo, o->base + off + done, bounce, chunk))
+                break;
+        } else {
+            if (fseek(o->fh, (long)(o->base + off + done), SEEK_SET) != 0)
+                break;
+            if (fread(bounce, 1u, (size_t)chunk, o->fh) != (size_t)chunk)
+                break;
+        }
+        ps1_write_bytes(c, addr + done, bounce, chunk);
+        done += chunk;
+    }
+    return done;
 }
 
 /* ---- BIGF (FILE_addbigsync) ---- */
@@ -359,15 +427,16 @@ int host_file_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
     uint32_t a0 = c->r[4], a1 = c->r[5], a2 = c->r[6], a3 = c->r[7];
     char name[256];
     uint8_t *data;
+    OpenFile src;
     uint32_t size = 0, handle;
 
     switch (addr) {
     /* ---- sincronas ---- */
     case 0x800EB204u:                       /* FILE_opensync(nombre, modo, prio, &handle) */
         guest_cstr(c, a0, name, sizeof(name));
-        data = lookup(h, name, &size);
-        if (data != NULL) {
-            handle = add_file(c, fl, data, size);
+        if (open_src(h, name, &src)) {
+            size = src.size;
+            handle = add_file(c, fl, &src);
             ps1_w32(c, a3, handle);
             fl->opens++;
             if (fl->log)
@@ -448,9 +517,9 @@ int host_file_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
     /* ---- asincronas: terminan en el acto ---- */
     case 0x800ECCC8u:                       /* FILE_open(nombre, modo, prio, user) -> op */
         guest_cstr(c, a0, name, sizeof(name));
-        data = lookup(h, name, &size);
-        if (data != NULL) {
-            handle = add_file(c, fl, data, size);
+        if (open_src(h, name, &src)) {
+            size = src.size;
+            handle = add_file(c, fl, &src);
             fl->opens++;
             if (fl->log)
                 fprintf(stderr, "file: abre %s (%u bytes, async)\n", name, (unsigned)size);

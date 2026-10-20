@@ -163,9 +163,9 @@ int main(int argc, char **argv)
     cpu.cop0[12] = 0x401u;
     /* El bus de hardware: sin el, take_irqs no se consulta nunca y ninguna
      * interrupcion de DMA llega. Es lo que hace new_cpu() de la referencia. */
-    spu_init(&spu);
+    ps1_spu_init(&spu);
     spu.log = spulog;
-    spu_attach(&spu, &cpu);
+    ps1_spu_attach(&spu, &cpu);
     cpu.trace = trace;
     cpu.tick_limit = tick_limit;
     /* el juego hace esperas activas sobre el timer: tras tantas ramas hacia atras sin

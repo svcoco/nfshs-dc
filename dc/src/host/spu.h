@@ -14,9 +14,12 @@
 
 #include "ps1rt.h"
 
-#define SPU_BASE      0x1F801C00u
-#define SPU_REG_BYTES 0x400u
-#define SPU_RAM_SIZE  0x80000u      /* 512 KB de RAM de sonido */
+/* Prefijo ps1_ / PS1_ a proposito: KOS declara su propio `spu_init` y su propio
+ * `SPU_RAM_SIZE` en dc/spu.h, que son el AICA del Dreamcast. Son cosas distintas con
+ * el mismo nombre, y sin el prefijo el main de Dreamcast no compila. */
+#define PS1_SPU_BASE      0x1F801C00u
+#define PS1_SPU_REG_BYTES 0x400u
+#define PS1_SPU_RAM_SIZE  0x80000u      /* 512 KB de RAM de sonido */
 
 #define DMA4_MADR     0x1F8010C0u
 #define DMA4_BCR      0x1F8010C4u
@@ -26,8 +29,8 @@
 
 typedef struct {
     Ps1IoBus iface;                        /* lo que ve ps1rt */
-    uint16_t reg[SPU_REG_BYTES / 2u];
-    uint8_t  ram[SPU_RAM_SIZE];
+    uint16_t reg[PS1_SPU_REG_BYTES / 2u];
+    uint8_t  ram[PS1_SPU_RAM_SIZE];
     uint32_t transfer_addr;                /* donde escribe el DMA en la RAM de sonido */
     uint32_t dma4[3];                      /* MADR, BCR, CHCR */
     uint32_t dpcr, dicr;
@@ -41,7 +44,7 @@ typedef struct {
     uint64_t irqs_raised;
 } SpuStub;
 
-void spu_init(SpuStub *s);
-void spu_attach(SpuStub *s, Cpu *c);
+void ps1_spu_init(SpuStub *s);
+void ps1_spu_attach(SpuStub *s, Cpu *c);
 
 #endif /* PS1_HOST_SPU_H */

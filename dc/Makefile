@@ -34,7 +34,7 @@ export TMPDIR
 export TMP  := $(TMPDIR)
 export TEMP := $(TMPDIR)
 
-.PHONY: help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-test dc-size bake disc diff clean
+.PHONY: help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size bake disc diff clean
 
 help:
 	@echo "Analisis y generacion (Python, funcionan ya):"
@@ -125,7 +125,9 @@ dc-test: $(DCBUILD)/run_tests.elf
 
 $(DCBUILD)/%.o: src/ps1rt/%.c
 	@mkdir -p $(DCBUILD) $(TMPDIR)
-	$(KOS_CC_W) $(DCFLAGS) -Isrc/ps1rt -c $< -o $@
+	$(KOS_CC_W) $(DCFLAGS) -Isrc/ps1rt -MMD -MP -c $< -o $@
+
+-include $(DCTEST_OBJS:.o=.d)
 
 # El runner es portable y define main(); se renombra para que el main de verdad sea
 # el de la envoltura de KOS.
@@ -147,10 +149,33 @@ dc-size: dc-check $(GEN)/parts.mk
 	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(GENFLAGS)" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
 	@sh-elf-size -t $(DCBUILD)/gen/*.o | tail -1
 
-dc:
-	@echo "Pendiente: el juego completo en Dreamcast es el paso 3 de M1b (platform/dc)."
-	@echo "Ya funcionan: 'make dc-test' (ps1rt en SH-4) y 'make dc-size' (tamano)."
-	@exit 1
+# El juego en Dreamcast. PS1_DIAG=0 deja fuera el volcado y los guiones del test
+# diferencial, que escriben archivos y en un GD-ROM no tienen sentido.
+DC_HOST_SRCS := $(filter-out src/host/dump.c,$(HOST_SRCS))
+DC_SRCS      := $(PS1RT_SRCS) $(DC_HOST_SRCS) $(HLE_TABLE) src/platform/dc/main.c
+DC_OBJS      := $(patsubst %.c,$(DCBUILD)/o/%.o,$(DC_SRCS))
+
+dc: $(DCBUILD)/nfshs.elf
+	@echo "listo: dc/$<"
+
+# -MMD -MP genera las dependencias de cabeceras al lado del objeto. Sin esto, cambiar
+# un struct en host.h recompilaba solo el .c tocado y el resto se quedaba con el layout
+# viejo: los modulos veian campos distintos del MISMO GameHost y el host se comportaba
+# de forma incoherente sin dar ningun error. Costo una tarde de diagnostico.
+$(DCBUILD)/o/%.o: %.c
+	@mkdir -p $(dir $@) $(TMPDIR)
+	$(KOS_CC_W) $(DCFLAGS) $(CPPFLAGS) -DPS1_DIAG=0 -MMD -MP -c $< -o $@
+
+-include $(DC_OBJS:.o=.d)
+
+# El C generado no se recompila aqui: lo hace dc-gen, que son 71 unidades y tarda.
+dc-gen: dc-check $(GEN)/parts.mk
+	@mkdir -p $(DCBUILD)/gen $(TMPDIR)
+	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(GENFLAGS)" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
+
+$(DCBUILD)/nfshs.elf: dc-check dc-gen $(DC_OBJS)
+	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o -o $@
+	@sh-elf-size $@
 
 bake:
 	@echo "Pendiente: M2." && exit 1

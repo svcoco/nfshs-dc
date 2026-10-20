@@ -166,6 +166,8 @@ void host_frame_top(GameHost *h, Cpu *c)
 #if PS1_DIAG
     dump_frame(h, c);
 #endif
+    if (h->poll_input != NULL)
+        h->poll_input(h);
     pad_write(h, c);
     /* fin del guion: parada ordenada, para que el arnes imprima su informe */
     if (h->pad_end != 0u && h->frames >= h->pad_end)

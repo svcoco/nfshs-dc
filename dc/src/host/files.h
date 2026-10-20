@@ -23,10 +23,21 @@
  * declare el archivo (ZZZFE.VIV, el del front end, tiene 435). */
 #define MOUNT_ENTRIES_MAX 65536u
 
+/* Un archivo abierto por el juego. Igual que los montajes, se lee A DEMANDA: el
+ * juego abre archivos de decenas de MB (ZZZZAMUS.VIV son 31 MB) y traerselos a
+ * memoria agota el heap del Dreamcast a la primera.
+ *
+ * Exactamente una de las tres fuentes esta puesta:
+ *   fh   -> archivo suelto del disco, propio de este OpenFile (se cierra al cerrar)
+ *   mo   -> entrada dentro de un BIGF montado, compartido (NO se cierra aqui)
+ *   data -> contenido ya en memoria (solo el BIGF que venia de otro montaje) */
 typedef struct {
-    uint32_t handle;               /* 0: libre */
-    uint8_t *data;
-    uint32_t size;
+    uint32_t      handle;          /* 0: libre */
+    FILE         *fh;
+    struct Mount *mo;
+    uint8_t      *data;
+    uint32_t      base;            /* donde empieza dentro de fh o del montaje */
+    uint32_t      size;
 } OpenFile;
 
 typedef struct {
@@ -50,7 +61,7 @@ typedef struct {
  *
  * `blob` es el camino antiguo y solo se usa cuando el BIGF no venia de un archivo del
  * disco sino de dentro de otro montaje; entonces `fh` es NULL. */
-typedef struct {
+typedef struct Mount {
     uint32_t    handle;            /* 0: libre */
     FILE       *fh;                /* abierto mientras viva el montaje; NULL si blob */
     uint8_t    *blob;              /* solo si fh == NULL */

@@ -22,7 +22,7 @@ static void check_irq(SpuStub *s, uint32_t addr, uint32_t len)
     if ((s->reg[0x1AAu / 2u] & 0x40u) == 0u || s->irq_flag)
         return;                             /* IRQ deshabilitada, o ya pendiente */
     irq = (uint32_t)s->reg[0x1A4u / 2u] << 3;   /* la direccion va en unidades de 8 */
-    if (((irq - addr) & (SPU_RAM_SIZE - 1u)) < len) {
+    if (((irq - addr) & (PS1_SPU_RAM_SIZE - 1u)) < len) {
         s->irq_flag = 1;
         s->irqs |= 1u << 9;
         s->irqs_raised++;
@@ -65,11 +65,11 @@ static void write_reg(SpuStub *s, uint32_t off, uint16_t v)
     }
     if (off == 0x1A8u) {
         /* escritura manual por la FIFO de datos: dos bytes en la RAM de sonido */
-        uint32_t a = s->transfer_addr & (SPU_RAM_SIZE - 2u);
+        uint32_t a = s->transfer_addr & (PS1_SPU_RAM_SIZE - 2u);
         s->ram[a] = (uint8_t)v;
         s->ram[a + 1u] = (uint8_t)(v >> 8);
         check_irq(s, a, 2u);
-        s->transfer_addr = (s->transfer_addr + 2u) & (SPU_RAM_SIZE - 1u);
+        s->transfer_addr = (s->transfer_addr + 2u) & (PS1_SPU_RAM_SIZE - 1u);
         return;
     }
     if (off == 0x1AAu && (v & 0x40u) == 0u)
@@ -100,13 +100,13 @@ static void dma4_run(SpuStub *s, Cpu *c)
     start = s->transfer_addr;             /* antes de avanzarla, para el check_irq */
 
     for (i = 0; i < bytes; i++) {
-        uint32_t a = s->transfer_addr & (SPU_RAM_SIZE - 1u);
+        uint32_t a = s->transfer_addr & (PS1_SPU_RAM_SIZE - 1u);
         if (to_spu)
             s->ram[a] = (uint8_t)ps1_r8(c, 0x80000000u | (src & 0x1FFFFFu));
         else
             ps1_w8(c, 0x80000000u | (src & 0x1FFFFFu), s->ram[a]);
         src++;
-        s->transfer_addr = (s->transfer_addr + 1u) & (SPU_RAM_SIZE - 1u);
+        s->transfer_addr = (s->transfer_addr + 1u) & (PS1_SPU_RAM_SIZE - 1u);
     }
 
     if (mode == 1u) {
@@ -135,8 +135,8 @@ static uint32_t bus_read(Cpu *c, void *self, uint32_t a, uint32_t n)
     (void)c;
     s->reads++;
 
-    if (a >= SPU_BASE && a < SPU_BASE + SPU_REG_BYTES) {
-        uint32_t off = a - SPU_BASE;
+    if (a >= PS1_SPU_BASE && a < PS1_SPU_BASE + PS1_SPU_REG_BYTES) {
+        uint32_t off = a - PS1_SPU_BASE;
         if (n == 4u)
             return (uint32_t)read_reg(s, off) | ((uint32_t)read_reg(s, off + 2u) << 16);
         if (n == 2u)
@@ -185,8 +185,8 @@ static void bus_write(Cpu *c, void *self, uint32_t a, uint32_t v, uint32_t n)
         break;
     }
 
-    if (a >= SPU_BASE && a < SPU_BASE + SPU_REG_BYTES) {
-        uint32_t off = a - SPU_BASE;
+    if (a >= PS1_SPU_BASE && a < PS1_SPU_BASE + PS1_SPU_REG_BYTES) {
+        uint32_t off = a - PS1_SPU_BASE;
         if (n == 4u) {
             write_reg(s, off, (uint16_t)v);
             write_reg(s, off + 2u, (uint16_t)(v >> 16));
@@ -209,7 +209,7 @@ static uint32_t bus_take_irqs(Cpu *c, void *self)
     return irqs;
 }
 
-void spu_init(SpuStub *s)
+void ps1_spu_init(SpuStub *s)
 {
     memset(s, 0, sizeof(*s));
     s->iface.read = bus_read;
@@ -218,7 +218,7 @@ void spu_init(SpuStub *s)
     s->iface.self = s;
 }
 
-void spu_attach(SpuStub *s, Cpu *c)
+void ps1_spu_attach(SpuStub *s, Cpu *c)
 {
     c->bus = &s->iface;
 }

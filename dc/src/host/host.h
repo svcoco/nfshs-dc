@@ -63,7 +63,7 @@ typedef struct {
     int      implemented;    /* 1 si algun modulo del host la atendio */
 } HleFunc;
 
-typedef struct {
+typedef struct GameHost {
     Ps1Host  iface;          /* lo que ve ps1rt; `self` apunta a este struct */
     HleFunc  hle[HOST_HLE_MAX];
     uint32_t hle_n;          /* ordenadas por direccion, para busqueda binaria */
@@ -118,6 +118,10 @@ typedef struct {
     uint32_t next_event;     /* descriptores de OpenEvent */
     uint32_t pad_buffers[2];
     uint16_t pad_buttons[2];  /* botones pulsados, logica normal */
+    /* La plataforma rellena pad_buttons aqui, una vez por frame, justo antes de que
+     * se escriban los buffers de libpad. En Dreamcast lee el mando por maple; en el
+     * host de PC es NULL y manda el guion de pad_steps. */
+    void (*poll_input)(struct GameHost *h);
     struct { uint64_t frame; uint16_t buttons; } pad_steps[PAD_SCRIPT_MAX];
     uint32_t pad_steps_n, pad_at;
     uint64_t pad_end;         /* campo en el que termina el guion (0: sin fin) */

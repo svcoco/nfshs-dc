@@ -10,10 +10,11 @@ de forma nativa con el PowerVR**.
 Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación como en los
 mensajes. Los identificadores de código van en inglés.
 
-Última actualización: 2026-10-18. Estado: **M0 y M1a cerrados. El test diferencial pasa
-con 120 frames idénticos en el front end y 231 en la carrera (RAM, registros, GTE y
-ticks), con cinco bugs reales encontrados. Siguiente: M1b (cross-compilar a SH-4), que
-está bloqueado por el toolchain: no hay KallistiOS en la máquina.**
+Última actualización: 2026-10-19. Estado: **M0 y M1a cerrados. En M1b: el toolchain ya
+está instalado (sh-elf-gcc 15.2.0, KOS `8e704086`) y el primer número está medido — el
+código generado ocupa **3,43 MB de `.text` en SH-4 con `-Os`**, así que **no hacen falta
+overlays**. Siguiente: `ps1rt` y las 227 pruebas unitarias sobre SH-4, y después
+`platform/dc/`.**
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y
@@ -162,11 +163,14 @@ Archivos del disco de Jorge:
   (12–24 bytes por instrucción MIPS, máscara de memoria incluida). A eso se suman 2 MB de
   RAM de PS1 y 1 MB de espejo de VRAM, de un total de 16 MB. El punto a vigilar es la
   I-cache de 8 KB.
-  - **Referencia medida (2026-10-18, x86-64, gcc 16.2):** el `.text` del mismo árbol
-    generado pesa **7,59 MB con `-O2` y 3,93 MB con `-Os`** (−48 %; `-O1` sale peor que
-    `-O2`), o sea 32,4 y 16,8 bytes por instrucción MIPS. No es el número de SH-4, pero la
-    cifra de `-Os` cae dentro del rango estimado. El de SH-4 es la primera medición de
-    M1b, y es la que decide si hace falta trocear el código en overlays.
+  - **Medido en x86-64 (2026-10-18, gcc 16.2):** `.text` = **7,59 MB con `-O2` y 3,93 MB
+    con `-Os`** (−48 %; `-O1` sale peor que `-O2`), o sea 32,4 y 16,8 bytes por
+    instrucción MIPS.
+  - **Medido en SH-4 (2026-10-19, sh-elf-gcc 15.2.0, `-ml -m4-single`):** `.text` =
+    **3 595 380 bytes (3,43 MB) con `-Os`** y 8 233 000 (7,85 MB) con `-O2`; 14,6 y 33,5
+    bytes por instrucción MIPS. Compila en 38 s y 96 s con 8 hilos, sin avisos. La
+    estimación de 2,9–5,9 MB acertó, y a `-Os` el SH-4 sale un 8,5 % **más compacto** que
+    x86-64. **No hacen falta overlays** (detalle en `docs/hitos/M1b.md`).
 - **M0 cerrado (2026-10-18).** Las dos cifras que faltaban están en `docs/hitos/M0.md`:
   - **RAM:** en carrera el juego tiene en uso ~**1,84 MB de los 2 MB** (1 214 KB de texto,
     616 KB de heap y pila, 12 KB de BSS), y escribe 265 de 512 páginas de 4 KB. La **pila
@@ -317,15 +321,19 @@ como opción al jugador, es una decisión de producto de M5.
 
 Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
 
-1. **Está bloqueado por el toolchain.** No hay KallistiOS ni `sh-elf-gcc` en la máquina
-   (comprobado el 2026-10-18). La recomendación es **dc-chain dentro del MSYS2 que ya
-   existe**, para estar sobre KOS de upstream con un solo entorno; el coste es una
-   compilación larga y desatendida. Es una decisión de Jorge: instala software.
-2. **La primera medición es el tamaño del código**, antes de escribir plataforma: en
-   Dreamcast el `1ST_READ.BIN` se carga entero en RAM. Medido en x86-64: `.text` del árbol
-   generado = **7,59 MB con `-O2` y 3,93 MB con `-Os`** (−48 %; `-O1` es peor que `-O2`).
-   La estimación de M0 para SH-4 era 2,9–5,9 MB y la medida de `-Os` cae dentro, pero el
-   número de SH-4 **hay que medirlo**.
+1. **El toolchain ya está (2026-10-19).** dc-chain dentro del MSYS2 que ya existía:
+   `sh-elf-gcc` 15.2.0, binutils 2.45.1, newlib 4.6.0, KOS `8e704086` (2026-10-16),
+   `-m4-single`. Verificado enlazando un `hello.c` con `<kos.h>` a un ELF `sh4a` real.
+   El toolchain del **AICA (ARM7) se dejó sin instalar a propósito**: su gcc 8.5.0 no
+   compila en hosts Windows modernos y **no hace falta**, porque KOS trae
+   `stream.drv.prebuilt` y lo usa solo cuando no encuentra compilador ARM.
+2. **El tamaño del código ya está medido (2026-10-19) y el riesgo está cerrado.** En
+   SH-4, la suma de `.text` de las 71 unidades es **3 595 380 bytes (3,43 MB) con `-Os`**
+   y 8 233 000 (7,85 MB) con `-O2`; 14,6 bytes por instrucción MIPS, dentro de la
+   estimación de M0 (2,9–5,9 MB) y un 8,5 % **por debajo** de x86-64 a `-Os`. Con 2 MB de
+   RAM de PS1 y 1 MB de espejo de VRAM van 6,43 MB de 16: **sin overlays**. Elegir `-Os`
+   o `-O2` es cuestión de velocidad (I-cache de 8 KB), no de espacio, y se decide
+   midiendo con el juego corriendo.
 3. **La auditoría del código portable contra los peligros del SH-4 ya está hecha** y
    despeja dos riesgos con datos: **0 accesos desalineados** y **0 en el borde de la RAM**
    en 900 frames de carrera, sin casts puntero↔entero y sin `double` salvo un `printf`. Lo

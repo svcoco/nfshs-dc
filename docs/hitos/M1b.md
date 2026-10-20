@@ -44,10 +44,39 @@ Esto no es el numero de SH-4, que es lo que hay que medir, pero sitia el problem
   assets en vuelo. Quedan del orden de **12 MB para codigo**. A `-Os` sobra; a `-O2` entra
   pero sin holgura para M2.
 
-**Primera medicion de M1b, antes de escribir una linea de plataforma:** compilar
-`dc/gen/` con `sh-elf-gcc -ml -m4-single -Os` y dar el `.text` real. Es la cifra que decide
-si hay que trocear el codigo (overlays desde el GD-ROM) o no, y es una medicion de una
-tarde, no de un hito.
+### La medicion real de SH-4 (2026-10-19): **riesgo cerrado**
+
+Mismo arbol generado, mismos 71 ficheros, `sh-elf-gcc 15.2.0 -ml -m4-single`, suma de
+`.text` de los 71 objetos:
+
+| | `.text` SH-4 | B/instr MIPS | x86-64 | SH-4 vs x86-64 |
+|---|---|---|---|---|
+| `-Os` | **3 595 380 (3,43 MB)** | **14,6** | 3,93 MB | **-8,5 %** |
+| `-O2` | 8 233 000 (7,85 MB) | 33,5 | 7,59 MB | +3,4 % |
+
+Tiempo de compilacion con 8 hilos: **38 s** a `-Os`, 96 s a `-O2`. Compila **sin avisos**.
+
+Tres conclusiones:
+
+1. **No hacen falta overlays.** A `-Os` el codigo son 3,43 MB de los 16 MB. Con los 2 MB
+   de RAM de PS1 y el 1 MB de espejo de VRAM van 6,43 MB, y quedan ~9,5 MB para KOS,
+   pila, heap y assets en vuelo. Hay holgura de sobra. A `-O2` (7,85 MB) tambien entra,
+   pero deja ~5 MB y eso ya aprieta para M2.
+2. **La estimacion de M0 acerto.** Decia 2,9-5,9 MB (12-24 B/instr) y han salido 14,6
+   B/instr. Queda dentro, en la mitad baja.
+3. **El SH-4 sale mas compacto que x86-64 a `-Os`**, que no era obvio: sus instrucciones
+   de 2 bytes de ancho fijo compensan necesitar mas instrucciones por operacion. A `-O2`
+   se da la vuelta, porque el desenrollado y la alineacion pesan mas que el ancho.
+
+**Queda por decidir `-Os` vs `-O2`, y no se decide por tamano sino por velocidad**, que es
+el otro riesgo (CPU e I-cache). Con 8 KB de I-cache, los 3,43 MB de `-Os` fallan menos que
+los 7,85 MB de `-O2`, asi que es posible que `-Os` sea ademas **mas rapido** aqui. Se mide
+en el paso 5, con el juego corriendo, no antes.
+
+Aviso de lectura: esto es la suma de `.text` de los objetos, no el binario enlazado. El
+ELF final suma `ps1rt`, el host, KOS y newlib, y **no se puede descartar nada**: todas las
+funciones recompiladas son alcanzables por la tabla de despacho. La cifra del ELF es el
+paso 5.
 
 ## 2. Auditoria del codigo portable contra los peligros del SH-4
 
@@ -80,7 +109,40 @@ GD-ROM (`/cd`) o de un romdisk, no del sistema de archivos del PC. De los cuatro
   de arrastrar `stdio` al binario de consola.
 - `host.c` solo los usa para el informe.
 
-## 3. El toolchain: decidido, y el script esta escrito
+## 3. El toolchain: instalado y verificado (2026-10-19)
+
+**Instalado el 2026-10-19**, siguiendo [`docs/instalar-sdk.md`](../instalar-sdk.md).
+Versiones exactas de esta maquina:
+
+| Pieza | Version |
+|---|---|
+| entorno | MSYS2 **UCRT64** sobre Windows 11 |
+| gcc del host | 16.2.0 (Rev6, MSYS2) |
+| `sh-elf-gcc` | **15.2.0** |
+| `sh-elf-ld` (binutils) | **2.45.1** |
+| newlib | **4.6.0** |
+| KallistiOS | `8e704086`, 2026-10-16 |
+| `arm-eabi-gcc` (AICA) | **no instalado**, a proposito: ver abajo |
+| `KOS_SH4_PRECISION` | `-m4-single` |
+
+Artefactos: `lib/dreamcast/libkallisti.a` (9,28 MB), `libkallisti_exports.a`,
+`libromdiskbase.a` y los addons (`libpthread.a`, `libkosfat.a`, ...).
+
+Prueba de humo real (no solo `--version`): un `hello.c` con `#include <kos.h>` compila y
+**enlaza**, y `sh-elf-objdump -f` dice `elf32-shl`, `architecture: sh4a`, `EXEC_P`.
+`text 189500  data 5792  bss 18596`.
+
+**El toolchain del AICA (ARM7) se dejo sin instalar.** Su perfil usa gcc 8.5.0, que no
+compila en hosts Windows modernos (`libcpp/files.c:1696`, conversion `const char*` ->
+`char*` en el bloque de rutas DOS; `files.c` se compila como C++). Da igual: KOS trae
+`kernel/arch/dreamcast/sound/arm/stream.drv.prebuilt` y su `Makefile` lo copia solo cuando
+`wildcard $(DC_ARM_CC)` sale vacio. Verificado: `stream.drv` se genero con los mismos 3 360
+bytes del precompilado. Lo unico que se pierde es poder **recompilar el firmware del
+AICA**, que este port no necesita: el audio de M3 va por la API de sonido de KOS, que
+corre sobre ese mismo driver.
+
+### Como se decidio y como se documento
+
 
 **Decision de Jorge (2026-10-18): dc-chain dentro del MSYS2 que ya existe.** La
 instalacion la lanza el **por separado**, de dos formas que llevan al mismo sitio:
@@ -154,8 +216,8 @@ necesita vigilancia.
 
 | # | Paso | Cierra con |
 |---|---|---|
-| 0 | Instalar KOS + `sh-elf-gcc` con `dc/tools/install-kos.sh` (lo lanza Jorge aparte) | `sh-elf-gcc --version` responde; el script deja las versiones en `/opt/toolchains/dc/versiones-sdk.txt`, que se pegan **aqui** |
-| 1 | **Medir el tamano**: compilar `dc/gen/` con `-ml -m4-single -Os` | `.text` real de SH-4, comparado con los 3,93 MB de x86-64 |
+| 0 | Instalar KOS + `sh-elf-gcc` | **Hecho (2026-10-19).** Versiones abajo |
+| 1 | **Medir el tamano**: compilar `dc/gen/` con `-ml -m4-single -Os` | **Hecho (2026-10-19): 3,43 MB.** Sin overlays (seccion 1) |
 | 2 | `ps1rt` en SH-4: compilar y pasar las **227 pruebas unitarias** en Dreamcast | pruebas en verde sobre Flycast |
 | 3 | `platform/dc/`: archivos (GD-ROM o romdisk), pad, timers, VSync, salida de texto | el juego arranca y avanza frames, con contadores en pantalla |
 | 4 | Front end y logica de carrera avanzando sin cuelgues | N frames sin panico, en Flycast **y en hardware** |

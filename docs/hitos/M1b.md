@@ -109,7 +109,7 @@ nuestra: salen de `Makefile.dreamcast.cfg`, `Makefile.aica.cfg` y `doc/environ.s
 /opt/toolchains/dc/kos/        KallistiOS            (C:\msys64\opt\toolchains\dc\...)
 /opt/toolchains/dc/kos-ports/  librerias portadas (se clona, no se compila)
 /opt/toolchains/dc/sh-elf/     toolchain SH-4, la CPU
-/opt/toolchains/dc/arm-eabi/   toolchain ARM7, el AICA (KOS no enlaza sin el)
+/opt/toolchains/dc/arm-eabi/   toolchain ARM7, el AICA (OPCIONAL: KOS usa stream.drv.prebuilt si falta)
 ```
 
 Perfil **estable** para Dreamcast: binutils 2.45.1, **gcc 15.2.0**, newlib 4.6.0, con

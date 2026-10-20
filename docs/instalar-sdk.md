@@ -1,9 +1,10 @@
 # Instalar el SDK de Dreamcast a mano (Windows + MSYS2)
 
-> **Revision 2026-10-19.** Si la copia que estas leyendo no lleva esta linea, **esta
-> vieja**: los comandos de los pasos 6 y 7 cambiaron. Vuelve a abrir el archivo desde el
-> repo antes de seguir. (Paso justo eso: una guia corregida en el repo no sirve de nada si
-> tienes la version anterior en pantalla.)
+> **Revision 2026-10-19 (b).** Si la copia que estas leyendo no lleva exactamente esta
+> linea, **esta vieja**. Cambios respecto a la (a): el **paso 7 es opcional** (la (a) decia
+> lo contrario, y se equivocaba). Respecto a la original: los comandos de los pasos 6 y 7
+> ya no llevan `makejobs`. Vuelve a abrir el archivo desde el repo antes de seguir: una
+> guia corregida no sirve de nada si tienes la version anterior en pantalla.
 
 Guia paso a paso para dejar `sh-elf-gcc` y KallistiOS funcionando. Es la alternativa
 manual a [`dc/tools/install-kos.sh`](../dc/tools/install-kos.sh), que hace esto mismo
@@ -25,13 +26,14 @@ gcc (dos pasadas) y newlib desde fuente, para dos arquitecturas.
 | `/opt/toolchains/dc/kos/` | `C:\msys64\opt\toolchains\dc\kos\` | KallistiOS |
 | `/opt/toolchains/dc/kos-ports/` | `...\kos-ports\` | librerias portadas (se clona, no se compila) |
 | `/opt/toolchains/dc/sh-elf/` | `...\sh-elf\` | toolchain **SH-4**, la CPU del Dreamcast |
-| `/opt/toolchains/dc/arm-eabi/` | `...\arm-eabi\` | toolchain **ARM7**, el AICA (el sonido) |
+| `/opt/toolchains/dc/arm-eabi/` | `...\arm-eabi\` | toolchain **ARM7**, el AICA (el sonido) — **opcional** |
 
 Esas rutas **no son una eleccion nuestra**: son las de fabrica de KallistiOS, y vienen de
 `utils/kos-chain/Makefile.dreamcast.cfg` (`toolchain_path=/opt/toolchains/dc/sh-elf`),
 `Makefile.aica.cfg` y `doc/environ.sh.sample`. Cambiarlas obliga a editar los tres sitios.
 
-Hacen falta **los dos** toolchains: KallistiOS no enlaza sin el del AICA.
+El del SH-4 es obligatorio. **El del AICA es opcional**: si falta, KOS usa el driver de
+sonido precompilado que ya trae (ver el paso 7).
 
 > **Aviso:** la documentacion del wiki de KallistiOS esta desactualizada en tres puntos
 > que hacen fallar una instalacion a ciegas. Esta guia esta escrita contra el repositorio
@@ -182,7 +184,30 @@ con `--with-endian=little`, multilib `m4-single,m4-single-only` y `thread_model=
 Si falla, los registros de cada componente estan en
 `/opt/toolchains/dc/kos/utils/kos-chain/logs/`. Mira el del ultimo que corrio.
 
-## 7. Construye el toolchain del AICA (ARM7)
+## 7. Construye el toolchain del AICA (ARM7) — **opcional, puedes saltartelo**
+
+> **Correccion (2026-10-19).** Una revision anterior de esta guia decia que este paso
+> «no se puede saltar» y que «no hay binario precompilado». **Las dos cosas eran falsas.**
+> KOS trae `kernel/arch/dreamcast/sound/arm/stream.drv.prebuilt` (3 360 bytes) y su
+> `Makefile` lo usa solo si no encuentra compilador ARM:
+>
+> ```make
+> ifeq ($(ARM_CC_IS_AVAILABLE), 1)
+> stream.drv: prog.elf                 # lo compila
+> else
+> stream.drv: stream.drv.prebuilt      # copia el precompilado
+> endif
+> ```
+>
+> La deteccion es automatica (`wildcard $(DC_ARM_CC)`): si no instalas el toolchain ARM,
+> no hay que tocar `environ.sh` ni nada. KOS compila igual.
+
+Lo que pierdes saltandotelo es solo poder **recompilar el firmware del AICA**. Para este
+port no hace falta: el audio de M3 va por la API de sonido de KOS, que corre sobre ese
+mismo driver de serie. Si algun dia hiciera falta, este paso se puede hacer despues sin
+rehacer nada.
+
+Si decides hacerlo igualmente:
 
 ```sh
 cd /opt/toolchains/dc/kos/utils/kos-chain
@@ -191,16 +216,34 @@ make platform=aica
 
 Igual que el paso 6: **sin anadirle nada**.
 
-Este paso **no se puede saltar** aunque no te interese el sonido todavia. KOS compila
-`kernel/arch/dreamcast/sound/arm/stream.drv` desde fuente y lo convierte a C con `bin2c`,
-asi que sin el toolchain ARM el `make` del paso 9 no termina. No hay binario precompilado.
+El perfil del AICA es **mucho mas viejo** que el del SH-4: binutils 2.47 pero **gcc 8.5.0**
+(de 2021), frente al 15.2.0 del SH-4. Y con un host gcc moderno **falla**, en este punto
+exacto:
 
-Ojo a que el perfil del AICA es **mucho mas viejo** que el del SH-4: binutils 2.47 pero
-**gcc 8.5.0** (de 2021), frente al 15.2.0 del SH-4. Si este paso falla dentro de gcc y no
-de binutils, esa diferencia es la primera sospecha, porque compilar fuentes de gcc
-antiguas con un host gcc moderno es un fallo conocido.
+```
+gcc-8.5.0/libcpp/files.c:1696:27: error: invalid conversion from 'const char*' to 'char*'
+         char *p2 = strchr (fname, '\');
+```
 
-**Comprueba:**
+Es codigo de rutas DOS, que solo se compila en hosts Windows, y `files.c` se compila como
+C++, donde `strchr` sobre un `const char*` devuelve `const char*`. El gcc 15.2.0 del SH-4
+no lo tiene porque aguas arriba ya esta corregido. El parche de mingw que trae `kos-chain`
+(`patches/hosts/x86_64-w64-mingw32/gcc-8.5.0.diff`) **no** cubre este caso: va solo de
+`WIN32_LEAN_AND_MEAN`.
+
+Arreglo, una linea (`p` ya esta declarado `const char *` dos lineas mas arriba):
+
+```sh
+cd /opt/toolchains/dc/kos/utils/kos-chain
+sed -i "s/char \*p2 = strchr (fname, '\\\\');/const char *p2 = strchr (fname, '\\\\');/" \
+    gcc-8.5.0/libcpp/files.c
+grep -n "p2 = strchr" gcc-8.5.0/libcpp/files.c     # debe decir: const char *p2
+make platform=aica
+```
+
+Se relanza encima de lo ya construido; no hay que limpiar nada.
+
+**Comprueba** (solo si hiciste el paso):
 
 ```sh
 /opt/toolchains/dc/arm-eabi/bin/arm-eabi-gcc --version
@@ -271,7 +314,11 @@ pegalo alli:
   echo "entorno MSYS2:  $MSYSTEM"
   echo "gcc del host:   $(gcc --version | head -1)"
   echo "sh-elf-gcc:     $(/opt/toolchains/dc/sh-elf/bin/sh-elf-gcc --version | head -1)"
-  echo "arm-eabi-gcc:   $(/opt/toolchains/dc/arm-eabi/bin/arm-eabi-gcc --version | head -1)"
+  if [ -x /opt/toolchains/dc/arm-eabi/bin/arm-eabi-gcc ]; then
+    echo "arm-eabi-gcc:   $(/opt/toolchains/dc/arm-eabi/bin/arm-eabi-gcc --version | head -1)"
+  else
+    echo "arm-eabi-gcc:   no instalado (KOS usa stream.drv.prebuilt)"
+  fi
   echo "KallistiOS:     $(git -C /opt/toolchains/dc/kos log -1 --format='%h %cd' --date=short)"
 } | tee /opt/toolchains/dc/versiones-sdk.txt
 ```
@@ -360,7 +407,7 @@ make platform=aica makejobs=1
 | Errores raros de dependencias al instalar paquetes | Actualizacion parcial. Haz `pacman -Syuu`, reabre la terminal, repite, y **revalida el lado x86** (ver el apartado del paso 3) |
 | Se queda sin espacio | Haz el paso 12 y relanza |
 | `sh-elf-gcc: command not found` tras instalar | Te falta `source /opt/toolchains/dc/kos/environ.sh` en esa terminal |
-| Falla el enlazado de KOS por algo de ARM | Te falta el paso 7. KOS no enlaza sin el toolchain del AICA |
+| `libcpp/files.c:1696: invalid conversion from 'const char*' to 'char*'` en el paso 7 | Fallo de gcc 8.5.0 en hosts Windows. Es opcional: **saltate el paso 7**, o aplica el `sed` de una linea que viene ahi |
 | Un script `.sh` del repo da errores raros de sintaxis | Finales de linea CRLF. El repo tiene `.gitattributes` que lo evita; si vienes de un clon viejo, `git add --renormalize .` |
 
 ## Donde el wiki se equivoca

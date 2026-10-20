@@ -125,6 +125,16 @@ run() {
     [ "$rc" -eq 0 ] || error "fallo: $* (codigo $rc)"
 }
 
+aviso() { echo "  AVISO: $*" >&2; }
+
+# Igual que run(), pero NO aborta: devuelve el codigo de salida para que decida quien
+# llama. Para los pasos que son best-effort (el toolchain ARM).
+run_opt() {
+    echo "+ $*" | tee -a "$LOG"
+    "$@" 2>&1 | tee -a "$LOG"
+    return ${PIPESTATUS[0]}
+}
+
 # ---------------------------------------------------------- 0. comprobaciones
 
 paso "0. Comprobando el entorno"
@@ -258,19 +268,26 @@ info "perfil estable:   $(grep -hE '^(binutils|gcc|newlib)_ver=' \
 # compila en serie: init.mk cae en `-j$(getconf _NPROCESSORS_ONLN)`, o sea todos los
 # nucleos. Se pasa explicito solo para poder bajarlo con --jobs 1 al diagnosticar.
 #
-# Hacen falta las DOS: sh-elf para la CPU SH-4 y arm-eabi para el ARM7 del AICA (el
-# procesador de sonido). KallistiOS no enlaza sin la segunda.
+# La de sh-elf (CPU SH-4) es obligatoria. La de arm-eabi (ARM7 del AICA, el procesador
+# de sonido) NO lo es: KOS trae kernel/arch/dreamcast/sound/arm/stream.drv.prebuilt y su
+# Makefile lo copia cuando no encuentra compilador ARM. Ademas su perfil usa gcc 8.5.0,
+# que no compila en hosts Windows modernos (libcpp/files.c). Por eso aqui es best-effort:
+# si falla, se avisa y se sigue.
 
 paso "3. Construyendo el toolchain SH-4 (sh-elf) - esto es lo que tarda"
 info "binutils + gcc (dos pasadas) + newlib, con $JOBS hilos"
 ( cd "$CHAIN" && run make platform=dreamcast makejobs="$JOBS" )
 
-paso "4. Construyendo el toolchain ARM del AICA (arm-eabi)"
-( cd "$CHAIN" && run make platform=aica makejobs="$JOBS" )
+paso "4. Construyendo el toolchain ARM del AICA (arm-eabi) - OPCIONAL"
+if ( cd "$CHAIN" && run_opt make platform=aica makejobs="$JOBS" ); then
+    info "toolchain ARM construido"
+else
+    aviso "el toolchain ARM fallo. NO es un problema: KOS usara stream.drv.prebuilt."
+    aviso "Solo pierdes poder recompilar el firmware del AICA. Detalle y arreglo opcional"
+    aviso "en docs/instalar-sdk.md, paso 7. Seguimos."
+fi
 
-for gcc_bin in "$DC_ROOT/sh-elf/bin/sh-elf-gcc" "$DC_ROOT/arm-eabi/bin/arm-eabi-gcc"; do
-    [ -x "$gcc_bin" ] || error "no se genero $gcc_bin. Mira los logs en $CHAIN/logs/"
-done
+[ -x "$DC_ROOT/sh-elf/bin/sh-elf-gcc" ]     || error "no se genero $DC_ROOT/sh-elf/bin/sh-elf-gcc. Mira los logs en $CHAIN/logs/"
 
 # ---------------------------------------------------------- 5. environ.sh
 

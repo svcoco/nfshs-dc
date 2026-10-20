@@ -3,10 +3,18 @@
  * El runner (test/unit/run_tests.c) es portable y no sabe nada de KOS: se compila
  * con -Dmain=ps1rt_tests_main y esta envoltura lo llama.
  *
- * La salida va al framebuffer ("fb"), que es el unico dispositivo que existe
- * siempre: sin dcload ni cable serie el resultado se lee en pantalla, en Flycast
- * o en hardware. Si hay dcload o serie, dbgio_dev_select_auto() los habria cogido
- * antes, asi que se intentan primero y "fb" queda de respaldo.
+ * La salida va al framebuffer ("fb"), FORZADO, y no por la autodeteccion de KOS.
+ * scif_detected() devuelve 1 siempre (scif.c: "We are always detected, though we
+ * might end up realizing there's no cable connected later"), asi que si se deja
+ * automatico gana el puerto serie y la PANTALLA DEL DREAMCAST SE QUEDA NEGRA.
+ *
+ * Eso no es que no haya salida -- en Flycast con Debug.SerialConsoleEnabled=yes
+ * aparece en una ventana aparte, "Flycast Serial Output", y con dcload llega al PC --
+ * pero es una salida que hay que ir a buscar, y en hardware sin cable serie ni
+ * dcload no existe. Con "fb" el resultado se lee donde uno lo mira, siempre.
+ *
+ * El banner de arranque de KOS se escapa igualmente por el serie, porque dbgio ya
+ * esta inicializado cuando llega este main.
  */
 #include <kos.h>
 
@@ -21,9 +29,9 @@ int main(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    /* Si no hay dcload ni serie, a pantalla. */
-    if(dbgio_dev_get() == NULL)
-        dbgio_dev_select("fb");
+    /* A pantalla, pase lo que pase. Ver el comentario de arriba. */
+    dbgio_dev_select("fb");
+    dbgio_enable();
 
     rc = ps1rt_tests_main();
 

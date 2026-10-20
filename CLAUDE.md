@@ -10,11 +10,11 @@ de forma nativa con el PowerVR**.
 Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación como en los
 mensajes. Los identificadores de código van en inglés.
 
-Última actualización: 2026-10-19. Estado: **M0 y M1a cerrados. En M1b: el toolchain ya
-está instalado (sh-elf-gcc 15.2.0, KOS `8e704086`) y el primer número está medido — el
-código generado ocupa **3,43 MB de `.text` en SH-4 con `-Os`**, así que **no hacen falta
-overlays**. Siguiente: `ps1rt` y las 227 pruebas unitarias sobre SH-4, y después
-`platform/dc/`.**
+Última actualización: 2026-10-19. Estado: **M0 y M1a cerrados. En M1b van los pasos 0, 1
+y 2: toolchain instalado (sh-elf-gcc 15.2.0, KOS `8e704086`), el código generado ocupa
+**3,43 MB de `.text` en SH-4 con `-Os`** (no hacen falta overlays), y `ps1rt` pasa
+**227/227 pruebas unitarias corriendo en SH-4** (Flycast 2.6). Siguiente: el paso 3,
+`platform/dc/` — archivos, pad, timers, VSync y salida de texto.**
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y

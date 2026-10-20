@@ -218,7 +218,7 @@ necesita vigilancia.
 |---|---|---|
 | 0 | Instalar KOS + `sh-elf-gcc` | **Hecho (2026-10-19).** Versiones abajo |
 | 1 | **Medir el tamano**: compilar `dc/gen/` con `-ml -m4-single -Os` | **Hecho (2026-10-19): 3,43 MB.** Sin overlays (seccion 1) |
-| 2 | `ps1rt` en SH-4: compilar y pasar las **227 pruebas unitarias** en Dreamcast | **Compila y enlaza (2026-10-19)**; falta ejecutarlo: hace falta Flycast o hardware |
+| 2 | `ps1rt` en SH-4: compilar y pasar las **227 pruebas unitarias** en Dreamcast | **Hecho (2026-10-19): 227/227 en Flycast 2.6** |
 | 3 | `platform/dc/`: archivos (GD-ROM o romdisk), pad, timers, VSync, salida de texto | el juego arranca y avanza frames, con contadores en pantalla |
 | 4 | Front end y logica de carrera avanzando sin cuelgues | N frames sin panico, en Flycast **y en hardware** |
 | 5 | Medir: tamano del ELF, RAM en uso, ms/frame | cifras en este archivo; comparacion con el presupuesto de la seccion 1 |
@@ -246,8 +246,32 @@ el runner portable se compila con `-Dmain=ps1rt_tests_main` y KOS llama al `main
 verdad. La salida va a dcload o al cable serie si los hay y, si no, al framebuffer, que
 existe siempre; al terminar espera a START para que el resultado se pueda leer.
 
-**Falta ejecutarlo**, y para eso hace falta un emulador (Flycast arranca el `.elf`
-directamente) o mandarlo al hardware. En esta maquina no hay ninguno de los dos.
+### Ejecutado: **227/227 en SH-4** (Flycast 2.6, 2026-10-19)
+
+Mismo resultado que en x86, comprobacion por comprobacion. Cubre los 22 bloques del
+runner: mapa de memoria, accesos desalineados, `div`/`mult`, `lwl`/`lwr`/`swl`/`swr`,
+`load_exe`, orden de despacho de `ps1_call`, ticks, parada, continuaciones, llamadas
+anidadas, interrupciones, diferidas, `syscall`, los seis de GTE (incluidos `divide`, el
+RTPS de identidad, las rarezas del banco de registros, saturaciones y banderas, y **el
+error de MVMVA con `cv == 2`**) y los tres de BIOS A0.
+
+Esto importa mas de lo que parece: el GTE hace toda su aritmetica en `int64_t`, que en
+SH-4 es **software**, y las saturaciones y banderas dependen de que esas cuentas de 64
+bits den exactamente lo mismo que en x86-64. Dan lo mismo.
+
+La linea `ps1rt: llamada a BIOS 0xa0:0x1 sin implementar (devuelve 0)` que sale en
+pantalla es el aviso esperado de B0/C0, que estan sin implementar a proposito, no un
+fallo.
+
+Como arrancarlo: `make -C dc dc-test` y `flycast.exe dc/build/dc/run_tests.elf`. Flycast
+carga el `.elf` directamente, sin GDI ni CDI. Arranca por REIOS.
+
+**Trampa que costo un rato:** KOS manda la salida al dispositivo que detecta, y
+`scif_detected()` devuelve 1 **siempre**, asi que gana el puerto serie y **la pantalla del
+Dreamcast se queda negra**. La salida esta ahi, pero en la ventana "Flycast Serial Output"
+(hace falta `Debug.SerialConsoleEnabled = yes` en `emu.cfg`), no en la del emulador. La
+envoltura fuerza `fb` por eso: en hardware sin cable serie ni dcload esa ventana no
+existe.
 
 ## 5. Lo que no se mide aqui
 

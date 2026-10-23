@@ -315,6 +315,22 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     f.write_all(&1u32.to_le_bytes()).expect("cabecera");
                     f
                 });
+            // NFSHS_DIFF_VIEW: dumps the RACE VIEW per frame, to compare the C port's
+            // capture (dc/src/host/game.c) against this one. The game does not build the
+            // world's mesh in RAM: this is all a renderer gets from it. Little-endian:
+            //   header: "NFSV" u32 version=1
+            //   per frame: u32 frame, u32 views, and per view u32 player, i16 rect[4],
+            //              i32 camera_pos[3], i32 camera_rot[9], u32 projection,
+            //              u16 chunks, then per chunk i16 block, u16 detail
+            let mut view_out: Option<std::io::BufWriter<std::fs::File>> = std::env::var("NFSHS_DIFF_VIEW")
+                .ok()
+                .map(|path| {
+                    use std::io::Write;
+                    let mut f = std::io::BufWriter::new(std::fs::File::create(&path).expect("NFSHS_DIFF_VIEW"));
+                    f.write_all(b"NFSV").expect("cabecera");
+                    f.write_all(&1u32.to_le_bytes()).expect("cabecera");
+                    f
+                });
             let mut diff_steps: Vec<(u32, u16)> = Vec::new();
             let mut diff_end = 0u32;
             if let Ok(path) = std::env::var("NFSHS_DIFF_SCRIPT") {
@@ -393,6 +409,31 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                         }
                     }
                     out.write_all(&rec).expect("NFSHS_DIFF_OVERLAY");
+                }
+                if let Some(out) = view_out.as_mut() {
+                    use std::io::Write;
+                    let mut rec: Vec<u8> = Vec::new();
+                    rec.extend_from_slice(&frame.to_le_bytes());
+                    rec.extend_from_slice(&(info.views.len() as u32).to_le_bytes());
+                    for v in &info.views {
+                        rec.extend_from_slice(&v.player.to_le_bytes());
+                        for t in v.rect {
+                            rec.extend_from_slice(&t.to_le_bytes());
+                        }
+                        for t in v.camera_pos {
+                            rec.extend_from_slice(&t.to_le_bytes());
+                        }
+                        for t in v.camera_rot {
+                            rec.extend_from_slice(&t.to_le_bytes());
+                        }
+                        rec.extend_from_slice(&v.projection.to_le_bytes());
+                        rec.extend_from_slice(&(v.chunks.len() as u16).to_le_bytes());
+                        for (block, detail) in &v.chunks {
+                            rec.extend_from_slice(&block.to_le_bytes());
+                            rec.extend_from_slice(&detail.to_le_bytes());
+                        }
+                    }
+                    out.write_all(&rec).expect("NFSHS_DIFF_VIEW");
                 }
                 if let Some(out) = diff_out.as_mut() {
                     use std::io::Write;
@@ -750,8 +791,11 @@ fn dump_track(grp: &str, psh: &str, out: &Path, view: Option<&str>) -> Result<()
     let track = formats::grp::Track::parse(&std::fs::read(grp)?)?;
     let psh = formats::psh::Psh::parse(&std::fs::read(psh)?)?;
     println!("nodes={} blocks={} textures={} vroad={}", track.nodes.len(), track.blocks.len(), track.textures.len(), track.vroad.len());
-    if std::env::var_os("NFSHS_BLOCKS").is_some() {
-        for (i, b) in track.blocks.iter().enumerate().take(12) {
+    if let Some(n) = std::env::var_os("NFSHS_BLOCKS") {
+        // NFSHS_BLOCKS=N lists N blocks (anything unparsable lists them all), for sizing
+        // a port's per-frame budget: the game picks which blocks to draw each frame.
+        let n = n.to_str().and_then(|s| s.parse().ok()).unwrap_or(usize::MAX);
+        for (i, b) in track.blocks.iter().enumerate().take(n) {
             let ymax = |m: &formats::grp::Mesh| m.verts.iter().map(|v| v[1] as f32 / 64.0).fold(f32::MIN, f32::max);
             let ymin = |m: &formats::grp::Mesh| m.verts.iter().map(|v| v[1] as f32 / 64.0).fold(f32::MAX, f32::min);
             println!(

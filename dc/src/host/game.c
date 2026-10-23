@@ -50,6 +50,36 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
     n = ps1_call_nested(c, ADDR_CHUNK_BUILD_LIST, args, 1u);
     ps1_w32(c, ADDR_CHUNK_BUILD_COUNT, n);
     h->race_chunks = n;
+    h->race_chunks_sum += n;
+    h->race_views++;
+    if (n > h->race_chunks_max)
+        h->race_chunks_max = n;
+
+    /* La captura de la vista: camara, proyeccion, recorte y lista de trozos. A partir
+     * de aqui el renderer no necesita volver a preguntarle nada al juego. */
+    if (h->views_n < VIEWS_MAX) {
+        RaceView *v = &h->view[h->views_n++];
+        uint32_t i;
+
+        v->player = player;
+        for (i = 0; i < 3u; i++)
+            v->camera_pos[i] = (int32_t)ps1_r32(c, ADDR_RENDER_VIEW + 8u + 4u * i);
+        for (i = 0; i < 9u; i++)
+            v->camera_rot[i] = (int32_t)ps1_r32(c, ADDR_RENDER_VIEW + 0x14u + 4u * i);
+        v->projection = ps1_r32(c, ADDR_CAMERA_ZOOM);
+        /* El recorte de esta vista va relativo al de la vista 0, que es como lo guarda
+         * la referencia; el tamano es absoluto. */
+        for (i = 0; i < 2u; i++)
+            v->rect[i] = (int16_t)((int16_t)ps1_r16(c, ADDR_DRAW_VIEWS + 200u * view + 8u + 2u * i) -
+                                   (int16_t)ps1_r16(c, ADDR_DRAW_VIEWS + 8u + 2u * i));
+        v->rect[2] = (int16_t)ps1_r16(c, ADDR_DRAW_VIEWS + 200u * view + 12u);
+        v->rect[3] = (int16_t)ps1_r16(c, ADDR_DRAW_VIEWS + 200u * view + 14u);
+        v->chunks_n = (uint16_t)(n < VIEW_CHUNKS_MAX ? n : VIEW_CHUNKS_MAX);
+        for (i = 0; i < v->chunks_n; i++) {
+            v->chunk[i] = (int16_t)ps1_r16(c, ADDR_CHUNK_BUILD_LIST_D + 4u * i);
+            v->detail[i] = (uint16_t)ps1_r16(c, ADDR_CHUNK_BUILD_LIST_D + 4u * i + 2u);
+        }
+    }
 
     /* El HUD: no es dibujo, son los numeros del juego (velocidad en unidades de
      * pantalla, marcha, tiempos, posicion) y el aviso de sentido contrario. */
@@ -121,3 +151,70 @@ int host_game_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
         return 0;
     }
 }
+
+#if PS1_DIAG
+/* ---- volcado de la vista de carrera (oraculo del paso 1 de M2b) ----
+ *
+ * Mismo formato que escribe la referencia con NFSHS_DIFF_VIEW, para que
+ * dc/test/diff/cmpview.py los compare campo a campo. Little-endian.
+ */
+static void putv16(FILE *f, uint16_t v)
+{
+    fputc((int)(v & 0xFFu), f);
+    fputc((int)((v >> 8) & 0xFFu), f);
+}
+
+static void putv32(FILE *f, uint32_t v)
+{
+    putv16(f, (uint16_t)v);
+    putv16(f, (uint16_t)(v >> 16));
+}
+
+int view_dump_open(GameHost *h, const char *path)
+{
+    FILE *f = fopen(path, "wb");
+
+    if (f == NULL)
+        return 0;
+    fwrite("NFSV", 1, 4, f);
+    putv32(f, 1u);
+    h->view_dump = f;
+    return 1;
+}
+
+void view_dump_frame(GameHost *h)
+{
+    FILE *f = h->view_dump;
+    uint32_t i, k;
+
+    if (f == NULL)
+        return;
+    putv32(f, (uint32_t)h->frames);
+    putv32(f, h->views_n);
+    for (i = 0; i < h->views_n; i++) {
+        const RaceView *v = &h->view[i];
+
+        putv32(f, v->player);
+        for (k = 0; k < 4u; k++)
+            putv16(f, (uint16_t)v->rect[k]);
+        for (k = 0; k < 3u; k++)
+            putv32(f, (uint32_t)v->camera_pos[k]);
+        for (k = 0; k < 9u; k++)
+            putv32(f, (uint32_t)v->camera_rot[k]);
+        putv32(f, v->projection);
+        putv16(f, v->chunks_n);
+        for (k = 0; k < v->chunks_n; k++) {
+            putv16(f, (uint16_t)v->chunk[k]);
+            putv16(f, v->detail[k]);
+        }
+    }
+}
+
+void view_dump_close(GameHost *h)
+{
+    if (h->view_dump != NULL) {
+        fclose(h->view_dump);
+        h->view_dump = NULL;
+    }
+}
+#endif /* PS1_DIAG */

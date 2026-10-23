@@ -105,6 +105,7 @@ int main(int argc, char **argv)
     const char *script = NULL;
     const char *dump_path = NULL;
     const char *ovl_path = NULL;
+    const char *view_path = NULL;
     const char *tex_path = NULL;
     const char *counts_path = NULL;
     uint64_t win_lo = 0, win_hi = 0, ram_at_call = 0, frame_dump_at = 0;
@@ -148,6 +149,8 @@ int main(int argc, char **argv)
             dump_path = argv[++i];
         else if (!strcmp(argv[i], "--overlaydump") && i + 1 < argc)
             ovl_path = argv[++i];
+        else if (!strcmp(argv[i], "--viewdump") && i + 1 < argc)
+            view_path = argv[++i];
         else if (!strcmp(argv[i], "--texdump") && i + 1 < argc)
             tex_path = argv[++i];
         else if (!strcmp(argv[i], "--shot") && i + 2 < argc) {
@@ -233,6 +236,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "no pude abrir el volcado de la lista de dibujo %s\n", ovl_path);
         return 1;
     }
+    if (view_path != NULL && !view_dump_open(&host, view_path)) {
+        fprintf(stderr, "no pude abrir el volcado de la vista %s\n", view_path);
+        return 1;
+    }
     if (dump_path != NULL && !dump_open(&host, dump_path)) {
         fprintf(stderr, "no pude abrir el volcado %s\n", dump_path);
         return 1;
@@ -261,6 +268,7 @@ int main(int argc, char **argv)
 
     dump_close(&host);
     overlay_dump_close(&host);
+    view_dump_close(&host);
     if (counts_path != NULL && !host_call_counts(&host, counts_path))
         fprintf(stderr, "no pude escribir la tabla de llamadas %s\n", counts_path);
     if (tex_path != NULL) {

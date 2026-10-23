@@ -80,6 +80,10 @@ def main(argv):
     # en la misma ejecucion, asi que no cuesta nada tenerlo siempre puesto.
     c_ovl = os.path.join(OUT, 'c.ovl')
     rust_ovl = os.path.join(OUT, 'rust.ovl')
+    # La vista de carrera: el oraculo del paso 1 de M2b. En el front end no hay
+    # ninguna, asi que con un guion de menus los dos lados salen vacios y coinciden.
+    c_view = os.path.join(OUT, 'c.view')
+    rust_view = os.path.join(OUT, 'rust.view')
     t0 = time.time() - 1          # margen por la resolucion del mtime
 
     if solo != 'rust':
@@ -90,7 +94,7 @@ def main(argv):
         # sin esto no existe el escenario de carrera que pide el criterio de M1a. En el
         # port la bandera esta apagada por defecto (ver dc/src/host/unlock.c).
         run([C_EXE, '--script', script, '--ticks', ticks, '--unlock', '--dump', c_dump,
-             '--overlaydump', c_ovl],
+             '--overlaydump', c_ovl, '--viewdump', c_view],
             {}, os.path.join(OUT, 'c.log'), 'C')
         n = fresh(c_dump, t0, 'C')
         print(f'  {n} frames')
@@ -101,6 +105,7 @@ def main(argv):
             {'NFSHS_DIFF_SCRIPT': script,
              'NFSHS_DIFF_OUT': rust_dump,
              'NFSHS_DIFF_OVERLAY': rust_ovl,
+             'NFSHS_DIFF_VIEW': rust_view,
              'NFSHS_FRAMESRC': '1',
              'TICKS': ticks},
             os.path.join(OUT, 'rust.log'), 'Rust')
@@ -117,7 +122,11 @@ def main(argv):
     cmpovl = os.path.join(ROOT, 'dc', 'test', 'diff', 'cmpovl.py')
     rc2 = subprocess.run([sys.executable, '-I', cmpovl, c_ovl, rust_ovl],
                          cwd=ROOT).returncode
-    return rc or rc2
+    print('\nvista de carrera:')
+    cmpview = os.path.join(ROOT, 'dc', 'test', 'diff', 'cmpview.py')
+    rc3 = subprocess.run([sys.executable, '-I', cmpview, c_view, rust_view],
+                         cwd=ROOT).returncode
+    return rc or rc2 or rc3
 
 
 sys.exit(main(sys.argv[1:]))

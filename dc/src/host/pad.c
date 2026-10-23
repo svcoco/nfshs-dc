@@ -188,11 +188,15 @@ void host_frame_top(GameHost *h, Cpu *c)
         h->overlay_max = h->overlay.n;
 #if PS1_DIAG
     overlay_dump_frame(h);
+    view_dump_frame(h);
 #endif
     host_build_textures(h);
     if (h->on_draw != NULL)
         h->on_draw(h);
     overlay_reset(&h->overlay);
+    /* Las vistas de carrera tambien son de UN frame: el renderer ya las ha consumido
+     * en on_draw. */
+    h->views_n = 0;
     /* fin del guion: parada ordenada, para que el arnes imprima su informe */
     if (h->pad_end != 0u && h->frames >= h->pad_end)
         c->tick_limit = 0;

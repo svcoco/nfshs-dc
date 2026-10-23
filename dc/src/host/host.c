@@ -329,6 +329,11 @@ void host_report(const GameHost *h, const Cpu *c)
            (unsigned long long)h->fields, (unsigned long long)h->frames);
     printf("  modo:                      %s\n",
            h->mode == HOST_RACE ? "carrera" : "front end");
+    if (h->race_views != 0u)
+        printf("  trozos de pista por vista: media %.1f, maximo %u (%llu vistas)\n",
+               (double)h->race_chunks_sum / (double)h->race_views,
+               (unsigned)h->race_chunks_max,
+               (unsigned long long)h->race_views);
     printf("  Font_TextXY atendidas:     %llu\n",
            (unsigned long long)h->views_fonttext);
     printf("  dibujado capturado:        %llu (en marco anidado)\n",

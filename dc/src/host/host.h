@@ -65,6 +65,26 @@ typedef struct {
     int      implemented;    /* 1 si algun modulo del host la atendio */
 } HleFunc;
 
+/* Una vista de carrera tal y como el juego la deja preparada (M2b, paso 1).
+ *
+ * Es **todo** lo que el renderer necesita del juego, porque el juego no construye la
+ * malla del mundo en su RAM: solo dice donde esta la camara y que bloques de pista se
+ * ven, con que nivel de detalle. La malla vive en el GRP y se hornea en el PC
+ * (docs/hitos/M2b.md). */
+#define VIEWS_MAX        2u    /* un jugador; dos en M5 */
+#define VIEW_CHUNKS_MAX 64u    /* lo que cabe en la lista del juego */
+
+typedef struct {
+    uint32_t player;
+    int16_t  rect[4];          /* recorte relativo al de la vista 0, y su tamano */
+    int32_t  camera_pos[3];
+    int32_t  camera_rot[9];    /* matriz 3x3, por filas */
+    uint32_t projection;
+    uint16_t chunks_n;
+    int16_t  chunk[VIEW_CHUNKS_MAX];     /* bloque de pista; negativo = hueco */
+    uint16_t detail[VIEW_CHUNKS_MAX];    /* nivel de detalle que pide el juego */
+} RaceView;
+
 typedef struct GameHost {
     Ps1Host  iface;          /* lo que ve ps1rt; `self` apunta a este struct */
     HleFunc  hle[HOST_HLE_MAX];
@@ -135,6 +155,7 @@ typedef struct GameHost {
 #if PS1_DIAG
     FILE    *dump;
     FILE    *ovl_dump;
+    FILE    *view_dump;
 #endif
     uint64_t dump_frames;
     uint64_t pad_writes;
@@ -160,7 +181,16 @@ typedef struct GameHost {
     TexCache texcache;
     uint16_t *tex_buf;
     uint32_t  tex_cap;          /* en texeles */
-    uint32_t race_chunks;     /* trozos de pista que la ultima vista decidio dibujar */
+    /* Las vistas de carrera preparadas en el frame en curso. */
+    RaceView view[VIEWS_MAX];
+    uint32_t views_n;
+
+    /* Trozos de pista que cada vista decide dibujar. Es la cifra que dimensiona M2b:
+     * el juego los elige, el PVR los tendra que transformar y pintar. */
+    uint32_t race_chunks;     /* los de la ultima vista */
+    uint32_t race_chunks_max;
+    uint64_t race_chunks_sum;
+    uint64_t race_views;      /* cuantas vistas de carrera se han preparado */
     uint64_t fields;          /* campos de video de 60 Hz transcurridos */
     uint64_t last_top;        /* reloj en la frontera de frame anterior */
     uint64_t frames;          /* frames del juego (frame_top), la clave del volcado */
@@ -227,6 +257,12 @@ int  pad_load_script(GameHost *h, const char *path);
 int  overlay_dump_open(GameHost *h, const char *path);
 void overlay_dump_frame(GameHost *h);
 void overlay_dump_close(GameHost *h);
+
+/* Volcado de la VISTA DE CARRERA por frame: el oraculo del paso 1 de M2b. La referencia
+ * escribe el mismo formato con NFSHS_DIFF_VIEW. */
+int  view_dump_open(GameHost *h, const char *path);
+void view_dump_frame(GameHost *h);
+void view_dump_close(GameHost *h);
 
 /* Volcado del estado por frame (ver dump.c para el formato). */
 int  dump_open(GameHost *h, const char *path);

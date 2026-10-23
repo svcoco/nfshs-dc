@@ -35,6 +35,10 @@ static SpuStub  spu;
 static uint64_t t_start;
 static uint64_t last_report_frame;
 static uint64_t last_report_ms;
+/* Cuando y en que frame empezo la carrera, para poder dar sus fps por separado: el
+   front end y la carrera cuestan cosas muy distintas y una media conjunta no dice
+   nada util. */
+static uint64_t race_ms0, race_frame0;
 
 /* ---- entrada: mando de Dreamcast -> botones de PS1 ----
  *
@@ -67,7 +71,17 @@ static uint16_t read_pad(void)
  * latido en pantalla: sin el no hay forma de saber si avanza o se colgo. */
 static void on_frame(GameHost *h)
 {
-    h->pad_buttons[0] = read_pad();
+    /* Con un guion cargado manda el guion: si el mando se leyera aqui, entre paso y
+     * paso del guion dejaria los botones a 0 y se perderia el "mantener hasta la
+     * linea siguiente" (pad_write solo escribe en los frames que tienen paso). */
+    if (h->mode == HOST_RACE && race_frame0 == 0u) {
+        race_frame0 = h->frames;
+        race_ms0 = timer_ms_gettime64() - t_start;
+        printf("--- CARRERA desde el frame %lu ---\n", (unsigned long)h->frames);
+    }
+
+    if (h->pad_steps_n == 0u)
+        h->pad_buttons[0] = read_pad();
 
     /* Los primeros frames se anuncian de uno en uno: lo que hay que saber antes que
      * el rendimiento es si el juego ARRANCA. Despues, cada 60 frames. */
@@ -141,11 +155,16 @@ static void *diag_thread(void *arg)
         printf("        opensync %lu  addbigsync %lu  readsync %lu  ultima HLE %#lx\n",
                (unsigned long)veces(0x800EB204u), (unsigned long)veces(0x800EB354u),
                (unsigned long)veces(0x800EB27Cu), (unsigned long)ultima_hle());
-        printf("        montaje[0]: handle %#lx  entradas %lu  tam %lu   next_handle %#lx\n",
+        printf("        montaje[0]: handle %#lx  entradas %lu   next_handle %#lx\n",
                (unsigned long)host.files.mounts[0].handle,
                (unsigned long)host.files.mounts[0].n,
-               (unsigned long)host.files.mounts[0].size,
                (unsigned long)host.files.next_handle);
+        /* host.mode pasa a carrera en SIM_MAINGAMELOOP (views.c) y player_views
+           cuenta las vistas 3D pedidas: juntos dicen si la carrera arranco. */
+        printf("        modo: %s   vistas 3D %lu   guion %lu/%lu\n",
+               host.mode == HOST_RACE ? "CARRERA" : "front end",
+               (unsigned long)host.player_views,
+               (unsigned long)host.pad_at, (unsigned long)host.pad_steps_n);
         prev_calls = cpu.calls;
     }
     return NULL;
@@ -258,6 +277,15 @@ int main(int argc, char **argv)
 
     host_attach(&host, &cpu);
 
+    /* Guion de entrada opcional. Si el disco trae uno, el juego se conduce solo hasta
+     * donde diga; si no, manda el mando. Es como se prueba la logica de carrera sin
+     * depender de que alguien navegue los menus a mano. */
+    if (pad_load_script(&host, GAMEDATA "/SCRIPT.TXT"))
+        printf("guion de entrada: %lu pasos, fin en el frame %lu\n",
+               (unsigned long)host.pad_steps_n, (unsigned long)host.pad_end);
+    else
+        printf("sin guion en el disco: manda el mando\n");
+
     printf("%lu funciones en la lista HLE\n", (unsigned long)host.hle_n);
     printf("entrando por %#lx\n\n", (unsigned long)ADDR_MAIN);
 
@@ -280,6 +308,8 @@ int main(int argc, char **argv)
     diag_corriendo = 0;
     ms = timer_ms_gettime64() - t_start;
 
+    host_report(&host, &cpu);
+
     printf("\n=== %lu frames en %lu ms ===\n",
            (unsigned long)host.frames, (unsigned long)ms);
     if (ms != 0u && host.frames != 0u)
@@ -287,7 +317,18 @@ int main(int argc, char **argv)
                (unsigned long)(host.frames * 1000u / ms),
                (unsigned long)((host.frames * 100000u / ms) % 100u),
                (unsigned long)(ms / host.frames));
-    host_report(&host, &cpu);
+    /* Lo que de verdad pide M1b: los fps de la CARRERA, sin la carga inicial del
+       GD-ROM ni los menus, que cuestan algo muy distinto. */
+    if (race_frame0 != 0u && ms > race_ms0) {
+        uint64_t rf = host.frames - race_frame0;
+        uint64_t rms = ms - race_ms0;
+        printf("    carrera: %lu frames en %lu ms = %lu.%02lu fps\n",
+               (unsigned long)rf, (unsigned long)rms,
+               (unsigned long)(rf * 1000u / rms),
+               (unsigned long)((rf * 100000u / rms) % 100u));
+    } else {
+        printf("    no se llego a la carrera\n");
+    }
     esperar_start();
     return 0;
 }

@@ -20,9 +20,10 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Lectura del guion de entrada: solo para el test diferencial. PAD_NAMES, name_bit
- * y parse_buttons no los usa nadie mas, asi que entran en el mismo guardado. */
-#if PS1_DIAG
+/* Lectura del guion de entrada. NO va bajo PS1_DIAG: solo LEE un archivo, y en
+ * Dreamcast es lo que permite llevar al juego hasta una carrera sin manos, que es
+ * como se prueba que la logica de carrera avanza. PS1_DIAG cubre lo que ESCRIBE
+ * archivos (el volcado por frame y la tabla de llamadas), que en un GD-ROM no cabe. */
 
 /* Bits del mando digital de PS1, en el orden del hardware. */
 static const struct {
@@ -140,8 +141,6 @@ int pad_load_script(GameHost *h, const char *path)
     fclose(f);
     return 1;
 }
-#endif /* PS1_DIAG */
-
 /* Frontera de frame del juego: se cuenta, se aplica la entrada y se vuelca el estado.
  * La referencia hace estas tres cosas en su frame_top, y por eso aqui tambien. */
 void host_frame_top(GameHost *h, Cpu *c)

@@ -9,6 +9,7 @@
 #
 #   mkdisc.sh --elf dc/build/dc/nfshs.elf --data gamedata --out dc/build/dc/disc
 #   mkdisc.sh ... --minimal      solo lo que la ejecucion medida toca (~90 MB)
+#   mkdisc.sh ... --script dc/test/diff/scripts/into_race.txt   entrada guionizada
 #
 # ---- por que la estructura es esta (ver docs/hitos/M1b.md) ----
 #
@@ -24,7 +25,7 @@
 # GDI las exige.
 set -eu
 
-ELF=""; DATA="gamedata"; OUT=""; MINIMAL=0
+ELF=""; DATA="gamedata"; OUT=""; MINIMAL=0; SCRIPT=""
 KOS_BASE="${KOS_BASE:-/opt/toolchains/dc/kos}"
 TRACK3_LBA=45000
 
@@ -33,6 +34,7 @@ while [ $# -gt 0 ]; do
         --elf)     ELF=$2; shift 2 ;;
         --data)    DATA=$2; shift 2 ;;
         --out)     OUT=$2; shift 2 ;;
+        --script)  SCRIPT=$2; shift 2 ;;
         --minimal) MINIMAL=1; shift ;;
         *) echo "opcion desconocida: $1" >&2; exit 2 ;;
     esac
@@ -62,6 +64,9 @@ echo "+ IP.BIN"
 echo "+ pista 3 (datos)"
 set -- -as mkisofs -C "0,$TRACK3_LBA" -G "$TMP/IP.BIN" -R -l -m "Need for Speed*" -m "MOVIES" -o "$OUT/track03.iso" \
        -graft-points "/1ST_READ.BIN=$TMP/1ST_READ.BIN"
+
+# Guion de entrada opcional: el juego lo busca en /cd/SCRIPT.TXT y se conduce solo.
+[ -n "$SCRIPT" ] && set -- "$@" "/SCRIPT.TXT=$SCRIPT"
 
 if [ "$MINIMAL" -eq 1 ]; then
     for f in NFS4.EXE FRONT.BIN ZZZFE.VIV ZZENGL.VIV ZZZZAMUS.VIV ZZZMSLKH.VIV \

@@ -10,12 +10,13 @@ de forma nativa con el PowerVR**.
 Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación como en los
 mensajes. Los identificadores de código van en inglés.
 
-Última actualización: 2026-10-19. Estado: **M0 y M1a cerrados. M1b casi cerrado: el
-front end de NFS High Stakes **corre en Dreamcast a 69–78 fps** (2 844 frames, 0 fallos
-de archivo, leyendo del GD-ROM), con `ps1rt` pasando **227/227** pruebas en SH-4 y el
-código generado en **3,43 MB de `.text`** con `-Os` (sin overlays). Falta: la lógica de
-carrera y **arrancar con BIOS real** (hoy solo con REIOS), que es lo que bloquea probar
-en hardware.**
+Última actualización: 2026-10-23. Estado: **M0 y M1a cerrados. En M1b: el front end de
+NFS High Stakes **corre en Dreamcast a 69–78 fps** (leyendo del GD-ROM, 0 fallos de
+archivo), `ps1rt` pasa **227/227** en SH-4 y el código generado ocupa **3,43 MB** con
+`-Os` (sin overlays). **La carrera entra pero no simula**, y tampoco en x86: le falta el
+trozo de lógica del manejador de `Render_RenderPlayerView` que M1a aparcó (detalle y
+medidas en `docs/hitos/M1b.md`). También pendiente: **arrancar con BIOS real**, hoy solo
+con REIOS, que es lo que bloquea el hardware.**
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y

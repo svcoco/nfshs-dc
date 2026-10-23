@@ -427,6 +427,80 @@ Y una del entorno, no del codigo: el `emu.cfg` de Flycast tenia **`Dynarec.Enabl
 o sea interpretando el SH-4. Con eso el juego iba a ~150 000 ticks/s y no llegaba a
 ningun frame. El guion de pruebas lo fuerza con `-config config:Dynarec.Enabled=yes`.
 
+## 4quinquies. La carrera: entra, pero NO simula (2026-10-23)
+
+El guion de entrada ya funciona en Dreamcast (`pad_load_script` sale de `PS1_DIAG`, que
+cubre lo que **escribe** archivos; leer un guion del disco esta bien), y `mkdisc.sh
+--script` lo mete en el disco como `/cd/SCRIPT.TXT`. Con `into_race.txt` el juego se
+conduce solo hasta una carrera.
+
+**Lo bueno: el Dreamcast hace exactamente lo mismo que el mismo codigo en x86.** Con el
+mismo guion y 900 frames:
+
+| | x86 | Dreamcast |
+|---|---|---|
+| ticks | 13 986 655 | 13 986 654 |
+| llamadas al host | 156 632 | 156 631 |
+| entradas al interprete | **21 378** | **21 378** |
+| aperturas | 102 ok / 3 fallidas | 102 ok / 3 fallidas |
+| BIGF montados | 3 | 3 |
+| ultimo que falto | `zTr06.trf` | `zTr06.trf` |
+| vistas 3D pedidas | 3 | 3 |
+| modo final | carrera | carrera |
+
+(La diferencia de 1 en ticks y llamadas es el muestreo del hilo de diagnostico, que lee
+un instante antes del final.)
+
+**Lo malo: la carrera no avanza, y tampoco en x86.** Comparando los hashes de pagina del
+volcado por frame contra la **referencia Rust**, con el guion alargado a 5 000 frames:
+
+| frames | nuestro port | referencia Rust |
+|---|---|---|
+| 100-110 (front end) | 128 paginas, **21 361 ticks** | 128 paginas, **21 361 ticks** |
+| 228-238 (entra en carrera) | 380 paginas, 4 598 503 ticks | 492 paginas, 4 619 999 ticks |
+| 400-410 | **0 paginas, 20 ticks** | 242 paginas, 27 471 ticks |
+| 1000-1010 | **0 paginas, 20 ticks** | 213 paginas, 31 211 ticks |
+| 3000-3010 | **0 paginas, 20 ticks** | 306 paginas, 48 406 ticks |
+| ticks al frame 5000 | 13 994 854 | **33 978 555** |
+
+En el front end el port y la referencia son **identicos hasta el tick**. En cuanto entra
+en carrera, el port se congela: 0 paginas de RAM cambian y gasta 2 ticks por frame. La
+referencia sigue simulando a ~3 000 ticks por frame.
+
+**La causa es la deuda que M1a dejo anotada**, y resulta ser mas grave de lo que parecia.
+`Render_RenderPlayerView` (0x800B4024) en nuestro host es un contador vacio:
+
+```c
+case 0x800B4024u:
+    h->player_views++;
+    *ret = 0;
+    return 1;
+```
+
+M1a lo dio por bueno porque esas llamadas «son la grabacion de geometria que M2b y M2c
+escriben de todas formas». La medida dice que **no todas lo son**: el manejador de la
+referencia empieza con lo que su propio comentario llama *game logic the original runs
+while rendering*:
+
+```rust
+c.m.w32(RENDER_VIEW, a0);  c.m.w32(RENDER_VIEW + 4, a1);
+c.call_nested(RENDER_START_WORLD_VIEW, &[a0]);   // camara, niebla, entorno -> GTE
+c.call_nested(SETUP_BUILD_MATRICES, ...);
+c.call_nested(DRAWW_WORLD_SETUP_MATRIX, ...);
+let n = c.call_nested(SETUP_CHUNK_BUILD_LIST, &[RENDER_VIEW]);
+c.m.w32(CHUNK_BUILD_COUNT, n);
+```
+
+Eso son **tres escrituras y cuatro llamadas anidadas**. Lo que viene despues
+(`record_objects`, los destellos de las farolas) si es grabacion y si es M2b/M2c. La
+pieza que hace falta, `ps1_call_nested`, **ya existe** y el host ya la usa en
+`showroom.c` y `views.c`.
+
+**Consecuencia para el hito:** el criterio de salida de M1b dice «el front end **y la
+logica de carrera** avanzan sin cuelgues». El front end si; la carrera **entra y se
+queda quieta**, y no por culpa del Dreamcast. O se porta ese trozo del manejador, o el
+criterio de la carrera se mueve a M2b. Es decision de Jorge.
+
 ## 5. Lo que no se mide aqui
 
 El **fps** no es criterio de M1b. El objetivo de 30 fps sostenidos (CLAUDE.md §3) se mide

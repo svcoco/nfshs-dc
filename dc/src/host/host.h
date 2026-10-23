@@ -195,10 +195,11 @@ void pad_write(GameHost *h, Cpu *c);
 void host_frame_top(GameHost *h, Cpu *c);
 #define RA_FLIP_PUT_DISP_ENV 0x800BF164u
 #define RA_MAIN_LOOP_YIELD   0x800B7AA4u
-#if PS1_DIAG
-/* Carga un guion de entrada; 0 si no pudo leerlo o no lo entiende. */
+/* Carga un guion de entrada; 0 si no pudo leerlo o no lo entiende. Sirve en las dos
+ * plataformas: en PC lo pasa --script y en Dreamcast sale del propio disco. */
 int  pad_load_script(GameHost *h, const char *path);
 
+#if PS1_DIAG
 /* Volcado del estado por frame (ver dump.c para el formato). */
 int  dump_open(GameHost *h, const char *path);
 void dump_frame(GameHost *h, const Cpu *c);

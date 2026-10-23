@@ -16,6 +16,7 @@
 #include "ps1rt.h"
 #include "files.h"
 #include "overlay.h"
+#include "texcache.h"
 
 #include <stdio.h>
 
@@ -151,6 +152,11 @@ typedef struct GameHost {
     Overlay  overlay;
     uint64_t overlay_unknown;   /* primitivas de GPU que no se saben grabar */
     uint32_t overlay_max;       /* el frame con mas cuadros */
+    /* Texturas convertidas de la VRAM de PS1 (M2a paso 3). El buffer de texeles
+     * lo pone la plataforma: en Dreamcast sera memoria del PVR. */
+    TexCache texcache;
+    uint16_t *tex_buf;
+    uint32_t  tex_cap;          /* en texeles */
     uint32_t race_chunks;     /* trozos de pista que la ultima vista decidio dibujar */
     uint64_t fields;          /* campos de video de 60 Hz transcurridos */
     uint64_t last_top;        /* reloj en la frontera de frame anterior */
@@ -195,6 +201,10 @@ uint32_t host_capture_prims(GameHost *h, Cpu *c, uint32_t addr);
 int  host_showroom_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 /* Rellena los buffers de libpad. Se llama en el frame_top, no en cada campo. */
 void pad_write(GameHost *h, Cpu *c);
+
+/* Pide a la cache las texturas que usa la lista de dibujo de este frame y convierte
+ * lo que falte. Se llama con la lista ya completa. */
+void host_build_textures(GameHost *h);
 
 /* Frontera de frame del juego, con la misma regla que la referencia:
  *   - front end: PutDispEnv del flip del motor, con ra == 0x800BF164

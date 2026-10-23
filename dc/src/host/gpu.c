@@ -63,6 +63,8 @@ int host_gpu_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
             for (i = 0; i < w; i++)
                 vram_put(h, x + i, y + j, col);
         h->vram_writes++;
+        /* lo reescrito tumba las texturas convertidas que lo usaban */
+        tex_dirty(&h->texcache, x, y, w, hh);
         *ret = 0;
         return 1;
     }
@@ -75,6 +77,7 @@ int host_gpu_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
                 p += 2u;
             }
         h->vram_writes++;
+        tex_dirty(&h->texcache, x, y, w, hh);
         *ret = 0;
         return 1;
     }
@@ -111,6 +114,8 @@ int host_gpu_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
             for (i = 0; i < w; i++)
                 vram_put(h, a1 + i, a2 + j, tmp[k++]);
         h->vram_writes++;
+        /* MoveImage escribe en el DESTINO, que es (a1, a2) */
+        tex_dirty(&h->texcache, a1, a2, w, hh);
         *ret = 0;
         return 1;
     }

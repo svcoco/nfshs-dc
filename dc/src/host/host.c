@@ -367,6 +367,14 @@ void host_report(const GameHost *h, const Cpu *c)
     printf("  combinaciones pagina+paleta: %u en total, %u a la vez en un frame%s\n",
            (unsigned)h->overlay.combos_n, (unsigned)h->overlay.frame_combos_max,
            h->overlay.combos_lost ? " (la tabla se lleno)" : "");
+    printf("  texturas: %u entradas, %u texeles vivos (pico %u de %u)\n",
+           (unsigned)h->texcache.n, (unsigned)h->texcache.texels,
+           (unsigned)h->texcache.pico_texels, (unsigned)h->tex_cap);
+    printf("  conversiones: %llu (%llu texeles), invalidadas %llu, sin sitio %llu\n",
+           (unsigned long long)h->texcache.conversiones,
+           (unsigned long long)h->texcache.texels_conv,
+           (unsigned long long)h->texcache.invalidadas,
+           (unsigned long long)h->texcache.sin_sitio);
     if (h->overlay.dropped || h->overlay_unknown)
         printf("  AVISO: %llu cuadros no cupieron, %llu primitivas sin grabar\n",
                (unsigned long long)h->overlay.dropped,

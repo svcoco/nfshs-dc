@@ -167,6 +167,71 @@ es **x1,25**. La regla que si se sostiene, y que es lo que la seccion 3 pide de 
 es **llevar el area de pantalla de PS1 a 640x480**. No cambia ninguna decision; cambia
 un factor que habria salido mal en el paso 4.
 
+## 3quater. Paso 3 hecho: la cache de texturas (2026-10-23)
+
+`dc/src/render/texcache.c`, portable. Convierte las paginas de 4 y 8 bits de la VRAM de
+PS1 (mas su paleta) a ARGB1555, que es lo que el PVR entiende sin shaders.
+
+### Lo que decidio el diseno, medido con `dc/tools/ovlstats.py`
+
+| En el peor frame del front end | |
+|---|---|
+| Guardando la **pagina entera** por combinacion | **6,75 MB** — no cabe en los 8 del PVR |
+| Guardando solo el **rectangulo que usan los UV** | **0,66 MB** |
+| Profundidad de las paginas | 8 bits (5 280 usos) y 4 bits (842); **ninguna de 16** |
+| Escrituras a la VRAM de PS1 | 6,6 por frame |
+
+De ahi las tres decisiones: se convierte el **rectangulo**, no la pagina; la cache
+**persiste entre frames** (la VRAM casi no cambia); y se invalida **por solape**, no en
+bloque.
+
+### Como asigna, y por que asi
+
+Asignador **por tope**: una vez convertida, una entrada no se mueve. El rectangulo del
+frame **no se acumula** entre frames —hacerlo crecia sin parar hasta desbordar— sino que
+se recalcula y solo se reconvierte si lo que pide el frame no cabe en lo ya convertido.
+Cuando el buffer se llena se vacia entero y se empieza de cero, que con una interfaz
+estatica pasa muy de vez en cuando.
+
+### Medido en 120 frames
+
+| | |
+|---|---|
+| Conversiones en toda la ejecucion | **63** (438 976 texeles) |
+| Pico de texeles vivos | **438 976** (0,84 MB) |
+| Invalidaciones por escritura a la VRAM | 0 |
+| Veces que no cupo algo | 0 |
+
+63 conversiones para 63 texturas distintas: **cada una se convierte una sola vez**. En
+SH-4 eso quiere decir que el coste es del arranque, no del frame.
+
+Las 0 invalidaciones no son un fallo: el juego escribe en los buffers de pantalla
+(x < 512) y las paginas de textura estan a la derecha, asi que no se pisan.
+
+### La validacion: verlo
+
+Este paso no tiene oraculo. Para poder mirarlo hay dos herramientas nuevas:
+
+- `dc/tools/texview.py` compone las texturas convertidas en una imagen.
+- `dc/src/platform/pc/raster.c` es un **rasterizador por software SOLO del arnes de
+  PC** —en Dreamcast dibuja el PVR— que pinta la lista de dibujo con las texturas ya
+  convertidas. `--shot <frame> <archivo.ppm>`, y `dc/tools/ppm2png.py` para verlo.
+
+Con eso el front end sale reconocible: el menu *game setup*, sus cuatro opciones, el
+icono, el texto de ayuda y la foto del coche, cada cosa en su sitio.
+
+**Y encontro algo que el PVR tambien va a necesitar: el orden.** La lista se guarda con
+el **ultimo dibujado primero**, porque los paquetes entran en la tabla de ordenacion por
+la cabeza. Dibujandola en orden de construccion solo se ve el texto sobre negro; hay que
+recorrerla del final al principio.
+
+### Un detalle que el PVR tendra que resolver
+
+PS1 marca con el bit STP los texeles que se mezclan en las primitivas semitransparentes,
+y la referencia los guarda como alfa 128. ARGB1555 solo tiene **un bit** de alfa, asi que
+esa distincion no cabe en el formato: habra que resolverla en el paso 4, por lista de
+dibujo o por modo de mezcla.
+
 ## 4. Lo que ya esta hecho y se aprovecha
 
 - `host_capture_prims` (views.c) **ya corre las rutinas de dibujo del front end en un

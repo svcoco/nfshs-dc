@@ -388,6 +388,25 @@ void overlay_record_packets(GameHost *h, Cpu *c, uint32_t start, uint32_t end)
     h->overlay.draw_mode = entrada;
 }
 
+/* Recorre la lista del frame y le dice a la cache que texturas hacen falta; luego
+ * convierte lo que no este vigente. Sin buffer de texeles no hace nada, que es el caso
+ * del host de PC cuando solo se quiere grabar. */
+void host_build_textures(GameHost *h)
+{
+    uint32_t i;
+
+    if (h->tex_buf == NULL || h->tex_cap == 0u)
+        return;
+    tex_begin_frame(&h->texcache);
+    for (i = 0; i < h->overlay.n; i++) {
+        const OverlayQuad *q = &h->overlay.quad[i];
+
+        if (q->kind == OVL_QUAD && q->has_tex)
+            tex_need(&h->texcache, q->tex.tpage, q->tex.clut, q->tex.uv);
+    }
+    tex_build(&h->texcache, h->vram, h->tex_buf, h->tex_cap);
+}
+
 #if PS1_DIAG
 /* ---- volcado para el oraculo ----
  *

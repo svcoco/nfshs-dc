@@ -13,7 +13,7 @@ BUILD  := build
 #   export PATH="/c/msys64/ucrt64/bin:/c/msys64/usr/bin:$PATH"
 CC       := gcc
 CFLAGS   ?= -std=c11 -O2 -fwrapv -fno-strict-aliasing -Wall -Wextra
-CPPFLAGS += -Isrc/ps1rt -I$(GEN)
+CPPFLAGS += -Isrc/ps1rt -Isrc/render -I$(GEN)
 # el codigo generado dispara estos avisos por construccion, no son problemas reales
 GENFLAGS := -Wno-unused-label -Wno-unused-variable -Wno-unused-but-set-variable             -Wno-unused-value -Wno-unused-parameter
 
@@ -22,6 +22,8 @@ GENFLAGS := -Wno-unused-label -Wno-unused-variable -Wno-unused-but-set-variable 
 HLE_TABLE  := $(GEN)/hle_table.c
 
 PS1RT_SRCS := $(wildcard src/ps1rt/*.c)
+# PORTABLE igual que ps1rt y host: la cache de texturas no incluye cabeceras de KOS
+RENDER_SRCS := $(wildcard src/render/*.c)
 HOST_SRCS  := $(wildcard src/host/*.c)
 PC_SRCS    := $(wildcard src/platform/pc/*.c)
 CPPFLAGS   += -Isrc/host
@@ -82,7 +84,7 @@ parity:
 test: $(BUILD)/run_tests
 	@$(BUILD)/run_tests
 
-$(BUILD)/run_tests: test/unit/run_tests.c $(PS1RT_SRCS)
+$(BUILD)/run_tests: test/unit/run_tests.c $(PS1RT_SRCS) $(RENDER_SRCS)
 	@mkdir -p $(BUILD) $(TMPDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
 
@@ -98,7 +100,7 @@ pc: $(BUILD)/nfshs-dc
 # Enlaza el C generado con ps1rt, el host y el arnes de x86.
 $(BUILD)/nfshs-dc: genobj $(HLE_TABLE) $(PS1RT_SRCS) $(HOST_SRCS) $(PC_SRCS)
 	@mkdir -p $(BUILD) $(TMPDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(PS1RT_SRCS) $(HOST_SRCS) $(PC_SRCS) $(HLE_TABLE) $(BUILD)/gen/*.o
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(PS1RT_SRCS) $(RENDER_SRCS) $(HOST_SRCS) $(PC_SRCS) $(HLE_TABLE) $(BUILD)/gen/*.o
 
 # ---------------------------------------------------------------- Dreamcast (M1b)
 #
@@ -154,7 +156,7 @@ dc-size: dc-check $(GEN)/parts.mk
 DC_HOST_SRCS := $(filter-out src/host/dump.c,$(HOST_SRCS))
 # test_main.c es el arranque del ELF de PRUEBAS (dc-test), no el del juego.
 DC_PLAT_SRCS := $(filter-out src/platform/dc/test_main.c,$(wildcard src/platform/dc/*.c))
-DC_SRCS      := $(PS1RT_SRCS) $(DC_HOST_SRCS) $(HLE_TABLE) $(DC_PLAT_SRCS)
+DC_SRCS      := $(PS1RT_SRCS) $(RENDER_SRCS) $(DC_HOST_SRCS) $(HLE_TABLE) $(DC_PLAT_SRCS)
 DC_OBJS      := $(patsubst %.c,$(DCBUILD)/o/%.o,$(DC_SRCS))
 
 dc: $(DCBUILD)/nfshs.elf

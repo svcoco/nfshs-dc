@@ -10,6 +10,7 @@
 #include "addr.h"
 #include "funcs.h"          /* dc/gen: ps1_dispatch, ps1_dispatch_at */
 #include "host.h"
+#include "raster.h"
 #include "spu.h"
 #include "ps1rt.h"
 
@@ -18,6 +19,30 @@
 #include <string.h>
 
 static uint8_t ram[PS1_RAM_SIZE + PS1_RAM_PAD];
+/* Buffer de texeles de la cache. Medido: el peor frame del front end son ~345 000
+ * texeles (0,66 MB); con medio millon sobra. En Dreamcast esto sera memoria del
+ * PVR y lo pondra la plataforma. */
+static uint16_t texbuf[512u * 1024u];
+
+/* --shot: el frame que hay que dibujar y donde dejarlo. Se hace desde el gancho por
+ * frame porque es el unico punto en que la lista de dibujo esta completa: justo
+ * despues se vacia para el frame siguiente. */
+static uint64_t shot_frame;
+static const char *shot_file;
+
+static void pc_on_frame(GameHost *h)
+{
+    if (shot_file == NULL || h->frames != shot_frame)
+        return;
+    host_build_textures(h);
+    if (raster_dump(h, texbuf, shot_file, h->display[2], h->display[3]))
+        printf("frame %llu dibujado: %s (%ux%u)\n",
+               (unsigned long long)h->frames, shot_file,
+               (unsigned)h->display[2], (unsigned)h->display[3]);
+    else
+        fprintf(stderr, "no pude dibujar el frame %llu\n",
+                (unsigned long long)h->frames);
+}
 static Cpu cpu;
 static GameHost host;
 static SpuStub spu;
@@ -80,6 +105,7 @@ int main(int argc, char **argv)
     const char *script = NULL;
     const char *dump_path = NULL;
     const char *ovl_path = NULL;
+    const char *tex_path = NULL;
     const char *counts_path = NULL;
     uint64_t win_lo = 0, win_hi = 0, ram_at_call = 0, frame_dump_at = 0;
     const char *frame_dump_path = NULL;
@@ -122,6 +148,12 @@ int main(int argc, char **argv)
             dump_path = argv[++i];
         else if (!strcmp(argv[i], "--overlaydump") && i + 1 < argc)
             ovl_path = argv[++i];
+        else if (!strcmp(argv[i], "--texdump") && i + 1 < argc)
+            tex_path = argv[++i];
+        else if (!strcmp(argv[i], "--shot") && i + 2 < argc) {
+            shot_frame = strtoull(argv[++i], NULL, 0);
+            shot_file = argv[++i];
+        }
         else if (!strcmp(argv[i], "--callcount") && i + 1 < argc)
             counts_path = argv[++i];
         else if (!strcmp(argv[i], "--ramdump") && i + 2 < argc) {
@@ -184,6 +216,9 @@ int main(int argc, char **argv)
     host.textlog = textlog;
     host.unlock = unlock;
     host.files.log = filelog;
+    host.tex_buf = texbuf;
+    host.poll_input = pc_on_frame;
+    host.tex_cap = (uint32_t)(sizeof texbuf / sizeof texbuf[0]);
     host.win_lo = win_lo;
     host.win_hi = win_hi;
     host.ram_at_call = ram_at_call;
@@ -228,6 +263,39 @@ int main(int argc, char **argv)
     overlay_dump_close(&host);
     if (counts_path != NULL && !host_call_counts(&host, counts_path))
         fprintf(stderr, "no pude escribir la tabla de llamadas %s\n", counts_path);
+    if (tex_path != NULL) {
+        /* Las texturas convertidas del ultimo frame, para mirarlas: este paso no tiene
+         * oraculo y la unica validacion posible es ver si se parecen a lo que deberian.
+         * Formato: "NFST" u32 n, y por entrada tpage, clut, u0, v0, w, h y w*h texeles
+         * en ARGB1555. dc/tools/texview.py las compone en una imagen. */
+        FILE *tf = fopen(tex_path, "wb");
+
+        if (tf == NULL) {
+            fprintf(stderr, "no pude abrir %s\n", tex_path);
+        } else {
+            uint32_t k, vivas = 0;
+
+            for (k = 0; k < host.texcache.n; k++)
+                if (host.texcache.e[k].lista)
+                    vivas++;
+            fwrite("NFST", 1, 4, tf);
+            fwrite(&vivas, 4, 1, tf);
+            for (k = 0; k < host.texcache.n; k++) {
+                const TexEntry *e = &host.texcache.e[k];
+                uint16_t cab[6];
+
+                if (!e->lista)
+                    continue;
+                cab[0] = e->tpage; cab[1] = e->clut;
+                cab[2] = e->u0;    cab[3] = e->v0;
+                cab[4] = e->w;     cab[5] = e->h;
+                fwrite(cab, 2, 6, tf);
+                fwrite(texbuf + e->offset, 2, (size_t)e->w * e->h, tf);
+            }
+            fclose(tf);
+            printf("texturas volcadas: %u en %s\n", (unsigned)vivas, tex_path);
+        }
+    }
     host_report(&host, &cpu);
     printf("\n=== bus de hardware (stub del SPU) ===\n");
     printf("  lecturas / escrituras:     %llu / %llu\n",

@@ -181,8 +181,19 @@ $(DCBUILD)/nfshs.elf: dc-check dc-gen $(DC_OBJS)
 	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o -o $@
 	@sh-elf-size $@
 
+# Horneado de pistas (M2b paso 2): GRP + PSH -> un .TRK que el SH-4 dibuja sin parsear
+# nada. La herramienta vive en dc/tools/bake/ y se compila dentro de la referencia Rust,
+# porque reutiliza src/formats (CLAUDE.md seccion 3).
+#   make bake            las 40 pistas
+#   make bake TRACK=ZTR00  solo esa
+BAKED  := $(BUILD)/baked
+NFSHS  := $(ROOT)/target/release/nfshs
+TRACK  ?=
+
 bake:
-	@echo "Pendiente: M2." && exit 1
+	@test -x "$(NFSHS)" || test -x "$(NFSHS).exe" || 	  { echo "falta la referencia: cargo build --release en la raiz"; exit 1; }
+	@mkdir -p $(BAKED)
+	@for g in $(ROOT)/gamedata/$(if $(TRACK),$(TRACK),*).GRP; do 	  n=$$(basename $$g .GRP); 	  psh=$(ROOT)/gamedata/$${n}0.PSH; 	  test -f $$psh || psh=$$(ls $(ROOT)/gamedata/$${n}*.PSH 2>/dev/null | head -1); 	  test -f "$$psh" || { echo "$$n: sin PSH, me lo salto"; continue; }; 	  $(NFSHS) bake-track $$g $$psh $(BAKED)/$$n.TRK 2>&1 | grep -v INFO || exit 1; 	done
 
 disc:
 	@echo "Pendiente: M2." && exit 1

@@ -5,6 +5,11 @@ mod headless;
 pub mod refcmp;
 pub mod soft;
 
+// The Dreamcast port's track bake. It lives under dc/ because it is the port's code
+// (CLAUDE.md section 8), and it is pulled in here so it can reuse src/formats.
+#[path = "../../dc/tools/bake/bake.rs"]
+mod bake;
+
 use crate::{app, assets, formats, game, opt, ps1, render};
 use anyhow::{Context as _, Result};
 use std::path::Path;
@@ -12,7 +17,7 @@ use std::path::Path;
 pub use headless::{front_end_play, screenshot};
 
 /// The commands [`run`] knows.
-pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car"];
+pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "bake-track", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car"];
 
 /// Run developer command `cmd` (`args` as on the command line); false if there is none.
 pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::RaceConfig) -> Result<bool> {
@@ -74,6 +79,8 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
         }
         "dump-psh" => dump_psh(Path::new(&args[2]), Path::new(&args[3]))?,
         "dump-track" => dump_track(&args[2], &args[3], Path::new(&args[4]), args.get(5).map(String::as_str))?,
+        // bake-track TRACK.GRP TRACK.PSH OUT.TRK: the Dreamcast port's track bake
+        "bake-track" => bake::bake(&args[2], &args[3], Path::new(&args[4]))?,
         "verify-decompress" => {
             // compare against reference outputs produced by tools/mipsemu.py (re/dec/<name>.bin)
             let (mut ok, mut bad) = (0, 0);

@@ -81,7 +81,7 @@ ya lo fija. **Las texturas de pista se hornean**; la cache de VRAM de M2a se que
 | # | Paso | Cierra con |
 |---|---|---|
 | 1 | **Captura de la vista** en el host de C: camara, matriz, proyeccion, rectangulo y lista de trozos | **Hecho (2026-10-23)**: la captura del port y la de la referencia **coinciden** en el guion de carrera |
-| 2 | **Horneado de la pista** (PC, Rust, reutilizando `src/formats`): GRP + PSH -> malla y texturas listas para el PVR | tamano del horneado y de su atlas, medidos |
+| 2 | **Horneado de la pista** (PC, Rust, reutilizando `src/formats`): GRP + PSH -> malla y texturas listas para el PVR | **Hecho (2026-10-23)**: tamano del horneado y de su atlas, medidos |
 | 3 | **Transformacion en el SH-4** (FTRV) y **recorte por plano cercano** | una pista en pantalla; ms/frame y triangulos medidos |
 | 4 | **El cielo** | el horizonte se ve |
 
@@ -137,3 +137,70 @@ hay que mirarlo.
 - **El orden.** La pista es opaca y va a la lista `OP` con Z-buffer, al reves que el 2D de
   M2a, que es el algoritmo del pintor en la lista `TR`. Son dos regimenes distintos en el
   mismo frame.
+
+## 5. Paso 2 hecho: el horneado (2026-10-23)
+
+`dc/tools/bake/bake.rs`, invocado como `nfshs bake-track` y desde `make -C dc bake`. Vive
+bajo `dc/` porque es codigo del port, y se compila dentro de la referencia Rust porque
+reutiliza `src/formats` (CLAUDE.md seccion 3); lo unico que toca de upstream son dos
+lineas en `src/dev/mod.rs`.
+
+### Que se decide en el PC y que no
+
+Todo lo que se puede resolver antes de arrancar, se resuelve:
+
+- **Las esquinas de UV**, con sus indicadores (`Trk_Material::uvFlag`: 0x10 voltea U, 0x40
+  voltea V, y luego 0x02 / 0x04 / 0x08 giran 90 / 180 / 270) ya aplicados y en el orden en
+  que `DrawW_DrawQuad` manda los puntos. El SH-4 solo mira un rectangulo y cuatro ranuras.
+- **Las texturas**, empaquetadas en un atlas y ya en ARGB1555 del PVR.
+- **La doble cara** (`Trk_Material` bit 0x10) y la **semitransparencia**, que en PS1 sale
+  de que la paleta de la forma tenga un color con STP, no de lo que diga el material.
+
+Y una cosa **no** se hornea, a proposito: **el color de vertice**. Sale de
+`Chunk_lightTable`, que vive en la RAM del juego y cambia con la pista, la variante y el
+clima, asi que cada vertice se queda con su **indice de sombra** y el port busca el color
+al dibujar. Es lo que mantiene la noche y la lluvia funcionando sin rehornear.
+
+### El formato
+
+Un archivo por pista y variante, todo little-endian:
+
+| Tramo | Contenido |
+|---|---|
+| cabecera | `"NFST"`, version, bloques, materiales, ancho y alto del atlas, vertices, cuadros, offset del atlas |
+| bloques | 44 bytes: origen `i32[3]` en 1/64 m y cinco pares (offset `u32`, cuenta `u16`): vertices y cuadros de suelo, cuadros lejanos, y vertices y cuadros de detalle |
+| materiales | 16 bytes: rectangulo en el atlas, `u8 corner[4]`, indicadores |
+| vertices | 8 bytes: `i16 x, y, z` en 1/64 m relativos al origen del bloque, `u8` indice de sombra |
+| cuadros | 10 bytes: `u16 v[4]` dentro del charco de SU bloque, `u16` material |
+| atlas | ARGB1555 |
+
+El horneado **se verifica a si mismo**: relee lo escrito y comprueba que cada tramo cae
+dentro del archivo, que todo indice de vertice cae dentro de su propio charco y que todo
+material existe. Un fallo de esos en el PC cuesta media hora; en el Dreamcast es una
+excepcion de direccion sin pista de donde viene.
+
+### Medido, las 40 pistas
+
+| | |
+|---|---|
+| Pistas horneadas sin error | **40 / 40** |
+| Bloques | 105 a 136 |
+| Vertices | ~21 000 a ~26 000 |
+| Cuadros | ~18 000 a ~24 000 |
+| Geometria | ~380 a 435 KB |
+| Atlas | **24 pistas en 1024x512 (1 MB)**, 16 en 1024x1024 (2 MB) |
+| Archivo entero | 1 375 a 2 497 KB |
+
+Con 2 MB de atlas en el peor caso, mas el 1 MB de la cache de texturas de M2a y los dos
+buffers de pantalla (1,2 MB), van ~4,2 MB de los 8 del PVR. Entra, pero M2c todavia tiene
+que meter coches y objetos: si aprieta, el atlas se puede partir en varios, porque la
+pista es opaca con Z-buffer y el orden de dibujo no importa.
+
+### Un intento que se midio y se tiro
+
+El empaquetador mete las formas **por orden de altura**, de mayor a menor, y las va
+poniendo en baldas. Intente mejorarlo llenando el resto de cada fila con la forma **mas
+ancha** que todavia cupiese, que es lo que suena bien. Medido sobre las 40 pistas, es
+**peor**: arrastra piezas anchas y bajas a baldas altas y desperdicia la altura, y las 40
+pasaban a necesitar 1024x1024 (600 a 977 filas) en vez de que 24 cupieran en 1024x512. El
+codigo lo cuenta para que nadie lo reintente.

@@ -514,7 +514,61 @@ el PVR es M2. Como presupuesto: de los 33 ms de un frame a 30 fps, la logica se 
 si M2b devuelve el 34 % de trabajo de la grabacion, esos 67 fps bajarian a ~44 antes de
 que el PVR dibuje nada. Medido en Flycast con dynarec, no en hardware.
 
-## 5. Lo que no se mide aqui## 5. Lo que no se mide aqui
+## 4sexies. CDI: arranca con la BIOS real (2026-10-23)
+
+El GDI solo arrancaba con REIOS. Con la BIOS real la consola reconocia el disco (leia el
+ID `T-00000` de nuestra IP.BIN) y se iba al menu. **Resuelto generando un CDI.**
+
+### Como se averiguo
+
+No adivinando: comparando con una imagen homebrew que **si** arranca con la BIOS real.
+`240pSuite.cdi` esta hecho con KOS, asi que sirve de patron exacto. De analizarla salio:
+
+| | |
+|---|---|
+| Su IP.BIN dice | `CD-ROM1/1`, no GD-ROM |
+| Su bootstrap (`0x300`-`0x7FF`) | **identico** al que genera nuestro `makeip`: el problema no era la IP.BIN |
+| Disposicion | 2 sesiones: pista 1 audio (150 de pregap + 302 sectores de 2352) y pista 2 de datos (150 + N, LBA **11702**) |
+| La cabecera del CDI | va al **final** del archivo; sus ultimos 8 bytes son la version y su tamano |
+
+### Lo que genera `mkdisc.sh --format cdi` (por omision)
+
+- `1ST_READ.BIN` **cifrado** con `scramble`, que es lo que pide arrancar desde CD (desde
+  GD-ROM va en claro).
+- IP.BIN con `-i CD-ROM1/1`.
+- ISO con `-C 0,11702`, porque los extents de ISO9660 son absolutos y la pista empieza ahi.
+- El contenedor lo escribe [`mkcdi.py`](../../dc/tools/mkdisc/mkcdi.py).
+
+Los sectores de datos van de **2048 bytes** a proposito. La plantilla usa 2336 (Mode 2
+Form 1), que obliga a calcular EDC y ECC por sector; con 2048 esa parte la pone quien
+graba el disco y la imagen es el ISO tal cual.
+
+**La trampa que costo dos intentos:** los campos del descriptor de pista se miden desde
+el **final del nombre del archivo**, que va dentro del propio descriptor. Con la base
+tomada desde el inicio del descriptor los valores caian 6 bytes tarde, la pista de datos
+quedaba mal declarada y la consola trataba el disco como **CD de audio**: salia el
+reproductor de CD de la BIOS. Se corrigio comparando la cabecera generada contra la de la
+imagen que si arrancaba, hasta que salieron identicas byte a byte.
+
+### Medido
+
+Con la BIOS real y el guion de carrera largo:
+
+| | GDI (REIOS) | CDI (BIOS real) |
+|---|---|---|
+| Carrera | 67 fps | **98-113 fps** |
+| Archivos | 102 ok / 3 fallidos | 102 ok / 3 fallidos |
+| BIGF montados | 3 | 3 |
+
+La diferencia de velocidad **no es del juego**: lo unico que cambia es como lee el disco.
+Leer un GD-ROM emulado sale bastante mas caro que leer una pista de datos de CD con
+sectores de 2048. Es una observacion, no una causa demostrada.
+
+**Lo que esto desbloquea:** un CDI con disposicion MIL-CD es lo que se graba en un CD-R
+para hardware real. Queda probarlo en una consola de verdad, que es lo unico que le falta
+a M1b.
+
+## 5. Lo que no se mide aqui
 
 El **fps** no es criterio de M1b. El objetivo de 30 fps sostenidos (CLAUDE.md §3) se mide
 en M3, cuando exista el renderer del PVR; en M1b el renderer no dibuja y el numero no

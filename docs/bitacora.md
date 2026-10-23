@@ -19,12 +19,15 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1a** Backend C + `ps1rt` en C, en x86 | Cerrado (2026-10-18) |
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
+| **M2b** La pista y el cielo en el PVR | Pasos 1 y 2 de 4 |
 | M2b, M2c, M3, M4, M5 | Sin empezar |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
 datos del disco y **dibuja el front end con el PVR a ~60 fps**, legible y completo: el
 menú *game setup*, sus opciones, la foto del coche y el texto de ayuda. La carrera
-ejecuta su lógica pero todavía no se dibuja: eso es M2b y M2c.
+ejecuta su lógica pero todavía no se dibuja: el port ya tiene la cámara y la lista de
+trozos de pista que el juego decide (M2b paso 1) y la pista horneada lista para el PVR
+(paso 2); falta transformarla y pintarla.
 
 ---
 
@@ -117,7 +120,7 @@ del CD).
 
 ---
 
-## M2a — El front end en pantalla (en curso)
+## M2a — El front end en pantalla (cerrado en emulador 2026-10-23)
 
 Primer hito **con imagen**. Criterio: front end navegable y legible en 480p y 480i.
 
@@ -128,6 +131,8 @@ Primer hito **con imagen**. Criterio: front end navegable y legible en 480p y 48
 | 3 | VRAM y paletas → texturas del PVR | **Hecho**, medido |
 | 4 | Dibujo 2D en el PVR | **Hecho**, el front end se ve en Dreamcast |
 | 5 | Ayudantes del HUD | **No hacen falta para el front end** (ver abajo) |
+
+Cerrado en emulador; el criterio de salida pide verlo en una tele en 480i.
 
 ### Paso 1: la grabación
 
@@ -242,6 +247,84 @@ correr y los **cuenta**, así que el primer guion que los toque lo dirá en el i
 
 ---
 
+## M2b — La pista y el cielo en el PVR (en curso)
+
+El hito que convierte el negro de la carrera en algo mirable.
+
+| # | Paso | Estado |
+|---|---|---|
+| 1 | Captura de la vista de carrera | **Hecho**, validado contra la referencia |
+| 2 | Horneado de la pista en el PC | **Hecho**, las 40 pistas |
+| 3 | Transformación en el SH-4 y dibujo en el PVR | En curso |
+| 4 | El cielo | |
+
+### El dimensionado, que cambió el planteamiento
+
+Medido antes de escribir nada, sobre 5 000 frames de carrera y el GRP de una pista:
+
+| | media | pico |
+|---|---|---|
+| Bloques de pista por vista | **8,4** | **18** |
+| Cuadros a pintar | ~1 180 | ~2 520 |
+| **Triángulos a pintar** | **~2 360** | **~5 040** |
+
+Un Dreamcast mueve del orden de 50 000 triángulos por frame a 60 Hz: el pico de la pista
+es el **10 %**. **El PVR no es el cuello**; lo será el SH-4, que tiene que transformar
+5 000–10 000 vértices por frame *además* de correr la lógica recompilada.
+
+Y la pista entera (18 046 cuadros, ~200 KB de caras) **cabe en RAM**: se carga al entrar y
+se queda. **No hace falta streaming**, que era el problema más caro que podía tener el
+hito.
+
+### Paso 1: la captura de la vista
+
+El juego **no construye la malla del mundo en su RAM**: solo deja preparada la cámara y
+dice qué bloques se ven y con qué nivel de detalle. Eso es todo lo que un renderer recibe
+de él, y ahora el port se lo queda (`RaceView` en `host.h`, llenada en `race_view_logic`).
+
+**Validado con oráculo**, igual que la grabación 2D: los dos lados vuelcan la vista por
+frame en el mismo formato (`NFSV`) y `dc/test/diff/cmpview.py` las compara campo a campo
+dentro de `make diff`.
+
+```
+vista de carrera:
+  C: 900 frames, referencia: 900 frames (900 en comun)
+OK: 669 vistas identicas en 900 frames
+```
+
+### Paso 2: el horneado de la pista
+
+`dc/tools/bake/bake.rs` (`make -C dc bake`) convierte GRP + PSH en un `.TRK` que el SH-4
+dibuja sin parsear nada. Vive bajo `dc/` porque es código del port y se compila dentro de
+la referencia Rust porque reutiliza `src/formats`; de upstream solo toca dos líneas.
+
+Se resuelve en el PC todo lo que se puede: las **esquinas de UV** con sus indicadores ya
+aplicados, las **texturas** en un atlas ARGB1555, la **doble cara** y la
+**semitransparencia** (que en PS1 sale de que la paleta de la forma tenga un color con
+STP, no de lo que diga el material).
+
+**El color de vértice no se hornea, a propósito.** Sale de `Chunk_lightTable`, que vive en
+la RAM del juego y cambia con la pista, la variante y el clima: cada vértice guarda su
+*índice de sombra* y el color se busca al dibujar. Es lo que mantiene noche y lluvia sin
+rehornear.
+
+El horneado **se verifica a sí mismo**: relee lo escrito y comprueba que cada índice de
+vértice cae en su propio charco y que todo material existe.
+
+| Medido, las 40 pistas | |
+|---|---|
+| Horneadas sin error | **40 / 40** |
+| Cuadros por pista | ~18 000 a 24 000 |
+| Geometría | 380–435 KB |
+| Atlas | **24 pistas en 1 MB**, 16 en 2 MB |
+| Archivo entero | 1 375 – 2 497 KB |
+
+En el peor caso van ~4,2 MB de los 8 del PVR entre atlas, caché de M2a y los dos buffers
+de pantalla. Entra, pero M2c todavía tiene que meter coches: si aprieta, el atlas se puede
+partir en varios, porque la pista es opaca con Z-buffer y el orden no importa.
+
+---
+
 ## Decisiones vigentes
 
 Las de `CLAUDE.md` §3 siguen en pie. Lo que ha cambiado o se ha precisado:
@@ -317,6 +400,8 @@ incompleta— los encontró el oráculo, no la lectura del código.
   las primitivas semitransparentes; ARGB1555 tiene **un solo bit** de alfa. Hoy se
   resuelve por modo de mezcla del cuadro entero, no por texel.
 - **Leer el front end en 480i.** Está probado el modo, no la legibilidad en una tele.
+- **Dos cuadros de menos** en los frames 126–130 del guion de carrera, los menús justo
+  antes de entrar: 239 contra 241 de la referencia. `front_end_120.txt` no llega ahí.
 - **M4:** factor de escala de las texturas, método y formato.
 - **Alcance:** si la primera versión incluye 2P y FMV.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.

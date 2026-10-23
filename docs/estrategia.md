@@ -79,10 +79,40 @@ enseñó que no se puede juzgar una de ellas sin medirla: parecía cosmética y 
 de una opción apagada por omisión, y si va a estar en el Dreamcast es una decisión de
 producto de M5, no de implementación.
 
-## El siguiente corte: M1b
+## Lo que se aprendió en M1b (cerrado en Flycast, 2026-10-23)
 
-M1b está **bloqueado por el toolchain** (no hay KallistiOS en la máquina, 2026-10-18), y su
-primera medición no es escribir plataforma, es **el tamaño del código**: en Dreamcast el
-`1ST_READ.BIN` se carga entero en RAM, así que cada byte de código quita RAM. La referencia
-medida en x86-64 es 7,59 MB con `-O2` y **3,93 MB con `-Os`**, y el número de SH-4 decide
-si hace falta trocear el código en overlays. Detalle en `docs/hitos/M1b.md`.
+Tres cosas, y ninguna era la que se esperaba.
+
+**El riesgo que daba miedo no existía.** El tamaño del código era el riesgo número uno
+—en Dreamcast el `1ST_READ.BIN` se carga entero en RAM— y salió en **3,43 MB con `-Os`**,
+un 8,5 % por debajo de x86-64 y dentro de la estimación de M0. No hacen falta overlays.
+Elegir `-Os` o `-O2` pasó a ser cuestión de velocidad, no de espacio.
+
+**Los problemas de verdad fueron de integración, otra vez.** Igual que en M1a, donde los
+cinco bugs estaban en el host y no en la recompilación. En M1b: una regla de Makefile sin
+dependencias de cabeceras que dejaba a los módulos del host viendo **layouts distintos
+del mismo struct** sin dar un error; `host_frame_top` que no avanzaba el reloj y
+congelaba la carrera; y un descriptor de CDI medido desde el sitio equivocado que hacía
+que la consola tomara el disco por un CD de audio. Ninguno era del SH-4.
+
+**Y una lección sobre el método.** El bug de la carrera congelada se encontró porque hay
+un oráculo: comparar los hashes de página contra la referencia Rust dijo «0 páginas
+cambian, ellos 242» y eso convirtió una sospecha en un hecho. El mismo patrón que en M1a.
+La inversión en el test diferencial se ha pagado dos veces.
+
+Lo que **no** está cerrado: nadie ha quemado el CDI ni lo ha probado en una consola. El
+formato es el correcto (MIL-CD, arranca con la BIOS real en Flycast) y la imagen cabe en
+un CD-R, pero hasta que no corra en hardware el número de rendimiento sigue siendo de un
+emulador.
+
+## El siguiente corte: M2a
+
+M2a es el primer hito con **imagen**: hasta ahora el port cuenta lo que el juego quiere
+dibujar, pero no dibuja nada. Su criterio es un front end navegable y legible.
+
+El orden no es caprichoso. Primero la **grabación en C**, que es código portable y —esto
+es lo que la hace primera— **se puede comparar contra la referencia**, igual que la RAM:
+la referencia produce la misma lista de comandos de dibujo, así que el oráculo sigue
+sirviendo. Después el PVR, que ya no tiene oráculo y hay que mirarlo con los ojos.
+
+Detalle y cifras en `docs/hitos/M2a.md`.

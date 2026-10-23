@@ -11,11 +11,11 @@ Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación 
 mensajes. Los identificadores de código van en inglés.
 
 Última actualización: 2026-10-23. Estado: **M0 y M1a cerrados. M1b cumple su criterio
-funcional en Flycast: el front end corre a **69–78 fps** y la **carrera simula a 67 fps**
-(4 769 frames, una vista 3D por frame, leyendo del GD-ROM), `ps1rt` pasa **227/227** en
-SH-4 y el código generado ocupa **3,43 MB** con `-Os` (sin overlays). Lo único que falta
-para cerrarlo es **probar en hardware**, bloqueado por el arranque con BIOS real (hoy
-solo con REIOS).**
+funcional: el juego **arranca con la BIOS real** desde un CDI (`mkdisc.sh`, formato por
+omisión), el front end corre a 69–78 fps y la **carrera simula a 98–113 fps**, `ps1rt`
+pasa **227/227** en SH-4 y el código generado ocupa **3,43 MB** con `-Os` (sin overlays).
+Falta solo **probarlo en una consola real**: el CDI es grabable en CD-R y es el formato
+que la consola acepta, pero nadie lo ha quemado todavía.**
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y
@@ -107,7 +107,7 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 |---|---|---|
 | M0 | Cifras de viabilidad | **Hecho.** Funciones, tamaño de código y RAM medidos (`docs/hitos/M0.md`). El «fps original (VSync)» quedó resuelto como mal planteado: el juego no se marca el ritmo con `VSync(N)` y la cadencia la impone el host; su lógica apunta a 60 Hz con un flip por campo, y el fps real del original es un hecho de rendimiento del hardware que necesitaría DuckStation |
 | M1a | Backend C + ps1rt en C, en PC (x86) | **Hecho (2026-10-18).** Test diferencial contra la versión Rust: **120 frames idénticos** en el front end y **231** en la carrera (incluida la transición), comparando 512 hashes de página, los 32 registros, hi, lo, cop0, los 64 del GTE, `cont` y ticks. **Cinco bugs reales** encontrados, todos de integración host/juego. Pruebas unitarias 227/227. El manejador de `Render_RenderPlayerView` queda para M2b (`docs/hitos/M1a.md`) |
-| M1b | Cross-compilar a SH-4 (KOS, `-m4-single`) + host mínimo (archivos, pad, timers, VSync, BIOS) | **Hecho en Flycast (2026-10-23), falta hardware.** Front end a 69–78 fps y carrera simulando a **67 fps**; `.text` de 3,43 MB con `-Os`, ELF `text 3,8 MB / bss 4,85 MB`; 227/227 unitarias en SH-4. El hardware lo bloquea el arranque con BIOS real (§11) |
+| M1b | Cross-compilar a SH-4 (KOS, `-m4-single`) + host mínimo (archivos, pad, timers, VSync, BIOS) | **Hecho en Flycast con BIOS real (2026-10-23).** Arranca desde CDI; front end a 69–78 fps y carrera simulando a **98–113 fps**; `.text` de 3,43 MB con `-Os`, ELF `text 3,8 MB / bss 4,85 MB`; 227/227 unitarias en SH-4. Falta quemarlo y probarlo en una consola |
 | M2a | Grabación en C + modos 480p/480i + 2D en PVR + espejo de VRAM y texturas | Front end navegable y legible en ambos modos |
 | M2b | Pista y cielo en PVR (transformación en SH-4 con FTRV, recorte por plano cercano) | Una pista recorrible; ms/frame y polígonos medidos |
 | M2c | Coches, props y efectos | Carrera completa de un jugador |
@@ -381,11 +381,11 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
 - **Abiertas:**
   - **M4:** factor de escala de las texturas (2× como base), método y formato.
   - **Alcance:** si la primera versión incluye 2P y FMV.
-  - **Arranque con BIOS real (abierta desde 2026-10-19):** el disco arranca con REIOS
-    (la BIOS emulada de Flycast) pero con la BIOS real la consola reconoce el disco y
-    cae al menú, probablemente por su comprobación de licencia. Bloquea las pruebas en
-    hardware. El camino habitual del homebrew es generar un **CDI** con `cdi4dc`.
-  - **Pruebas en hardware:** qué medio de carga usar.
+  - *(cerrada 2026-10-23: el arranque con BIOS real funciona desde un **CDI** con
+    disposición MIL-CD, que genera `dc/tools/mkdisc/mkdisc.sh` por omisión. El GDI solo
+    arrancaba con REIOS.)*
+  - **Pruebas en hardware:** el CDI es grabable en CD-R, pero nadie lo ha quemado ni
+    probado en una consola. Es lo único que le falta a M1b.
   - **Parche local a KallistiOS:** `fs_iso9660.c` solo lee el área de baja densidad y el
     port necesita la de alta (552 MB de datos no caben en los 92 MB de la baja). El
     parche está en `dc/tools/kos-patches/`; habría que proponerlo aguas arriba.

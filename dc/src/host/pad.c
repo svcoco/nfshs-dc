@@ -162,6 +162,20 @@ void host_frame_top(GameHost *h, Cpu *c)
      * incluia los botones de este frame y el de la referencia los del anterior, y en el
      * frame 1 salian dos paginas distintas (los dos buffers del pad) aunque la RAM fuera
      * identica en la frontera de la llamada. Era un fallo del instrumento, no del port. */
+    /* Los frames del juego van atados a los campos de video de 60 Hz: si el reloj no
+     * esta justo en un campo, o no se ha movido desde la frontera anterior, se avanza
+     * al siguiente campo. Es lo que hace frame_top en frame.rs de la referencia.
+     *
+     * Sin esto la CARRERA SE CONGELA, y costo encontrarlo: en el front end la frontera
+     * de frame es el flip (PutDispEnv), que mueve el tiempo por otro camino, asi que
+     * alli no se nota. En carrera la frontera es systemtask en el tope del bucle
+     * principal, que no mueve el reloj; los campos se quedaban clavados, el root
+     * counter de 128 Hz no latia y la fisica no avanzaba: 0 paginas de RAM cambiaban
+     * y el juego gastaba 2 ticks por frame contando frames para siempre. */
+    if (h->clock % HOST_FIELD != 0u || h->clock == h->last_top)
+        host_advance_to(h, c, (h->clock / HOST_FIELD + 1u) * HOST_FIELD);
+    h->last_top = h->clock;
+
 #if PS1_DIAG
     dump_frame(h, c);
 #endif

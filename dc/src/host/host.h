@@ -144,7 +144,9 @@ typedef struct GameHost {
 
     /* ---- dibujo que se cuenta pero no se pinta (M2a) ---- */
     uint64_t fe_shapes, fe_squares, player_views;
+    uint32_t race_chunks;     /* trozos de pista que la ultima vista decidio dibujar */
     uint64_t fields;          /* campos de video de 60 Hz transcurridos */
+    uint64_t last_top;        /* reloj en la frontera de frame anterior */
     uint64_t frames;          /* frames del juego (frame_top), la clave del volcado */
     uint32_t actuators[2];   /* motores del DualShock (PadSetAct) */
     uint32_t cb_vsync;       /* VSyncCallback */

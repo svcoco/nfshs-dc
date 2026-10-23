@@ -10,13 +10,12 @@ de forma nativa con el PowerVR**.
 Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación como en los
 mensajes. Los identificadores de código van en inglés.
 
-Última actualización: 2026-10-23. Estado: **M0 y M1a cerrados. En M1b: el front end de
-NFS High Stakes **corre en Dreamcast a 69–78 fps** (leyendo del GD-ROM, 0 fallos de
-archivo), `ps1rt` pasa **227/227** en SH-4 y el código generado ocupa **3,43 MB** con
-`-Os` (sin overlays). **La carrera entra pero no simula**, y tampoco en x86: le falta el
-trozo de lógica del manejador de `Render_RenderPlayerView` que M1a aparcó (detalle y
-medidas en `docs/hitos/M1b.md`). También pendiente: **arrancar con BIOS real**, hoy solo
-con REIOS, que es lo que bloquea el hardware.**
+Última actualización: 2026-10-23. Estado: **M0 y M1a cerrados. M1b cumple su criterio
+funcional en Flycast: el front end corre a **69–78 fps** y la **carrera simula a 67 fps**
+(4 769 frames, una vista 3D por frame, leyendo del GD-ROM), `ps1rt` pasa **227/227** en
+SH-4 y el código generado ocupa **3,43 MB** con `-Os` (sin overlays). Lo único que falta
+para cerrarlo es **probar en hardware**, bloqueado por el arranque con BIOS real (hoy
+solo con REIOS).**
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y
@@ -108,7 +107,7 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 |---|---|---|
 | M0 | Cifras de viabilidad | **Hecho.** Funciones, tamaño de código y RAM medidos (`docs/hitos/M0.md`). El «fps original (VSync)» quedó resuelto como mal planteado: el juego no se marca el ritmo con `VSync(N)` y la cadencia la impone el host; su lógica apunta a 60 Hz con un flip por campo, y el fps real del original es un hecho de rendimiento del hardware que necesitaría DuckStation |
 | M1a | Backend C + ps1rt en C, en PC (x86) | **Hecho (2026-10-18).** Test diferencial contra la versión Rust: **120 frames idénticos** en el front end y **231** en la carrera (incluida la transición), comparando 512 hashes de página, los 32 registros, hi, lo, cop0, los 64 del GTE, `cont` y ticks. **Cinco bugs reales** encontrados, todos de integración host/juego. Pruebas unitarias 227/227. El manejador de `Render_RenderPlayerView` queda para M2b (`docs/hitos/M1a.md`) |
-| M1b | Cross-compilar a SH-4 (KOS, `-m4-single`) + host mínimo (archivos, pad, timers, VSync, BIOS) | Compila y ejecuta en DC (Flycast y hardware): el front end y la lógica de carrera avanzan sin cuelgues, con contadores y estado del coche en pantalla; tamaño del ELF y RAM medidos |
+| M1b | Cross-compilar a SH-4 (KOS, `-m4-single`) + host mínimo (archivos, pad, timers, VSync, BIOS) | **Hecho en Flycast (2026-10-23), falta hardware.** Front end a 69–78 fps y carrera simulando a **67 fps**; `.text` de 3,43 MB con `-Os`, ELF `text 3,8 MB / bss 4,85 MB`; 227/227 unitarias en SH-4. El hardware lo bloquea el arranque con BIOS real (§11) |
 | M2a | Grabación en C + modos 480p/480i + 2D en PVR + espejo de VRAM y texturas | Front end navegable y legible en ambos modos |
 | M2b | Pista y cielo en PVR (transformación en SH-4 con FTRV, recorte por plano cercano) | Una pista recorrible; ms/frame y polígonos medidos |
 | M2c | Coches, props y efectos | Carrera completa de un jugador |
@@ -336,7 +335,15 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
    RAM de PS1 y 1 MB de espejo de VRAM van 6,43 MB de 16: **sin overlays**. Elegir `-Os`
    o `-O2` es cuestión de velocidad (I-cache de 8 KB), no de espacio, y se decide
    midiendo con el juego corriendo.
-3. **La auditoría del código portable contra los peligros del SH-4 ya está hecha** y
+3. **La carrera necesitó dos arreglos (2026-10-23), y el segundo era el de verdad.**
+   `Render_RenderPlayerView` era un contador vacío y le faltaba su parte de **lógica**
+   (cámara, trozos de pista, y el HUD: velocidad, marcha, tiempos, sentido contrario);
+   pero aun con eso seguía congelada, porque `host_frame_top` **no avanzaba el reloj al
+   siguiente campo de vídeo**. En el front end no se notaba —allí la frontera es el
+   flip, que sí mueve el tiempo—, pero en carrera la frontera es `systemtask` y sin ese
+   avance el root counter de 128 Hz no late y la física no corre. Detalle en
+   `docs/hitos/M1b.md`.
+4. **La auditoría del código portable contra los peligros del SH-4 ya está hecha** y
    despeja dos riesgos con datos: **0 accesos desalineados** y **0 en el borde de la RAM**
    en 900 frames de carrera, sin casts puntero↔entero y sin `double` salvo un `printf`.
    Lo de «abstraer `FILE`/`fopen`» que decía aquí **era falso** y queda retirado: KOS

@@ -1,4 +1,5 @@
 /* Grabacion del dibujo 2D del front end. Portado de src/ps1/host/overlay.rs. */
+#include "addr.h"
 #include "host.h"
 
 #include <string.h>
@@ -52,6 +53,7 @@ void overlay_push(GameHost *h, const int16_t pts[4][2], const uint32_t colours[4
         return;
     }
     q = &o->quad[o->n++];
+    q->kind = OVL_QUAD;
     for (k = 0; k < 4u; k++) {
         /* el desplazamiento de la vista que se esta grabando */
         q->pts[k][0] = (int16_t)(pts[k][0] + o->prim_offset[0]);
@@ -69,6 +71,23 @@ void overlay_push(GameHost *h, const int16_t pts[4][2], const uint32_t colours[4
     }
     q->semi = (uint8_t)(semi != 0);
     q->abr = abr;
+}
+
+void overlay_clip(GameHost *h, int16_t x, int16_t y, int16_t w, int16_t hh)
+{
+    Overlay *o = &h->overlay;
+    OverlayQuad *q;
+
+    o->total++;
+    if (o->n >= OVERLAY_MAX) {
+        o->dropped++;
+        return;
+    }
+    q = &o->quad[o->n++];
+    memset(q, 0, sizeof(*q));
+    q->kind = OVL_CLIP;
+    q->pts[0][0] = x; q->pts[0][1] = y;
+    q->pts[1][0] = w; q->pts[1][1] = hh;
 }
 
 static void rect_pts(int16_t out[4][2], int32_t x, int32_t y, int32_t w, int32_t h)
@@ -367,4 +386,200 @@ void overlay_record_packets(GameHost *h, Cpu *c, uint32_t start, uint32_t end)
             parse_prim(h, c, pos[i] + 4u, lens[i]);
     }
     h->overlay.draw_mode = entrada;
+}
+
+#if PS1_DIAG
+/* ---- volcado para el oraculo ----
+ *
+ * Mismo formato que escribe la referencia con NFSHS_DIFF_OVERLAY (src/dev/mod.rs), todo
+ * little-endian:
+ *   cabecera: "NFSO" u32 version=1
+ *   por frame: u32 frame, u32 cuadros, u32 otros_comandos, y por cuadro
+ *              i16 pts[4][2], u32 colores[4], u8 hay_textura, u8 semi, u8 abr,
+ *              u8 relleno, u16 tpage, u16 clut, u16 uv[4][2]
+ *
+ * "otros_comandos" es lo que la referencia tiene y el port todavia no produce (texto,
+ * cajas del HUD, concesionario, videos): en el port siempre es 0, y la comparacion lo
+ * usa para decir cuanto falta. */
+static void put16(FILE *f, uint16_t v)
+{
+    fputc((int)(v & 0xFFu), f);
+    fputc((int)((v >> 8) & 0xFFu), f);
+}
+
+static void put32o(FILE *f, uint32_t v)
+{
+    put16(f, (uint16_t)v);
+    put16(f, (uint16_t)(v >> 16));
+}
+
+int overlay_dump_open(GameHost *h, const char *path)
+{
+    FILE *f = fopen(path, "wb");
+
+    if (f == NULL)
+        return 0;
+    fwrite("NFSO", 1, 4, f);
+    put32o(f, 1u);
+    h->ovl_dump = f;
+    return 1;
+}
+
+void overlay_dump_frame(GameHost *h)
+{
+    FILE *f = h->ovl_dump;
+    uint32_t i, k;
+
+    if (f == NULL)
+        return;
+    put32o(f, (uint32_t)h->frames);
+    put32o(f, h->overlay.n);
+    put32o(f, 0u);                       /* el port no produce otros comandos todavia */
+    for (i = 0; i < h->overlay.n; i++) {
+        const OverlayQuad *q = &h->overlay.quad[i];
+
+        for (k = 0; k < 4u; k++) {
+            put16(f, (uint16_t)q->pts[k][0]);
+            put16(f, (uint16_t)q->pts[k][1]);
+        }
+        for (k = 0; k < 4u; k++)
+            put32o(f, q->colours[k]);
+        fputc(q->kind, f);
+        fputc(q->has_tex, f);
+        fputc(q->semi, f);
+        fputc(q->abr, f);
+        put16(f, q->has_tex ? q->tex.tpage : 0u);
+        put16(f, q->has_tex ? q->tex.clut : 0u);
+        for (k = 0; k < 4u; k++) {
+            put16(f, q->has_tex ? q->tex.uv[k][0] : 0u);
+            put16(f, q->has_tex ? q->tex.uv[k][1] : 0u);
+        }
+    }
+}
+
+void overlay_dump_close(GameHost *h)
+{
+    if (h->ovl_dump != NULL) {
+        fclose(h->ovl_dump);
+        h->ovl_dump = NULL;
+    }
+}
+#endif /* PS1_DIAG */
+
+/* ---- el texto del front end ----
+ *
+ * Font_TextXY no produce un comando de texto en el front end: produce **un cuadro por
+ * caracter**, recortado de la imagen de 4 bits de la fuente. (El comando de texto es la
+ * otra rama, la de una carrera en pausa, y esa es del paso 5.)
+ *
+ * Hay dos rutinas que pintan glifos: la normal, semitransparente y en la paleta y color
+ * actuales, y la del reflejo en el suelo del concesionario, que va opaca, volteada y con
+ * paleta y color propios.
+ */
+static uint16_t glyph_code(Cpu *c, uint32_t a)
+{
+    return (uint16_t)(ps1_r8(c, a) | (ps1_r8(c, a + 1u) << 8));
+}
+
+void overlay_font_quads(GameHost *h, Cpu *c, uint32_t text, int32_t x, int32_t y)
+{
+    uint32_t blitter = ps1_r32(c, ADDR_FONT_BLITTER);
+    int upside = (blitter == ADDR_FONT_UPSIDE_BLIT);
+    uint32_t table = ps1_r32(c, ADDR_FONT_TABLE);
+    uint32_t count = ps1_r32(c, ADDR_FONT_COUNT);
+    uint32_t shape = ps1_r32(c, ADDR_FONT_SHAPE);
+    uint32_t pos, i;
+    uint16_t fx, fy, tpage, clut;
+    uint32_t colour;
+    int32_t space;
+
+    if (table == 0u || shape == 0u)
+        return;
+    pos = ps1_r32(c, shape + 12u);
+    fx = (uint16_t)(pos & 0xFFFu);
+    fy = (uint16_t)((pos >> 16) & 0xFFFu);
+    tpage = (uint16_t)((fx / 64u) | ((fy / 256u) << 4));
+    if (upside) {
+        clut = (uint16_t)ps1_r16(c, ADDR_FONT_UP_CLUT);
+        colour = ps1_r32(c, ADDR_FONT_UP_COLOUR) & 0xFFFFFFu;
+    } else {
+        clut = (uint16_t)ps1_r16(c, ADDR_FONT_CURRENT_CLUT);
+        colour = ps1_r32(c, ADDR_FONT_COLOUR) & 0xFFFFFFu;
+    }
+    space = (int32_t)ps1_r8(c, ADDR_FONT_SPACE);
+
+    for (i = 0; i < 256u; i++) {
+        uint16_t ch = (uint16_t)ps1_r8(c, text + i);
+        uint32_t k, g = 0;
+        int encontrado = 0;
+        int32_t w, hh, u, v, adv, dx, dy;
+        uint32_t colours[4];
+        QuadTex tex;
+        int16_t pts[4][2];
+        uint32_t j;
+
+        if (ch == 0u)
+            break;
+        if (ch < 33u) {                  /* espacio y controles: solo avanzan */
+            x += space;
+            continue;
+        }
+        k = (uint32_t)ch - 32u;
+        /* el glifo suele estar en su sitio por indice; si no, se busca */
+        if (k < count && glyph_code(c, table + 11u * k) == ch) {
+            g = table + 11u * k;
+            encontrado = 1;
+        } else {
+            for (j = 0; j < count; j++)
+                if (glyph_code(c, table + 11u * j) == ch) {
+                    g = table + 11u * j;
+                    encontrado = 1;
+                    break;
+                }
+        }
+        if (!encontrado)
+            continue;
+        w   = (int32_t)ps1_r8(c, g + 2u);
+        hh  = (int32_t)ps1_r8(c, g + 3u);
+        u   = (int32_t)glyph_code(c, g + 4u);
+        v   = (int32_t)glyph_code(c, g + 6u);
+        adv = (int8_t)ps1_r8(c, g + 8u);
+        dx  = (int8_t)ps1_r8(c, g + 9u);
+        dy  = (int8_t)ps1_r8(c, g + 10u);
+
+        if (w > 0 && hh > 0) {
+            uint16_t u0 = (uint16_t)(u & 0xFF), v0, u1, v1;
+
+            for (j = 0; j < 4u; j++)
+                colours[j] = colour;
+            tex.tpage = tpage;
+            tex.clut = clut;
+            if (upside) {
+                /* la fila de arriba del glifo (desde un texel por encima) abajo */
+                v0 = (uint16_t)(((((int32_t)fy + v) & 0xFF) - 1) & 0xFF);
+            } else {
+                v0 = (uint16_t)(((int32_t)fy + v) & 0xFF);
+            }
+            u1 = (uint16_t)(u0 + (uint16_t)w);
+            v1 = (uint16_t)(v0 + (uint16_t)hh);
+            tex.uv[0][0] = u0; tex.uv[0][1] = v0;
+            tex.uv[1][0] = u1; tex.uv[1][1] = v0;
+            tex.uv[2][0] = u0; tex.uv[2][1] = v1;
+            tex.uv[3][0] = u1; tex.uv[3][1] = v1;
+            if (upside) {
+                int32_t top = y + 5 - hh - dy, bottom = y + 5 - dy;
+                int32_t l = x + dx, r = x + dx + w;
+
+                pts[0][0] = (int16_t)l; pts[0][1] = (int16_t)bottom;
+                pts[1][0] = (int16_t)r; pts[1][1] = (int16_t)bottom;
+                pts[2][0] = (int16_t)l; pts[2][1] = (int16_t)top;
+                pts[3][0] = (int16_t)r; pts[3][1] = (int16_t)top;
+                overlay_push(h, pts, colours, &tex, 0, 0u);
+            } else {
+                rect_pts(pts, x + dx, y + dy, w, hh);
+                overlay_push(h, pts, colours, &tex, 1, 0u);
+            }
+        }
+        x += adv;
+    }
 }

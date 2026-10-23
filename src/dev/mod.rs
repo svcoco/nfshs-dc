@@ -299,6 +299,22 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     }
                     f
                 });
+            // NFSHS_DIFF_OVERLAY: vuelca la LISTA DE DIBUJO por frame, para comparar la
+            // grabacion 2D del port en C (dc/src/host/overlay.c) contra esta, que es la
+            // que alimenta al renderer de referencia. Formato, todo little-endian:
+            //   cabecera: "NFSO" u32 version=1
+            //   por frame: u32 frame, u32 cuadros, u32 otros_comandos, y por cuadro
+            //              i16 pts[4][2], u32 colores[4], u8 hay_textura, u8 semi,
+            //              u8 abr, u8 relleno, u16 tpage, u16 clut, u16 uv[4][2]
+            let mut ovl_out: Option<std::io::BufWriter<std::fs::File>> = std::env::var("NFSHS_DIFF_OVERLAY")
+                .ok()
+                .map(|path| {
+                    use std::io::Write;
+                    let mut f = std::io::BufWriter::new(std::fs::File::create(&path).expect("NFSHS_DIFF_OVERLAY"));
+                    f.write_all(b"NFSO").expect("cabecera");
+                    f.write_all(&1u32.to_le_bytes()).expect("cabecera");
+                    f
+                });
             let mut diff_steps: Vec<(u32, u16)> = Vec::new();
             let mut diff_end = 0u32;
             if let Ok(path) = std::env::var("NFSHS_DIFF_SCRIPT") {
@@ -333,6 +349,51 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             }
             let on_frame: ps1::host::FrameFn = Box::new(move |c, info| {
                 frame += 1;
+                if let Some(out) = ovl_out.as_mut() {
+                    use std::io::Write;
+                    use ps1::host::OverlayCmd;
+                    let quads: Vec<&OverlayCmd> = info.overlay.iter()
+                        .filter(|c| matches!(c, OverlayCmd::Quad { .. } | OverlayCmd::Clip { .. }))
+                        .collect();
+                    let otros = info.overlay.len() - quads.len();
+                    let mut rec: Vec<u8> = Vec::with_capacity(12 + 56 * quads.len());
+                    rec.extend_from_slice(&frame.to_le_bytes());
+                    rec.extend_from_slice(&(quads.len() as u32).to_le_bytes());
+                    rec.extend_from_slice(&(otros as u32).to_le_bytes());
+                    for q in quads {
+                        if let OverlayCmd::Clip { x, y, w, h } = q {
+                            // mismo registro, con el tipo a 1: solo se miran las dos
+                            // primeras esquinas (origen y tamano)
+                            for v in [*x, *y, *w, *h, 0, 0, 0, 0] {
+                                rec.extend_from_slice(&v.to_le_bytes());
+                            }
+                            rec.extend_from_slice(&[0u8; 16]);
+                            rec.extend_from_slice(&[1u8, 0, 0, 0]);
+                            rec.extend_from_slice(&[0u8; 20]);
+                            continue;
+                        }
+                        let OverlayCmd::Quad { pts, colours, tex, semi, abr } = q else { continue };
+                        for p in pts {
+                            rec.extend_from_slice(&p[0].to_le_bytes());
+                            rec.extend_from_slice(&p[1].to_le_bytes());
+                        }
+                        for c in colours {
+                            rec.extend_from_slice(&c.to_le_bytes());
+                        }
+                        rec.extend_from_slice(&[0u8, u8::from(tex.is_some()), u8::from(*semi), *abr]);
+                        let (tpage, clut, uv) = match tex {
+                            Some(t) => (t.tpage, t.clut, t.uv),
+                            None => (0, 0, [[0u16; 2]; 4]),
+                        };
+                        rec.extend_from_slice(&tpage.to_le_bytes());
+                        rec.extend_from_slice(&clut.to_le_bytes());
+                        for t in uv {
+                            rec.extend_from_slice(&t[0].to_le_bytes());
+                            rec.extend_from_slice(&t[1].to_le_bytes());
+                        }
+                    }
+                    out.write_all(&rec).expect("NFSHS_DIFF_OVERLAY");
+                }
                 if let Some(out) = diff_out.as_mut() {
                     use std::io::Write;
                     let mut rec: Vec<u8> = Vec::with_capacity(4636);

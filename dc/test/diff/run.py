@@ -76,6 +76,10 @@ def main(argv):
     os.makedirs(OUT, exist_ok=True)
     c_dump = os.path.join(OUT, 'c.d1')
     rust_dump = os.path.join(OUT, 'rust.d1')
+    # La lista de dibujo 2D: el oraculo de la grabacion de M2a. Va con el mismo guion y
+    # en la misma ejecucion, asi que no cuesta nada tenerlo siempre puesto.
+    c_ovl = os.path.join(OUT, 'c.ovl')
+    rust_ovl = os.path.join(OUT, 'rust.ovl')
     t0 = time.time() - 1          # margen por la resolucion del mtime
 
     if solo != 'rust':
@@ -85,7 +89,8 @@ def main(argv):
         # cosmetico: con todo bloqueado el juego no deja entrar a una carrera, asi que
         # sin esto no existe el escenario de carrera que pide el criterio de M1a. En el
         # port la bandera esta apagada por defecto (ver dc/src/host/unlock.c).
-        run([C_EXE, '--script', script, '--ticks', ticks, '--unlock', '--dump', c_dump],
+        run([C_EXE, '--script', script, '--ticks', ticks, '--unlock', '--dump', c_dump,
+             '--overlaydump', c_ovl],
             {}, os.path.join(OUT, 'c.log'), 'C')
         n = fresh(c_dump, t0, 'C')
         print(f'  {n} frames')
@@ -95,6 +100,7 @@ def main(argv):
         run([RUST_EXE, 'boot-main'],
             {'NFSHS_DIFF_SCRIPT': script,
              'NFSHS_DIFF_OUT': rust_dump,
+             'NFSHS_DIFF_OVERLAY': rust_ovl,
              'NFSHS_FRAMESRC': '1',
              'TICKS': ticks},
             os.path.join(OUT, 'rust.log'), 'Rust')
@@ -105,8 +111,13 @@ def main(argv):
         return 0
     print('\ncomparacion:')
     cmp_py = os.path.join(ROOT, 'dc', 'test', 'diff', 'cmp.py')
-    return subprocess.run([sys.executable, '-I', cmp_py, c_dump, rust_dump],
-                          cwd=ROOT).returncode
+    rc = subprocess.run([sys.executable, '-I', cmp_py, c_dump, rust_dump],
+                        cwd=ROOT).returncode
+    print('\nlista de dibujo 2D:')
+    cmpovl = os.path.join(ROOT, 'dc', 'test', 'diff', 'cmpovl.py')
+    rc2 = subprocess.run([sys.executable, '-I', cmpovl, c_ovl, rust_ovl],
+                         cwd=ROOT).returncode
+    return rc or rc2
 
 
 sys.exit(main(sys.argv[1:]))

@@ -39,4 +39,19 @@
 /* Scratchpad: el original lo usa de cache de dibujo en estas llamadas. */
 #define ADDR_DCACHE             0x1F800000u
 
+/* ---- la fuente del front end (Font_TextXY) ----
+ * El texto del front end no es un comando aparte: es un cuadro por caracter, sacado de
+ * la imagen de 4 bits de la fuente actual. */
+#define ADDR_FONT_BLITTER      (ADDR_GP + 6328u)  /* que rutina pinta los glifos */
+#define ADDR_FONT_BLIT         0x800CC00Cu        /* la normal */
+#define ADDR_FONT_UPSIDE_BLIT  0x8004F49Cu        /* el reflejo del suelo del concesionario */
+#define ADDR_FONT_TABLE        0x80136F14u        /* tabla de glifos (11 bytes cada uno) */
+#define ADDR_FONT_COUNT        0x80136F04u
+#define ADDR_FONT_SHAPE        0x80136F18u        /* la forma con la imagen de la fuente */
+#define ADDR_FONT_CURRENT_CLUT (ADDR_GP + 4880u)
+#define ADDR_FONT_COLOUR       (ADDR_GP + 4872u)
+#define ADDR_FONT_SPACE        (ADDR_GP + 4882u)  /* ancho del espacio */
+#define ADDR_FONT_UP_CLUT      0x8013EB4Cu
+#define ADDR_FONT_UP_COLOUR    0x8013EB44u
+
 #endif /* PS1_HOST_ADDR_H */

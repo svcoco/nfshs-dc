@@ -97,9 +97,39 @@ Sin regresion: 227/227 unitarias, 120 frames identicos y la misma divergencia co
 el 232. Era de esperar —la grabacion solo **lee** la RAM del invitado— pero se comprobo.
 El arbol portable sigue compilando para SH-4 sin un solo aviso.
 
-Lo que falta del paso 1 es el **oraculo**: comparar la lista del port contra la de la
-referencia, que produce la misma. Hoy solo se comprueba que las cifras son coherentes y
-que no hay primitivas sin grabar.
+### El oraculo: **34 525 comandos identicos** (2026-10-23)
+
+Paso 1 cerrado. Los dos lados vuelcan su lista de dibujo por frame en el mismo formato
+—el port con `--overlaydump`, la referencia con `NFSHS_DIFF_OVERLAY`— y
+[`cmpovl.py`](../../dc/test/diff/cmpovl.py) las compara comando a comando. Va dentro de
+`make diff`, asi que no se puede romper sin enterarse.
+
+```
+comandos (cuadros y recortes): C 34525, referencia 34525
+comandos de la referencia que el port no produce todavia: 0
+OK: 34525 comandos identicos en 120 frames
+```
+
+**El oraculo encontro dos cosas que las cifras sueltas no habrian visto:**
+
+1. **Faltaban ~91 cuadros por frame: el texto.** `Font_TextXY` en el front end no produce
+   un comando de texto, produce **un cuadro por caracter** recortado de la imagen de 4
+   bits de la fuente. El port lo contaba y lo descartaba. Portado como
+   `overlay_font_quads`, con sus dos rutinas de pintado: la normal (semitransparente, en
+   la paleta y color actuales) y la del reflejo en el suelo del concesionario (opaca,
+   volteada y con paleta propia).
+2. **Faltaban los recortes.** `SetDrawArea` es un **hook**, no una HLE, y el host solo
+   tenia enganchado `systemtask`: nadie lo miraba. El front end lo usa 11 veces por frame
+   para recortar el texto que se desplaza, y sin eso el paso 4 habria pintado cosas fuera
+   de su sitio. La lista pasa a tener tipo de comando (`OVL_QUAD`, `OVL_CLIP`).
+
+Eso deja la grabacion del front end **completa**: cero comandos de la referencia sin
+producir.
+
+**En carrera la lista NO coincide, y es lo esperado**: 68 361 comandos contra 210 157. La
+referencia graba ademas la tabla de ordenacion de las vistas de carrera (HUD,
+cuentavueltas, mapa) y toda la geometria del mundo, que es **M2b y M2c**. El oraculo de
+M2a mide el front end, que es su criterio de salida.
 
 ## 4. Lo que ya esta hecho y se aprovecha
 

@@ -79,6 +79,7 @@ int main(int argc, char **argv)
     const char *hle_path = "tools/hle_funcs.txt";
     const char *script = NULL;
     const char *dump_path = NULL;
+    const char *ovl_path = NULL;
     const char *counts_path = NULL;
     uint64_t win_lo = 0, win_hi = 0, ram_at_call = 0, frame_dump_at = 0;
     const char *frame_dump_path = NULL;
@@ -119,6 +120,8 @@ int main(int argc, char **argv)
             script = argv[++i];
         else if (!strcmp(argv[i], "--dump") && i + 1 < argc)
             dump_path = argv[++i];
+        else if (!strcmp(argv[i], "--overlaydump") && i + 1 < argc)
+            ovl_path = argv[++i];
         else if (!strcmp(argv[i], "--callcount") && i + 1 < argc)
             counts_path = argv[++i];
         else if (!strcmp(argv[i], "--ramdump") && i + 2 < argc) {
@@ -191,6 +194,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "no pude cargar el guion de entrada %s\n", script);
         return 1;
     }
+    if (ovl_path != NULL && !overlay_dump_open(&host, ovl_path)) {
+        fprintf(stderr, "no pude abrir el volcado de la lista de dibujo %s\n", ovl_path);
+        return 1;
+    }
     if (dump_path != NULL && !dump_open(&host, dump_path)) {
         fprintf(stderr, "no pude abrir el volcado %s\n", dump_path);
         return 1;
@@ -218,6 +225,7 @@ int main(int argc, char **argv)
     }
 
     dump_close(&host);
+    overlay_dump_close(&host);
     if (counts_path != NULL && !host_call_counts(&host, counts_path))
         fprintf(stderr, "no pude escribir la tabla de llamadas %s\n", counts_path);
     host_report(&host, &cpu);

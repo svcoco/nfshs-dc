@@ -150,6 +150,10 @@ int host_views_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
          * Lo que dibujan (font_quads o el comando de texto del overlay) es M2a: aqui
          * solo importa que el original no corra y que v0 sea 0. */
         h->views_fonttext++;
+        /* En el front end el texto son cuadros (uno por caracter); en una carrera en
+         * pausa la referencia produce un comando de texto, que es del paso 5. */
+        if (h->mode == HOST_FRONTEND)
+            overlay_font_quads(h, c, c->r[4], (int32_t)c->r[5], (int32_t)c->r[6]);
         if (h->textlog) {
             char buf[80];
             uint32_t i;

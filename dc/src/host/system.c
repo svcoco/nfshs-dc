@@ -202,5 +202,18 @@ void host_hook(GameHost *h, Cpu *c, uint32_t addr)
              * siguiente tick del timer es lo que saca al juego de la espera activa. */
             host_advance_to(h, c, (h->clock / HOST_TICK + 1u) * HOST_TICK);
         }
+        return;
+    }
+    if (addr == 0x800EEC70u && h->mode == HOST_FRONTEND) {
+        /* SetDrawArea(DR_AREA, rect): el front end recorta parte de lo que dibuja (el
+         * texto que se desplaza). En terminos de VRAM el rectangulo cae dentro de uno
+         * de los dos buffers de 256 lineas, asi que se le quita esa mitad. */
+        uint32_t rect = c->r[5];
+        int16_t x = (int16_t)ps1_r16(c, rect);
+        int16_t y = (int16_t)ps1_r16(c, rect + 2u);
+        int16_t oy = (y >= 256) ? 256 : 0;
+
+        overlay_clip(h, x, (int16_t)(y - oy), (int16_t)ps1_r16(c, rect + 4u),
+                     (int16_t)ps1_r16(c, rect + 6u));
     }
 }

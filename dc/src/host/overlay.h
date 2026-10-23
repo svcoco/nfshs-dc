@@ -32,8 +32,18 @@ typedef struct {
     uint16_t uv[4][2];
 } QuadTex;
 
-/* Esquinas en orden: arriba-izquierda, arriba-derecha, abajo-izquierda, abajo-derecha. */
+/* Que es cada entrada de la lista. */
+typedef enum {
+    OVL_QUAD = 0,            /* un cuadro en coordenadas de pantalla */
+    OVL_CLIP = 1             /* SetDrawArea: el dibujo que sigue va recortado a ese rect */
+} OverlayKind;
+
+/* Esquinas en orden: arriba-izquierda, arriba-derecha, abajo-izquierda, abajo-derecha.
+ * En OVL_CLIP solo se usan pts[0] (esquina) y pts[1] (ancho y alto); el resto no se
+ * mira. Se reaprovecha el hueco en vez de crecer el struct: la lista son 4096 entradas
+ * y esto es RAM de Dreamcast. */
 typedef struct {
+    uint8_t  kind;
     int16_t  pts[4][2];
     uint32_t colours[4];     /* 0xBBGGRR; 0x80 es el 1,0 en los cuadros con textura */
     QuadTex  tex;
@@ -69,12 +79,16 @@ void overlay_reset(Overlay *o);
 /* Un cuadro ya resuelto. `tex` puede ser NULL. */
 void overlay_push(struct GameHost *h, const int16_t pts[4][2], const uint32_t colours[4],
                   const QuadTex *tex, int semi, uint8_t abr);
+/* SetDrawArea en el front end: recorta lo que se dibuje a continuacion. */
+void overlay_clip(struct GameHost *h, int16_t x, int16_t y, int16_t w, int16_t hh);
 /* Un rectangulo plano: PSXDrawSquare y PSXDrawTransSquare. */
 void overlay_square(struct GameHost *h, int32_t x, int32_t y, int32_t w, int32_t h_,
                     uint32_t colour, int semi);
 /* El emisor de formas del front end (0x8004E74C). */
 void overlay_shape_quads(struct GameHost *h, Cpu *c, uint32_t info, uint32_t flags,
                          int32_t x, int32_t y, const uint32_t colours[4], uint32_t abr);
+/* Font_TextXY en el front end: un cuadro por caracter. */
+void overlay_font_quads(struct GameHost *h, Cpu *c, uint32_t text, int32_t x, int32_t y);
 /* Graba los paquetes de GPU escritos entre `start` y `end` del buffer de primitivas. */
 void overlay_record_packets(struct GameHost *h, Cpu *c, uint32_t start, uint32_t end);
 

@@ -130,6 +130,7 @@ typedef struct GameHost {
     /* ---- volcado para el test diferencial ---- */
 #if PS1_DIAG
     FILE    *dump;
+    FILE    *ovl_dump;
 #endif
     uint64_t dump_frames;
     uint64_t pad_writes;
@@ -208,6 +209,12 @@ void host_frame_top(GameHost *h, Cpu *c);
 int  pad_load_script(GameHost *h, const char *path);
 
 #if PS1_DIAG
+/* Volcado de la LISTA DE DIBUJO por frame: el oraculo de la grabacion 2D de M2a. La
+ * referencia escribe el mismo formato con NFSHS_DIFF_OVERLAY. */
+int  overlay_dump_open(GameHost *h, const char *path);
+void overlay_dump_frame(GameHost *h);
+void overlay_dump_close(GameHost *h);
+
 /* Volcado del estado por frame (ver dump.c para el formato). */
 int  dump_open(GameHost *h, const char *path);
 void dump_frame(GameHost *h, const Cpu *c);

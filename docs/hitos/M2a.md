@@ -80,16 +80,18 @@ coordenadas de pantalla, por las **tres vias** que usa el juego:
 
 | | |
 |---|---|
-| Cuadros grabados | **22 285** |
-| Maximo en un frame | **198** |
+| Cuadros grabados | **34 525** |
+| Maximo en un frame | **300** |
 | Primitivas que no se supieron grabar | **0** |
 | Cuadros que no cupieron | **0** |
-| Combinaciones `(pagina, paleta)` distintas, en total | **62** |
-| Combinaciones **vivas a la vez en un frame** | **53** |
+| Combinaciones `(pagina, paleta)` distintas, en total | **63** |
+| Combinaciones **vivas a la vez en un frame** | **54** |
 
-**Las 53 son el numero que manda, y avisan de un problema.** Si la cache convirtiera una
+(Cifras con el texto ya incluido; las de una medida anterior sin el eran menores.)
+
+**Las 54 son el numero que manda, y avisan de un problema.** Si la cache convirtiera una
 pagina de textura entera por combinacion (256x256 texeles a 16 bits = 128 KB), serian
-**6,8 MB de los 8 MB de VRAM del PVR**. O sea que el paso 3 **no puede** cachear paginas
+**6,9 MB de los 8 MB de VRAM del PVR**. O sea que el paso 3 **no puede** cachear paginas
 enteras: tiene que convertir solo el rectangulo que los UV usan de verdad, que en un
 sprite de interfaz es pequeno. Queda anotado antes de disenarla.
 

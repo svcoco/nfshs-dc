@@ -25,6 +25,9 @@ todo el trabajo del port va en la rama **`dc`**. El C vive en el árbol **`dc/`*
 
 ## 1. Cómo retomar (léeme primero)
 
+0. **`docs/bitacora.md`** es el resumen vivo del proyecto: lo construido, las cifras
+   medidas y las decisiones vigentes. Empieza por ahí y se actualiza al cerrar cada
+   paso; el detalle largo está en `docs/hitos/`.
 1. Lee las secciones 3 (decisiones) y 6 (M0) de este archivo. No reabras decisiones ya
    tomadas salvo que Jorge lo pida.
 2. Comprueba que estás en la rama `dc` y verifica los hashes de `gamedata/` (sección 6).

@@ -190,6 +190,8 @@ void host_frame_top(GameHost *h, Cpu *c)
     overlay_dump_frame(h);
 #endif
     host_build_textures(h);
+    if (h->on_draw != NULL)
+        h->on_draw(h);
     overlay_reset(&h->overlay);
     /* fin del guion: parada ordenada, para que el arnes imprima su informe */
     if (h->pad_end != 0u && h->frames >= h->pad_end)

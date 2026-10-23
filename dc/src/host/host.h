@@ -124,6 +124,9 @@ typedef struct GameHost {
      * se escriban los buffers de libpad. En Dreamcast lee el mando por maple; en el
      * host de PC es NULL y manda el guion de pad_steps. */
     void (*poll_input)(struct GameHost *h);
+    /* La plataforma dibuja aqui: se llama con la lista COMPLETA y las texturas
+     * ya convertidas, justo antes de vaciarla para el frame siguiente. */
+    void (*on_draw)(struct GameHost *h);
     struct { uint64_t frame; uint16_t buttons; } pad_steps[PAD_SCRIPT_MAX];
     uint32_t pad_steps_n, pad_at;
     uint64_t pad_end;         /* campo en el que termina el guion (0: sin fin) */

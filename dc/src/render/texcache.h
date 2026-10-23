@@ -18,7 +18,10 @@
  *      entre no caber y ocupar menos de un megabyte.
  *   2. La cache **persiste entre frames**. Convertir 0,66 MB por frame en un SH-4 seria
  *      carisimo, y no hace falta: la VRAM casi no cambia.
- *   3. Se invalida por **solape**: cada escritura a la VRAM tumba solo las entradas cuyo
+ *   3. La tabla tiene 128 entradas y se **expulsa la mas antigua** cuando se llena. Sin
+ *      eso, medido sobre 3 000 frames del front end, la tabla se llenaba de
+ *      combinaciones viejas y 13 654 peticiones se quedaban sin textura.
+ *   4. Se invalida por **solape**: cada escritura a la VRAM tumba solo las entradas cuyo
  *      rectangulo toca. Invalidarlo todo en cada escritura costaria reconversiones de
  *      sobra.
  *
@@ -44,6 +47,7 @@ typedef struct {
      * reutiliza tal cual; si no, se convierte de nuevo. El rectangulo del frame NO se
      * acumula entre frames: hacerlo crecia sin parar y acababa desbordando la cache. */
     uint16_t fu0, fv0, fu1, fv1;
+    uint32_t ultimo;          /* ultimo frame en que se pidio, para expulsarla */
     uint8_t  usada;           /* pedida en el frame en curso */
     uint8_t  lista;           /* ya convertida y vigente */
 } TexEntry;
@@ -51,6 +55,7 @@ typedef struct {
 typedef struct {
     TexEntry e[TEX_MAX];
     uint32_t n;
+    uint32_t frame;           /* cuenta de frames, para la antiguedad */
     uint32_t top;             /* asignador por tope: los offsets no se mueven */
     uint32_t texels;          /* texeles reservados en el buffer */
     /* medidas */
@@ -58,6 +63,7 @@ typedef struct {
     uint64_t texels_conv;     /* y cuantos texeles ha costado */
     uint64_t invalidadas;
     uint64_t sin_sitio;       /* entradas o texeles que no cupieron */
+    uint64_t expulsadas;      /* entradas reutilizadas por falta de sitio */
     uint32_t pico_texels;     /* el maximo de texeles vivos a la vez */
     uint64_t vaciados;        /* veces que se lleno y hubo que empezar de cero */
 } TexCache;

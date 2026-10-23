@@ -96,6 +96,7 @@ void tex_begin_frame(TexCache *tc)
 {
     uint32_t i;
 
+    tc->frame++;
     for (i = 0; i < tc->n; i++) {
         tc->e[i].usada = 0;
         tc->e[i].fu0 = 0xFFFFu;          /* rectangulo del frame, vacio */
@@ -124,11 +125,26 @@ void tex_need(TexCache *tc, uint16_t tpage, uint16_t clut, const uint16_t uv[4][
             break;
         }
     if (e == NULL) {
-        if (tc->n >= TEX_MAX) {
-            tc->sin_sitio++;
-            return;
+        if (tc->n < TEX_MAX) {
+            e = &tc->e[tc->n++];
+        } else {
+            /* La tabla esta llena: se reutiliza la entrada que lleva mas tiempo sin
+             * pedirse. Nunca una de este frame, que se estaria dibujando ahora. Sus
+             * texeles quedan huerfanos en el asignador por tope hasta el siguiente
+             * vaciado, que es barato comparado con no dibujar el cuadro. */
+            TexEntry *vieja = NULL;
+
+            for (i = 0; i < tc->n; i++)
+                if (!tc->e[i].usada &&
+                    (vieja == NULL || tc->e[i].ultimo < vieja->ultimo))
+                    vieja = &tc->e[i];
+            if (vieja == NULL) {
+                tc->sin_sitio++;
+                return;
+            }
+            e = vieja;
+            tc->expulsadas++;
         }
-        e = &tc->e[tc->n++];
         memset(e, 0, sizeof(*e));
         e->tpage = tpage;
         e->clut = clut;
@@ -141,6 +157,7 @@ void tex_need(TexCache *tc, uint16_t tpage, uint16_t clut, const uint16_t uv[4][
     if (u1 > e->fu1) e->fu1 = u1;
     if (v1 > e->fv1) e->fv1 = v1;
     e->usada = 1;
+    e->ultimo = tc->frame;
 }
 
 uint32_t tex_build(TexCache *tc, const uint16_t *vram, uint16_t *dst, uint32_t cap)

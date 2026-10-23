@@ -1,0 +1,8 @@
+# Variante larga de front_end_120.txt: la misma navegacion, pero se queda 3 000
+# frames en los menus en vez de 120. Es para MIRAR el front end dibujado; para
+# el oraculo se usa front_end_120.txt, que es el que tiene frames comparados.
+# Front end sin tocar nada, 120 frames: la evidencia barata de que la identidad
+# aguanta en el tiempo y no solo en los dos primeros frames.
+0 -
+
+#end 3000

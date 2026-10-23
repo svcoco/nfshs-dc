@@ -370,10 +370,13 @@ void host_report(const GameHost *h, const Cpu *c)
     printf("  texturas: %u entradas, %u texeles vivos (pico %u de %u)\n",
            (unsigned)h->texcache.n, (unsigned)h->texcache.texels,
            (unsigned)h->texcache.pico_texels, (unsigned)h->tex_cap);
-    printf("  conversiones: %llu (%llu texeles), invalidadas %llu, sin sitio %llu\n",
+    printf("  conversiones: %llu (%llu texeles), invalidadas %llu, expulsadas %llu,\n"
+           "                vaciados %llu, sin sitio %llu\n",
            (unsigned long long)h->texcache.conversiones,
            (unsigned long long)h->texcache.texels_conv,
            (unsigned long long)h->texcache.invalidadas,
+           (unsigned long long)h->texcache.expulsadas,
+           (unsigned long long)h->texcache.vaciados,
            (unsigned long long)h->texcache.sin_sitio);
     if (h->overlay.dropped || h->overlay_unknown)
         printf("  AVISO: %llu cuadros no cupieron, %llu primitivas sin grabar\n",

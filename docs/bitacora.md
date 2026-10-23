@@ -18,12 +18,13 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M0** Viabilidad | Cerrado (2026-10-18) |
 | **M1a** Backend C + `ps1rt` en C, en x86 | Cerrado (2026-10-18) |
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
-| **M2a** El front end en pantalla | Pasos 1 y 2 de 5 |
+| **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
 | M2b, M2c, M3, M4, M5 | Sin empezar |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
-datos del disco y ejecuta la lógica del juego —front end y carrera— a 98–113 fps. **No
-dibuja nada todavía**: muestra contadores en pantalla. La imagen empieza en M2a.
+datos del disco y **dibuja el front end con el PVR a ~60 fps**, legible y completo: el
+menú *game setup*, sus opciones, la foto del coche y el texto de ayuda. La carrera
+ejecuta su lógica pero todavía no se dibuja: eso es M2b y M2c.
 
 ---
 
@@ -124,9 +125,9 @@ Primer hito **con imagen**. Criterio: front end navegable y legible en 480p y 48
 |---|---|---|
 | 1 | Grabación del dibujo 2D en C | **Hecho**, validado contra la referencia |
 | 2 | Modos de vídeo 480p/480i | **Hecho**, probado con los dos cables |
-| 3 | VRAM y paletas → texturas del PVR | Siguiente |
-| 4 | Dibujo 2D en el PVR | |
-| 5 | Ayudantes del HUD | |
+| 3 | VRAM y paletas → texturas del PVR | **Hecho**, medido |
+| 4 | Dibujo 2D en el PVR | **Hecho**, el front end se ve en Dreamcast |
+| 5 | Ayudantes del HUD | **No hacen falta para el front end** (ver abajo) |
 
 ### Paso 1: la grabación
 
@@ -164,6 +165,80 @@ del mundo, que son M2b y M2c.
 según la región de la consola. Se fuerza con `/cd/VIDEO.TXT` (`vga`, `ntsc`, `pal`), que
 `mkdisc.sh --video` escribe. Forzar VGA sin cable VGA no se obedece: la consola solo saca
 31 kHz por ese cable.
+
+### Paso 3: la caché de texturas
+
+`dc/src/render/texcache.c`, portable. Convierte de la VRAM de PS1 (páginas de 4, 8 o 16
+bits con paleta) a ARGB1555 del PVR. Tres decisiones, cada una salida de una medida:
+
+1. **Se convierte el rectángulo que los UV usan, no la página.** Guardar la página entera
+   por combinación serían 6,75 MB; el rectángulo son 0,66 MB.
+2. **La caché persiste entre frames.** La VRAM apenas cambia (6,6 escrituras por frame),
+   así que reconvertir cada frame sería tirar el SH-4 a la basura.
+3. **Se invalida por solape**, no en bloque: una escritura a la VRAM solo tumba las
+   entradas cuyo rectángulo —o cuya paleta— toca.
+
+Los texeles se reparten con un **asignador por tope**: una entrada convertida no se
+mueve, porque compactar cambiaría todos los desplazamientos y obligaría a reconvertirlo
+todo. Cuando el buffer se llena se vacía entero y se empieza de cero.
+
+**Y hace falta expulsar.** La tabla tiene 128 entradas y al principio no se expulsaba
+nada. Sobre 120 frames no se nota (63 combinaciones), pero en 3 000 frames la tabla se
+llena de combinaciones viejas y **13 654 peticiones se quedaban sin textura**: en pantalla
+eran cuadros negros en la foto del coche. Expulsando la entrada que lleva más tiempo sin
+pedirse —nunca una del frame en curso— bajan a **0**.
+
+| Medido, 3 000 frames de front end | |
+|---|---|
+| Conversiones | 380 (0,13 por frame) |
+| Pico de texeles vivos | 523 968 de 524 288 (1,0 MB) |
+| Invalidaciones por escritura a la VRAM | 101 |
+| Expulsiones por tabla llena | 39 |
+| Vaciados del buffer | 4 |
+| **Peticiones sin textura** | **0** |
+
+### Paso 4: el dibujo en el PVR
+
+`dc/src/platform/dc/render.c`. Cada cuadro va como una tira de dos triángulos a la lista
+**translúcida** con el **autosort desactivado**, para que el PVR respete el orden de
+envío: esto es un algoritmo del pintor, no una escena con profundidad. Sin test ni
+escritura de Z, sin descarte de caras.
+
+- **Coordenadas:** el front end dibuja en 512×240 y la salida es 640×480, así que el
+  escalado **no es uniforme**: ×1,25 en horizontal y ×2 en vertical. (En carrera la
+  pantalla de PS1 es 320×240, o sea ×2 en ambos ejes.)
+- **Color:** en PS1 el 0x80 del color de vértice es el 1,0 y modula la textura; aquí se
+  duplica por canal y se satura.
+- **Recorte:** en software sobre los cuadros alineados a los ejes, ajustando también los
+  UV. El recorte por hardware del PVR va por baldosas de 32×32 y no da el grano fino que
+  el texto desplazado del front end necesita.
+- **Subidas a la VRAM del PVR:** solo cuando la caché ha convertido algo nuevo.
+
+**El encuadre está verificado, y no a ojo.** Dibujando cuatro marcadores de 32×32 en las
+esquinas de 640×480 se midió que el marcador de (0,0) cae exactamente en el primer píxel
+de la zona dibujada y mide exactamente 32×32 en coordenadas de pantalla. Lo que parecía
+un desplazamiento era la captura: PowerShell pide el rectángulo del cliente en píxeles
+lógicos y `PrintWindow` dibuja en físicos, así que con el escalado de Windows al 125 %
+la imagen salía recortada por la derecha y por abajo. Capturando a ×1,25 aparece la
+pantalla entera.
+
+Por serie, el modo confirmado es `640x480, bitmap en 172,40`.
+
+**Rendimiento:** **~60 fps** en el front end dibujado (Flycast con dynarec), contra 69–78
+sin dibujar.
+
+### Paso 5: los ayudantes del HUD
+
+Medido antes de escribir nada: en 3 000 frames de front end **no se llama ni una vez** a
+los cuatro ayudantes del HUD, y no queda ninguna primitiva sin grabar ni ningún cuadro
+sin dibujar. El front end ya se lee entero —menú, opciones, foto y texto de ayuda—, que
+es el criterio del paso.
+
+`Rect`, `ThinBox`, `PauseBox`, `Shape` y `Bitmap` son del **HUD de carrera**, y en
+carrera la lista 2D sale hoy vacía (0 cuadros en el frame 900) porque la vista de
+carrera entera todavía no se dibuja. Portarlos ahora sería escribir a ciegas contra un
+escenario que no existe: van con M2c, cuando haya carrera que mirar. El port los deja
+correr y los **cuenta**, así que el primer guion que los toque lo dirá en el informe.
 
 ---
 
@@ -224,6 +299,13 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **Los campos del descriptor de pista de un CDI se miden desde el final del nombre del
   archivo**, que va dentro del propio descriptor.
 - **El intérprete de respaldo no es código muerto:** 21 378 entradas en 900 frames.
+- **Las capturas de la ventana de Flycast salen recortadas por el DPI.** PowerShell pide
+  el rectángulo del cliente en píxeles lógicos y `PrintWindow` dibuja en físicos: con
+  Windows al 125 % hay que crear el mapa de bits a ×1,25 o se pierde la derecha y el
+  fondo. No es un desplazamiento del render.
+- **La consola serie de Flycast es una ventana propia** («Flycast Serial Output»), no la
+  salida estándar: en Windows el proceso es de interfaz gráfica y `stdout` no va a
+  ninguna parte.
 
 ---
 
@@ -231,7 +313,10 @@ incompleta— los encontró el oráculo, no la lectura del código.
 
 - **Probar en una consola real.** El CDI es grabable y arranca con la BIOS real en
   emulador, pero nadie lo ha quemado. Hasta entonces los fps son de Flycast.
-- **Caché de texturas del PVR** (paso 3 de M2a): no puede cachear páginas enteras.
+- **El bit STP de PS1 no cabe en ARGB1555.** PS1 marca por texel los que se mezclan en
+  las primitivas semitransparentes; ARGB1555 tiene **un solo bit** de alfa. Hoy se
+  resuelve por modo de mezcla del cuadro entero, no por texel.
+- **Leer el front end en 480i.** Está probado el modo, no la legibilidad en una tele.
 - **M4:** factor de escala de las texturas, método y formato.
 - **Alcance:** si la primera versión incluye 2P y FMV.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.

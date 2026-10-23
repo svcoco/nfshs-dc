@@ -15,7 +15,9 @@ funcional: el juego **arranca con la BIOS real** desde un CDI (`mkdisc.sh`, form
 omisión), el front end corre a 69–78 fps y la **carrera simula a 98–113 fps**, `ps1rt`
 pasa **227/227** en SH-4 y el código generado ocupa **3,43 MB** con `-Os` (sin overlays).
 Falta solo **probarlo en una consola real**: el CDI es grabable en CD-R y es el formato
-que la consola acepta, pero nadie lo ha quemado todavía.**
+que la consola acepta, pero nadie lo ha quemado todavía. **M2a tiene sus cinco pasos
+hechos**: el front end **se dibuja con el PVR en Dreamcast a ~60 fps**, completo y
+legible; queda mirarlo en 480i en una tele, que es el criterio de salida del hito.**
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y

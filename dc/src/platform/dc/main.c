@@ -17,6 +17,7 @@
 #include "host.h"
 #include "ps1rt.h"
 #include "spu.h"
+#include "render.h"
 #include "video.h"
 
 KOS_INIT_FLAGS(INIT_DEFAULT);
@@ -303,6 +304,21 @@ int main(int argc, char **argv)
      * no hay acceso a carreras (ver docs/hitos/M1a.md). */
     host.unlock = 1;
     host.poll_input = on_frame;
+    /* El PVR: a partir de aqui el juego se DIBUJA, no solo se cuenta. */
+    if (render_init()) {
+        host.tex_buf = render_texbuf();
+        host.tex_cap = render_texcap();
+        host.on_draw = render_frame;
+        printf("PVR listo: %lu texeles de cache de texturas\n",
+               (unsigned long)render_texcap());
+        /* A partir de aqui la pantalla es del juego, asi que los diagnosticos se van
+         * al puerto serie: en Flycast salen en la ventana "Serial Output" y en
+         * hardware por el cable serie o dcload. */
+        printf("(los contadores siguen por el puerto serie)\n");
+        dbgio_dev_select("scif");
+    } else {
+        printf("AVISO: el PVR no arranco; se sigue sin dibujar\n");
+    }
 
     host_attach(&host, &cpu);
 

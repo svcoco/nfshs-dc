@@ -115,4 +115,15 @@ es lo que la hace primera— **se puede comparar contra la referencia**, igual q
 la referencia produce la misma lista de comandos de dibujo, así que el oráculo sigue
 sirviendo. Después el PVR, que ya no tiene oráculo y hay que mirarlo con los ojos.
 
+**Al 2026-10-23 los cinco pasos están hechos** y el front end se dibuja en Dreamcast a
+~60 fps. La parte sin oráculo dejó dos lecciones que valen para M2b y M2c:
+
+- **120 frames no bastan para medir una caché.** La de texturas parecía perfecta en 120
+  frames y a los 3 000 dejaba 13 654 peticiones sin textura, porque la tabla se llenaba
+  de combinaciones viejas y no expulsaba ninguna. El escenario corto esconde el
+  envejecimiento.
+- **Mirar una captura no es medir.** Lo que parecía un desplazamiento del encuadre del
+  PVR era el escalado de DPI de la captura de pantalla. Lo resolvieron cuatro marcadores
+  de posición conocida y una línea por el puerto serie, no más capturas.
+
 Detalle y cifras en `docs/hitos/M2a.md`.

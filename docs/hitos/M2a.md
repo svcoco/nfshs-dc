@@ -57,6 +57,9 @@ Las primitivas crudas que hay que parsear son el juego estandar de la GPU de PS1
 | 4 | **Dibujo 2D en el PVR**: cuadros con color por vertice, textura, color key y semitransparencia | el front end se ve |
 | 5 | **Texto y ayudantes del HUD** | el front end se **lee** |
 
+Estado (2026-10-23): **los cinco pasos cerrados**. Falta el criterio de salida del hito,
+que es mirar el front end en 480i en una tele.
+
 El paso 1 va primero porque es **codigo portable y tiene oraculo**: la referencia produce
 la misma lista, asi que se puede comparar igual que se compara la RAM, sin tocar un
 Dreamcast. Del paso 2 en adelante ya no hay oraculo y hay que mirar la pantalla.
@@ -202,6 +205,25 @@ estatica pasa muy de vez en cuando.
 | Invalidaciones por escritura a la VRAM | 0 |
 | Veces que no cupo algo | 0 |
 
+### Y medido en 3 000 frames, que es donde aparecio el fallo
+
+120 frames se quedan cortos. La tabla tiene 128 entradas y **al principio no expulsaba
+nada**, asi que a la larga se llenaba de combinaciones viejas:
+
+| | sin expulsion | con expulsion |
+|---|---|---|
+| Conversiones | 267 | 380 |
+| Invalidaciones | 89 | 101 |
+| Expulsiones | — | 39 |
+| Vaciados del buffer | 4 | 4 |
+| **Peticiones sin textura** | **13 654** | **0** |
+| Cuadros sin dibujar en el frame 2 800 | 11 | 0 |
+
+Se expulsa la entrada que lleva **mas tiempo sin pedirse**, y nunca una del frame en
+curso, que se estaria dibujando ahora mismo. Sus texeles quedan huerfanos en el asignador
+por tope hasta el siguiente vaciado: cuatro vaciados en 3 000 frames es mucho mas barato
+que no dibujar el cuadro.
+
 63 conversiones para 63 texturas distintas: **cada una se convierte una sola vez**. En
 SH-4 eso quiere decir que el coste es del arranque, no del frame.
 
@@ -229,8 +251,51 @@ recorrerla del final al principio.
 
 PS1 marca con el bit STP los texeles que se mezclan en las primitivas semitransparentes,
 y la referencia los guarda como alfa 128. ARGB1555 solo tiene **un bit** de alfa, asi que
-esa distincion no cabe en el formato: habra que resolverla en el paso 4, por lista de
-dibujo o por modo de mezcla.
+esa distincion no cabe en el formato. **Resuelto en el paso 4 por modo de mezcla del
+cuadro entero**, no por texel; si algun efecto lo necesita por texel, se replantea.
+
+## 3quinquies. Pasos 4 y 5 hechos (2026-10-23)
+
+### Paso 4: el dibujo en el PVR
+
+`dc/src/platform/dc/render.c`. Cada cuadro es una tira de dos triangulos en la lista
+**translucida** con el **autosort desactivado**: manda el orden de envio, porque esto es
+un algoritmo del pintor y no una escena con profundidad. Sin test ni escritura de Z y
+sin descarte de caras.
+
+| Decision | Por que |
+|---|---|
+| Escalado **x1,25 horizontal y x2 vertical** | el front end dibuja en 512x240 y la salida es 640x480. **No es uniforme.** En carrera la pantalla de PS1 es 320x240, o sea x2 en los dos ejes |
+| Color de vertice **duplicado y saturado** | en PS1 el 0x80 es el 1,0 y modula la textura; lo que PS1 podia pasar de 1,0 se pierde |
+| Recorte **en software** sobre los cuadros alineados a los ejes, ajustando los UV | el recorte por hardware del PVR va por baldosas de 32x32 y no da el grano que necesita el texto desplazado del front end |
+| Resubida de texturas **solo cuando la cache convierte algo** | 380 conversiones en 3 000 frames: casi nunca |
+
+**El encuadre se midio, no se estimo.** Dibujando cuatro marcadores de 32x32 en las
+esquinas de 640x480: el de (0,0) cae en el **primer pixel** de la zona dibujada y mide
+exactamente 32x32 de pantalla. Por serie, `render: modo 640x480  bitmap en 172,40` y
+`pantalla de PS1 512x240 -> 640x480`.
+
+Lo que parecia un desplazamiento era la **captura**: PowerShell pide el rectangulo del
+cliente en pixeles logicos y `PrintWindow` dibuja en fisicos, asi que con Windows al
+125 % la imagen salia recortada por la derecha y por abajo. Capturando a x1,25 sale la
+pantalla entera.
+
+**Resultado:** el front end dibujado en Dreamcast a **~60 fps** (69-78 sin dibujar), con
+el menu *game setup*, sus cuatro opciones, el icono, la foto del coche y el texto de
+ayuda en su sitio, igual que el rasterizador de PC para el mismo frame.
+
+### Paso 5: los ayudantes del HUD
+
+Medido antes de escribir codigo: en 3 000 frames de front end los cuatro ayudantes
+**no se llaman ni una vez**, no queda ninguna primitiva sin grabar y no hay ningun cuadro
+sin dibujar. El front end ya se lee entero, que es el criterio del paso.
+
+`Rect`, `ThinBox`, `PauseBox`, `Shape` y `Bitmap` son del **HUD de carrera**, y en
+carrera la lista 2D sale hoy **vacia** (0 cuadros en el frame 900) porque la vista de
+carrera todavia no se dibuja. Portarlos ahora seria escribir a ciegas contra un escenario
+que no existe: van con **M2c**. El port los deja correr y los **cuenta**
+(`views_hud_unported`), asi que el primer guion que los toque lo dira en el informe en
+vez de divergir en silencio.
 
 ## 4. Lo que ya esta hecho y se aprovecha
 

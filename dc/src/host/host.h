@@ -15,6 +15,7 @@
 
 #include "ps1rt.h"
 #include "files.h"
+#include "overlay.h"
 
 #include <stdio.h>
 
@@ -144,6 +145,11 @@ typedef struct GameHost {
 
     /* ---- dibujo que se cuenta pero no se pinta (M2a) ---- */
     uint64_t fe_shapes, fe_squares, player_views;
+    /* La lista de dibujo 2D de este frame (M2a paso 1). El port graba lo que el
+     * juego quiere pintar; dibujarlo con el PVR son los pasos 3 y 4. */
+    Overlay  overlay;
+    uint64_t overlay_unknown;   /* primitivas de GPU que no se saben grabar */
+    uint32_t overlay_max;       /* el frame con mas cuadros */
     uint32_t race_chunks;     /* trozos de pista que la ultima vista decidio dibujar */
     uint64_t fields;          /* campos de video de 60 Hz transcurridos */
     uint64_t last_top;        /* reloj en la frontera de frame anterior */

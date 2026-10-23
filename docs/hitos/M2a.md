@@ -61,6 +61,46 @@ El paso 1 va primero porque es **codigo portable y tiene oraculo**: la referenci
 la misma lista, asi que se puede comparar igual que se compara la RAM, sin tocar un
 Dreamcast. Del paso 2 en adelante ya no hay oraculo y hay que mirar la pantalla.
 
+## 3bis. Paso 1 hecho: la grabacion (2026-10-23)
+
+`dc/src/host/overlay.c` convierte el dibujo del front end en una lista de cuadros en
+coordenadas de pantalla, por las **tres vias** que usa el juego:
+
+- el **emisor de formas** (`0x8004E74C`), que es el grueso: lee la descripcion de la
+  forma en la RAM del juego y la parte en varios cuadros, porque una pagina de textura
+  de PS1 solo tiene 256 texeles de ancho;
+- `PSXDrawSquare` y `PSXDrawTransSquare`, cuadros planos (el transparente se dibuja
+  varias veces encima de si mismo, que es como el original oscurece);
+- las rutinas que **construyen sus propias primitivas** (DrawTV y companeras), que ya se
+  corrian anidadas: ahora se graba lo que escriben en el buffer de primitivas, parseando
+  el juego estandar de la GPU de PS1 (`0x20-0x3F` poligonos, `0x60-0x7F` sprites,
+  `0x40-0x5F` lineas, `0xE1` modo de dibujo).
+
+### Medido, 120 frames de front end
+
+| | |
+|---|---|
+| Cuadros grabados | **22 285** |
+| Maximo en un frame | **198** |
+| Primitivas que no se supieron grabar | **0** |
+| Cuadros que no cupieron | **0** |
+| Combinaciones `(pagina, paleta)` distintas, en total | **62** |
+| Combinaciones **vivas a la vez en un frame** | **53** |
+
+**Las 53 son el numero que manda, y avisan de un problema.** Si la cache convirtiera una
+pagina de textura entera por combinacion (256x256 texeles a 16 bits = 128 KB), serian
+**6,8 MB de los 8 MB de VRAM del PVR**. O sea que el paso 3 **no puede** cachear paginas
+enteras: tiene que convertir solo el rectangulo que los UV usan de verdad, que en un
+sprite de interfaz es pequeno. Queda anotado antes de disenarla.
+
+Sin regresion: 227/227 unitarias, 120 frames identicos y la misma divergencia conocida en
+el 232. Era de esperar —la grabacion solo **lee** la RAM del invitado— pero se comprobo.
+El arbol portable sigue compilando para SH-4 sin un solo aviso.
+
+Lo que falta del paso 1 es el **oraculo**: comparar la lista del port contra la de la
+referencia, que produce la misma. Hoy solo se comprueba que las cifras son coherentes y
+que no hay primitivas sin grabar.
+
 ## 4. Lo que ya esta hecho y se aprovecha
 
 - `host_capture_prims` (views.c) **ya corre las rutinas de dibujo del front end en un

@@ -86,9 +86,18 @@ uint32_t host_capture_prims(GameHost *h, Cpu *c, uint32_t addr)
     for (i = 0; i < 16u; i++)
         ps1_w32(c, nested_sp + 16u + 4u * i, ps1_r32(c, sp + 16u + 4u * i));
 
-    h->capturing = 1;
-    ret = ps1_call_nested(c, addr, args, 4u);
-    h->capturing = 0;
+    /* El buffer de primitivas crece desde el puntero del scratchpad: lo que la rutina
+     * anada entre estas dos lecturas es lo que dibujo. */
+    {
+        uint32_t ini = ps1_r32(c, 0x1F800004u);
+        uint32_t fin;
+
+        h->capturing = 1;
+        ret = ps1_call_nested(c, addr, args, 4u);
+        h->capturing = 0;
+        fin = ps1_r32(c, 0x1F800004u);
+        overlay_record_packets(h, c, ini, fin);
+    }
     h->views_captured++;
     return ret;
 }

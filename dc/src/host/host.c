@@ -360,6 +360,17 @@ void host_report(const GameHost *h, const Cpu *c)
     printf("  formas 2D del front end:     %llu  cuadros: %llu\n",
            (unsigned long long)h->fe_shapes, (unsigned long long)h->fe_squares);
     printf("  vistas 3D pedidas:           %llu\n", (unsigned long long)h->player_views);
+    /* M2a: lo que el juego quiere PINTAR, ya grabado. Las combinaciones distintas
+     * de pagina de textura y paleta son lo que dimensiona la cache del PVR. */
+    printf("  cuadros grabados:            %llu (maximo por frame: %u)\n",
+           (unsigned long long)h->overlay.total, (unsigned)h->overlay_max);
+    printf("  combinaciones pagina+paleta: %u en total, %u a la vez en un frame%s\n",
+           (unsigned)h->overlay.combos_n, (unsigned)h->overlay.frame_combos_max,
+           h->overlay.combos_lost ? " (la tabla se lleno)" : "");
+    if (h->overlay.dropped || h->overlay_unknown)
+        printf("  AVISO: %llu cuadros no cupieron, %llu primitivas sin grabar\n",
+               (unsigned long long)h->overlay.dropped,
+               (unsigned long long)h->overlay_unknown);
     printf("  llamadas de video:           %llu\n", (unsigned long long)h->video_calls);
     printf("  flips (PutDispEnv):          %llu\n", (unsigned long long)h->flips);
     printf("  area de pantalla:            %u,%u %ux%u\n",

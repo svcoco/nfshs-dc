@@ -182,6 +182,11 @@ void host_frame_top(GameHost *h, Cpu *c)
     if (h->poll_input != NULL)
         h->poll_input(h);
     pad_write(h, c);
+    /* La lista de dibujo es de UN frame: aqui se cierra la del frame que termina (de
+     * momento solo se mide; dibujarla es el paso 4 de M2a) y se empieza la siguiente. */
+    if (h->overlay.n > h->overlay_max)
+        h->overlay_max = h->overlay.n;
+    overlay_reset(&h->overlay);
     /* fin del guion: parada ordenada, para que el arnes imprima su informe */
     if (h->pad_end != 0u && h->frames >= h->pad_end)
         c->tick_limit = 0;

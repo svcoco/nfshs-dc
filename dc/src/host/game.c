@@ -76,15 +76,41 @@ int host_game_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
      * Estas son HLE porque en la referencia las dibuja su motor. En M1a no se dibuja
      * nada, asi que solo se cuentan: la cuenta ya dice cuanto dibujo pide el front
      * end, que es dato util para dimensionar M2a. La grabacion de verdad es M2. */
-    case 0x8004E74Cu:                       /* emisor de formas del front end */
+    case 0x8004E74Cu: {
+        /* El emisor de formas del front end (DrawShapeExtended y companeras). Los
+         * argumentos quinto y sexto van en la pila: la direccion de los cuatro colores
+         * de esquina y el modo de mezcla. */
+        uint32_t sp = c->r[29];
+        uint32_t colours_at = ps1_r32(c, sp + 16u);
+        uint32_t abr = ps1_r32(c, sp + 20u);
+        uint32_t colours[4];
+        uint32_t k;
+
+        for (k = 0; k < 4u; k++)
+            colours[k] = ps1_r32(c, colours_at + 4u * k) & 0xFFFFFFu;
         h->fe_shapes++;
+        overlay_shape_quads(h, c, a0, c->r[5], (int32_t)c->r[6], (int32_t)c->r[7],
+                            colours, abr);
         *ret = 0;
         return 1;
-    case 0x8004F12Cu:                       /* PSXDrawSquare */
-    case 0x8004F3B8u:                       /* PSXDrawTransSquare */
+    }
+    case 0x8004F12Cu:                       /* PSXDrawSquare(color, x, y, w, h) */
+    case 0x8004F3B8u: {                     /* PSXDrawTransSquare(..., veces) */
+        /* El quinto argumento (la altura) va en la pila; el transparente se dibuja
+         * varias veces encima de si mismo, que es como el original lo oscurece. */
+        uint32_t sp = c->r[29];
+        int32_t  hh = (int32_t)ps1_r32(c, sp + 16u);
+        int semi = (addr == 0x8004F3B8u);
+        int32_t veces = semi ? (int16_t)ps1_r16(c, sp + 20u) : 1;
+        int32_t i;
+
         h->fe_squares++;
+        for (i = 0; i < veces; i++)
+            overlay_square(h, (int32_t)c->r[5], (int32_t)c->r[6], (int32_t)c->r[7],
+                           hh, a0, semi);
         *ret = 0;
         return 1;
+    }
     case 0x800B4024u:                       /* Render_RenderPlayerView: la vista 3D */
         h->player_views++;
         race_view_logic(h, c, a0, c->r[5]);

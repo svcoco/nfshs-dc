@@ -17,6 +17,7 @@
 #include "host.h"
 #include "ps1rt.h"
 #include "spu.h"
+#include "video.h"
 
 KOS_INIT_FLAGS(INIT_DEFAULT);
 
@@ -217,12 +218,40 @@ int main(int argc, char **argv)
     (void)argc;
     (void)argv;
 
+    /* El modo de video va ANTES que la consola de pantalla, que se monta sobre el
+     * framebuffer del modo vigente. Si el disco trae /cd/VIDEO.TXT con "vga", "ntsc"
+     * o "pal", manda eso; si no, lo decide el cable. */
+    {
+        char forzado[16];
+        FILE *vf = fopen(GAMEDATA "/VIDEO.TXT", "r");
+        size_t i;
+
+        forzado[0] = '\0';
+        if (vf != NULL) {
+            if (fgets(forzado, (int)sizeof(forzado), vf) == NULL)
+                forzado[0] = '\0';
+            fclose(vf);
+            /* fuera el salto de linea, y a minusculas */
+            for (i = 0; forzado[i] != '\0'; i++) {
+                if (forzado[i] == '\r' || forzado[i] == '\n') {
+                    forzado[i] = '\0';
+                    break;
+                }
+                if (forzado[i] >= 'A' && forzado[i] <= 'Z')
+                    forzado[i] = (char)(forzado[i] - 'A' + 'a');
+            }
+        }
+        video_init(forzado[0] ? forzado : NULL);
+    }
+
     /* A pantalla: sin cable serie ni dcload es la unica salida que hay. */
     dbgio_dev_select("fb");
     dbgio_enable();
 
-    printf("NFS High Stakes -> Dreamcast  (M1b)\n");
-    printf("%lu funciones recompiladas\n\n", (unsigned long)ps1_range_n);
+    printf("NFS High Stakes -> Dreamcast\n");
+    printf("%lu funciones recompiladas\n", (unsigned long)ps1_range_n);
+    printf("video: %s   (cable: %s)%s\n\n", video_mode_name(),
+           video_cable_name(), video_forced() ? "  [forzado]" : "");
 
     /* Donde esta el sistema de archivos, segun el disco. KOS lo busca SIEMPRE en el
      * area de baja densidad (fs_iso9660.c: cdrom_read_toc(&toc, false)), asi que la

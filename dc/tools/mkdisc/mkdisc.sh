@@ -11,6 +11,7 @@
 #   mkdisc.sh ... --format gdi    la otra disposicion (ver abajo)
 #   mkdisc.sh ... --minimal       solo lo que la ejecucion medida toca (~90 MB)
 #   mkdisc.sh ... --script dc/test/diff/scripts/into_race.txt   entrada guionizada
+#   mkdisc.sh ... --video ntsc   fuerza el modo en vez de detectar el cable
 #
 # ---- las dos disposiciones, y por que CDI por omision ----
 #
@@ -27,7 +28,7 @@
 # ISO9660 son absolutos y KOS los lee tal cual (ver docs/hitos/M1b.md).
 set -eu
 
-ELF=""; DATA="gamedata"; OUT=""; MINIMAL=0; SCRIPT=""; FORMAT="cdi"
+ELF=""; DATA="gamedata"; OUT=""; MINIMAL=0; SCRIPT=""; FORMAT="cdi"; VIDEO=""
 KOS_BASE="${KOS_BASE:-/opt/toolchains/dc/kos}"
 AQUI=$(dirname "$0")
 
@@ -38,6 +39,7 @@ while [ $# -gt 0 ]; do
         --out)     OUT=$2; shift 2 ;;
         --script)  SCRIPT=$2; shift 2 ;;
         --format)  FORMAT=$2; shift 2 ;;
+        --video)   VIDEO=$2; shift 2 ;;
         --minimal) MINIMAL=1; shift ;;
         *) echo "opcion desconocida: $1" >&2; exit 2 ;;
     esac
@@ -85,6 +87,11 @@ set -- -as mkisofs -C "0,$LBA" -G "$TMP/IP.BIN" -R -l \
        -m "Need for Speed*" -m "MOVIES" -o "$TMP/datos.iso" \
        -graft-points "/1ST_READ.BIN=$TMP/1ST_READ.BIN"
 [ -n "$SCRIPT" ] && set -- "$@" "/SCRIPT.TXT=$SCRIPT"
+# --video vga|ntsc|pal: fuerza el modo en vez de dejarlo a la deteccion del cable.
+if [ -n "$VIDEO" ]; then
+    echo "$VIDEO" > "$TMP/VIDEO.TXT"
+    set -- "$@" "/VIDEO.TXT=$TMP/VIDEO.TXT"
+fi
 if [ "$MINIMAL" -eq 1 ]; then
     for f in NFS4.EXE FRONT.BIN ZZZFE.VIV ZZENGL.VIV ZZZZAMUS.VIV ZZZMSLKH.VIV \
              LICENSEA.DAT; do

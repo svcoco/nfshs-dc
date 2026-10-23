@@ -152,7 +152,9 @@ dc-size: dc-check $(GEN)/parts.mk
 # El juego en Dreamcast. PS1_DIAG=0 deja fuera el volcado y los guiones del test
 # diferencial, que escriben archivos y en un GD-ROM no tienen sentido.
 DC_HOST_SRCS := $(filter-out src/host/dump.c,$(HOST_SRCS))
-DC_SRCS      := $(PS1RT_SRCS) $(DC_HOST_SRCS) $(HLE_TABLE) src/platform/dc/main.c
+# test_main.c es el arranque del ELF de PRUEBAS (dc-test), no el del juego.
+DC_PLAT_SRCS := $(filter-out src/platform/dc/test_main.c,$(wildcard src/platform/dc/*.c))
+DC_SRCS      := $(PS1RT_SRCS) $(DC_HOST_SRCS) $(HLE_TABLE) $(DC_PLAT_SRCS)
 DC_OBJS      := $(patsubst %.c,$(DCBUILD)/o/%.o,$(DC_SRCS))
 
 dc: $(DCBUILD)/nfshs.elf

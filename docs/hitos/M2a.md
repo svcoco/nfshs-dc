@@ -131,6 +131,40 @@ referencia graba ademas la tabla de ordenacion de las vistas de carrera (HUD,
 cuentavueltas, mapa) y toda la geometria del mundo, que es **M2b y M2c**. El oraculo de
 M2a mide el front end, que es su criterio de salida.
 
+## 3ter. Paso 2 hecho: modos de video (2026-10-23)
+
+`dc/src/platform/dc/video.c`. Elige el modo por el cable y permite forzarlo.
+
+| Cable | Modo |
+|---|---|
+| VGA | **480p VGA** (31 kHz) |
+| RGB/SCART o compuesto | **480i**, NTSC o PAL segun la region de la consola |
+
+Para forzarlo, el disco puede llevar `/cd/VIDEO.TXT` con `vga`, `ntsc` o `pal`;
+`mkdisc.sh --video ntsc` lo escribe. Forzar VGA sin cable VGA **no se obedece**: la
+consola solo saca 31 kHz por ese cable y la tele se quedaria en negro, asi que se avisa
+y se cae al entrelazado.
+
+Comprobado en Flycast con la BIOS real, cambiandole el cable:
+
+```
+cable VGA        -> video: 480p VGA   (cable: VGA)
+cable compuesto  -> video: 480i NTSC  (cable: compuesto)
+cable VGA + VIDEO.TXT=ntsc -> video: 480i NTSC  (cable: VGA)  [forzado]
+```
+
+### Un dato medido que corrige un detalle de CLAUDE.md seccion 3
+
+La seccion 3 dice que «las coordenadas 2D se escalan x2». Medido con `NFSHS_ENVDBG`
+sobre los dos guiones, **el juego no dibuja a 320x240**: su pantalla es de **512x240**,
+con doble buffer en la VRAM de PS1 (en y=0 e y=256), tanto en el front end como en
+carrera. Las sub-areas de 320x240 que aparecen son vistas, no la pantalla.
+
+Asi que el x2 vale para la vertical (240 -> 480) pero no para la horizontal: 512 -> 640
+es **x1,25**. La regla que si se sostiene, y que es lo que la seccion 3 pide de verdad,
+es **llevar el area de pantalla de PS1 a 640x480**. No cambia ninguna decision; cambia
+un factor que habria salido mal en el paso 4.
+
 ## 4. Lo que ya esta hecho y se aprovecha
 
 - `host_capture_prims` (views.c) **ya corre las rutinas de dibujo del front end en un

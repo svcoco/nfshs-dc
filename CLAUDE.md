@@ -75,8 +75,11 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 - **Audio:** se convierte antes de compilar (ADPCM de PS1 a formato AICA), en **M3**. En
   M1 y M2 el SPU es un stub que acepta escrituras y mantiene el volumen de voz.
 - **Vídeo (en M2a):** 480p a 31 kHz (VGA) y 480i a 15 kHz. Se renderiza a 640×480 en
-  ambos, el modo se elige con `vid_check_cable` (se puede forzar) y las coordenadas 2D se
-  escalan ×2.
+  ambos y el modo se elige con `vid_check_cable` (se puede forzar con `/cd/VIDEO.TXT`).
+  **Hecho el 2026-10-23** (`dc/src/platform/dc/video.c`), comprobado con los dos cables.
+  Matiz medido: el juego dibuja a **512×240**, no a 320×240, así que el «×2» vale para
+  la vertical pero la horizontal es ×1,25. La regla es **llevar el área de pantalla de
+  PS1 a 640×480** (detalle en `docs/hitos/M2a.md`).
 - **FPS (decisión de Jorge, 2026-10-18): sin tope artificial.**
   - **Mínimo conservador: 30 fps sostenidos.** El original en PS1 tiene el tope en 30 y
     baja hasta 8 en los momentos malos, así que 30 sostenidos ya es una mejora sobre él.

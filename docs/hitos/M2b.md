@@ -308,3 +308,12 @@ Por encima del anillo mas alto de la cupula no hay geometria: ese hueco lo cubre
 
 El cielo cuesta menos del 10 % de los triangulos del frame y no mueve el ritmo: sigue
 clavado en los 60 Hz del campo de video, que es el techo de la pantalla.
+
+### El dithering, apagado (2026-10-23)
+
+El PVR tapizaba la imagen con su patron de puntos. **No es una opcion suelta**: KOS lo
+enciende dentro de la tabla de modos de pixel (`PM_RGB555` y `PM_RGB565` llevan
+`PVR_PM_DITHER` en `video.c`), asi que se activa solo al fijar el modo de video. Se apaga
+con `vid_set_dithering(false)` **despues** de `vid_set_mode_ex`, que es lo que hace ahora
+`dc/src/platform/dc/video.c` en sus dos caminos. El degradado del cielo y el asfalto
+salen limpios y el ritmo no se mueve.

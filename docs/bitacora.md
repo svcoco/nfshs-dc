@@ -425,6 +425,11 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **Mandar geometría a una lista del PVR con `PVR_BINSIZE_0` no da error:** deja la
   pantalla negra y hunde el ritmo a 4 fps. M2a solo usaba la translúcida, así que la
   opaca se quedó a cero sin que se notara.
+- **El dithering del PVR no es una opción aparte: va pegado al modo de píxel RGB.** En
+  `video.c` de KOS, `PM_RGB555` y `PM_RGB565` llevan `PVR_PM_DITHER` en la propia tabla,
+  así que se enciende solo al fijar el modo de vídeo. Se apaga con
+  `vid_set_dithering(false)` **después** de `vid_set_mode_ex`, o el PVR tapiza la imagen
+  con su patrón de puntos.
 - **En la lista opaca del PVR, un texel con color clave se pinta NEGRO.** No hay prueba
   de alfa. Lo que lleve color clave va a *punch-through*.
 - **El `0x80` de PS1 es el 1,0 en todas partes**, también en el color de vértice del

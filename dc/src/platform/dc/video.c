@@ -80,10 +80,20 @@ int video_init(const char *forzar)
                                            : "480i NTSC (VGA pedido sin cable VGA)";
         s_forzado = 0;
         vid_set_mode_ex(&vid_builtin[dm]);
+    /* El dithering NO es una opcion aparte: KOS lo enciende dentro de la tabla de modos
+     * de pixel (PM_RGB555 y PM_RGB565 llevan PVR_PM_DITHER), asi que se activa solo al
+     * fijar el modo de video y hay que apagarlo DESPUES. Sin esto el PVR tapiza la
+     * imagen con su patron de puntos. */
+    vid_set_dithering(false);
         return 0;
     }
 
     vid_set_mode_ex(&vid_builtin[dm]);
+    /* El dithering NO es una opcion aparte: KOS lo enciende dentro de la tabla de modos
+     * de pixel (PM_RGB555 y PM_RGB565 llevan PVR_PM_DITHER), asi que se activa solo al
+     * fijar el modo de video y hay que apagarlo DESPUES. Sin esto el PVR tapiza la
+     * imagen con su patron de puntos. */
+    vid_set_dithering(false);
     return 1;
 }
 

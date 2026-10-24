@@ -17,6 +17,7 @@
 #include "files.h"
 #include "overlay.h"
 #include "texcache.h"
+#include "track.h"
 
 #include <stdio.h>
 
@@ -74,7 +75,7 @@ typedef struct {
 #define VIEWS_MAX        2u    /* un jugador; dos en M5 */
 #define VIEW_CHUNKS_MAX 64u    /* lo que cabe en la lista del juego */
 
-typedef struct {
+typedef struct RaceView {
     uint32_t player;
     int16_t  rect[4];          /* recorte relativo al de la vista 0, y su tamano */
     int32_t  camera_pos[3];
@@ -184,6 +185,17 @@ typedef struct GameHost {
     /* Las vistas de carrera preparadas en el frame en curso. */
     RaceView view[VIEWS_MAX];
     uint32_t views_n;
+
+    /* Chunk_lightTable: el color de vertice de la pista, indexado por la sombra que
+     * cada vertice trae horneada. Vive en la RAM del juego y cambia con la pista, la
+     * variante y el clima, asi que se relee cuando el puntero se mueve. */
+    uint32_t light_table[256];
+    uint32_t light_ptr;
+
+    /* El nombre base del ultimo .GRP que el juego abrio: es como el port sabe QUE pista
+     * tiene que cargar horneada, sin tener que leerselo al juego por otro sitio. */
+    char     track_name[16];
+    int      light_ok;
 
     /* Trozos de pista que cada vista decide dibujar. Es la cifra que dimensiona M2b:
      * el juego los elige, el PVR los tendra que transformar y pintar. */

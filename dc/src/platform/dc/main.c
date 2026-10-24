@@ -167,6 +167,12 @@ static void *diag_thread(void *arg)
                host.mode == HOST_RACE ? "CARRERA" : "front end",
                (unsigned long)host.player_views,
                (unsigned long)host.pad_at, (unsigned long)host.pad_steps_n);
+        /* La pista: si no se ve nada, esto dice si es que no cargo o si es que se
+           dibuja y no se ve. */
+        printf("        pista: %s   %llu triangulos en %llu frames\n",
+               host.track_name[0] != '\0' ? host.track_name : "(ninguna)",
+               (unsigned long long)render_tris(),
+               (unsigned long long)render_tri_frames());
         prev_calls = cpu.calls;
     }
     return NULL;

@@ -11,6 +11,7 @@
 #include "host.h"
 #include "raster.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -172,6 +173,136 @@ int raster_dump(const GameHost *h, const uint16_t *texbuf, const char *path,
 
     printf("  raster: %u cuadros pintados, %u saltados por falta de textura\n",
            (unsigned)pintados, (unsigned)saltados);
+    f = fopen(path, "wb");
+    if (f == NULL)
+        return 0;
+    fprintf(f, "P6\n%d %d\n255\n", w, hh);
+    fwrite(rgb, 1, (size_t)w * hh * 3u, f);
+    fclose(f);
+    return 1;
+}
+
+/* ---- la pista (M2b paso 3) ----
+ *
+ * Mismo papel que arriba: el paso 3 no tiene oraculo, asi que la unica manera de saber
+ * si la camara, la proyeccion y el recorte estan bien es MIRAR un frame. Esto pinta lo
+ * que track_draw emite, con buffer de profundidad, porque la pista es opaca y no vale el
+ * algoritmo del pintor.
+ */
+
+typedef struct {
+    uint8_t *rgb;
+    float   *z;               /* 1/w: cuanto mayor, mas cerca */
+    int      w, h;
+    const uint16_t *atlas;
+    int      aw, ah;
+    uint32_t pintados;
+} Pista;
+
+static void tri_pista(Pista *P, const TrackVert *a, const TrackVert *b,
+                      const TrackVert *c)
+{
+    float area = (b->x - a->x) * (c->y - a->y) - (b->y - a->y) * (c->x - a->x);
+    int minx, maxx, miny, maxy, x, y;
+
+    if (area == 0.0f)
+        return;
+    /* Los cuadros de la pista vienen en los dos sentidos de giro (hay materiales de
+     * doble cara), asi que se rellenan los dos: el signo del area dice cual es. */
+    if (area < 0.0f) {
+        const TrackVert *s = b;
+
+        b = c;
+        c = s;
+        area = -area;
+    }
+    minx = (int)floorf(fminf(fminf(a->x, b->x), c->x));
+    maxx = (int)ceilf(fmaxf(fmaxf(a->x, b->x), c->x));
+    miny = (int)floorf(fminf(fminf(a->y, b->y), c->y));
+    maxy = (int)ceilf(fmaxf(fmaxf(a->y, b->y), c->y));
+    if (minx < 0) minx = 0;
+    if (miny < 0) miny = 0;
+    if (maxx > P->w - 1) maxx = P->w - 1;
+    if (maxy > P->h - 1) maxy = P->h - 1;
+
+    for (y = miny; y <= maxy; y++) {
+        for (x = minx; x <= maxx; x++) {
+            float px = (float)x + 0.5f, py = (float)y + 0.5f;
+            float w0 = ((b->x - a->x) * (py - a->y) - (b->y - a->y) * (px - a->x)) / area;
+            float w1 = ((c->x - b->x) * (py - b->y) - (c->y - b->y) * (px - b->x)) / area;
+            float w2 = 1.0f - w0 - w1;
+            float la, lb, lc, iz;
+            size_t o;
+            int tu, tv;
+            uint16_t t;
+            int r, g, bb;
+
+            if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f)
+                continue;
+            /* w1 es el peso de a, w2 el de b y w0 el de c */
+            la = w1; lb = w2; lc = w0;
+            iz = la * a->z + lb * b->z + lc * c->z;
+            o = (size_t)y * P->w + x;
+            if (iz <= P->z[o])
+                continue;                /* hay algo mas cerca */
+
+            tu = (int)((la * a->u + lb * b->u + lc * c->u) * (float)P->aw);
+            tv = (int)((la * a->v + lb * b->v + lc * c->v) * (float)P->ah);
+            if (tu < 0) tu = 0;
+            if (tv < 0) tv = 0;
+            if (tu >= P->aw) tu = P->aw - 1;
+            if (tv >= P->ah) tv = P->ah - 1;
+            t = P->atlas[(size_t)tv * P->aw + tu];
+            if (!(t & 0x8000u))
+                continue;                /* color clave */
+
+            /* modulacion de PS1: textura * color * 2, con 0x80 como el 1,0 */
+            r = (int)(((t >> 10) & 0x1F) << 3) * (int)((a->argb >> 16) & 0xFF) / 128;
+            g = (int)(((t >> 5) & 0x1F) << 3) * (int)((a->argb >> 8) & 0xFF) / 128;
+            bb = (int)((t & 0x1F) << 3) * (int)(a->argb & 0xFF) / 128;
+            P->z[o] = iz;
+            P->rgb[o * 3u + 0u] = (uint8_t)CLAMP255(r);
+            P->rgb[o * 3u + 1u] = (uint8_t)CLAMP255(g);
+            P->rgb[o * 3u + 2u] = (uint8_t)CLAMP255(bb);
+            P->pintados++;
+        }
+    }
+}
+
+static void emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
+{
+    Pista *P = (Pista *)user;
+    uint32_t k;
+
+    (void)m;
+    for (k = 2; k < n; k++)
+        tri_pista(P, &v[0], &v[k - 1u], &v[k]);
+}
+
+int raster_track(const GameHost *h, const Track *track, const char *path,
+                 int w, int hh)
+{
+    static uint8_t rgb[640 * 480 * 3];
+    static float zbuf[640 * 480];
+    Pista P;
+    TrackStats st;
+    FILE *f;
+
+    if (w <= 0 || hh <= 0 || (size_t)w * hh * 3u > sizeof rgb || h->views_n == 0u)
+        return 0;
+    memset(rgb, 0, (size_t)w * hh * 3u);
+    memset(zbuf, 0, (size_t)w * hh * sizeof zbuf[0]);
+    P.rgb = rgb; P.z = zbuf; P.w = w; P.h = hh;
+    P.atlas = track->atlas; P.aw = track->atlas_w; P.ah = track->atlas_h;
+    P.pintados = 0;
+
+    track_draw(track, &h->view[0], h->light_ok ? h->light_table : NULL,
+               (float)w, (float)hh, emite, &P, &st);
+    printf("  pista: %u bloques, %u cuadros -> %u triangulos (%u recortados, %u detras), "
+           "%u pixeles\n",
+           (unsigned)st.blocks_drawn, (unsigned)st.quads_in, (unsigned)st.quads_out,
+           (unsigned)st.clipped, (unsigned)st.behind, (unsigned)P.pintados);
+
     f = fopen(path, "wb");
     if (f == NULL)
         return 0;

@@ -211,6 +211,26 @@ static int open_src(GameHost *h, const char *name, OpenFile *o)
     uint32_t n, m, k;
 
     memset(o, 0, sizeof(*o));
+
+    /* Al abrir un .GRP, el juego esta cargando una pista: el port se queda con su nombre
+     * base para cargar la version horneada (ver dc/src/render/track.c). */
+    {
+        size_t L = strlen(name);
+
+        if (L > 4u && (name[L - 4u] == '.') &&
+            (name[L - 3u] == 'g' || name[L - 3u] == 'G') &&
+            (name[L - 2u] == 'r' || name[L - 2u] == 'R') &&
+            (name[L - 1u] == 'p' || name[L - 1u] == 'P')) {
+            size_t i, b = 0;
+
+            for (i = 0; i < L - 4u; i++)
+                if (name[i] == '/' || name[i] == '\\')
+                    b = i + 1u;
+            for (i = 0; b + i < L - 4u && i + 1u < sizeof h->track_name; i++)
+                h->track_name[i] = name[b + i];
+            h->track_name[i] = '\0';
+        }
+    }
     if (disk_open(h, name, &f, &n)) {
         o->fh = f;
         o->base = 0u;

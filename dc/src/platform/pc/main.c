@@ -29,9 +29,20 @@ static uint16_t texbuf[512u * 1024u];
  * despues se vacia para el frame siguiente. */
 static uint64_t shot_frame;
 static const char *shot_file;
+static uint64_t track_frame;
+static const char *track_file;    /* el PPM de salida */
+static const char *track_trk;     /* el .TRK horneado */
+static Track track;
 
 static void pc_on_frame(GameHost *h)
 {
+    if (track_file != NULL && h->frames == track_frame) {
+        if (track.raw == NULL && !track_load(&track, track_trk))
+            fprintf(stderr, "no pude cargar la pista horneada %s\n", track_trk);
+        else if (raster_track(h, &track, track_file, 640, 480))
+            printf("frame %llu: pista dibujada en %s\n",
+                   (unsigned long long)h->frames, track_file);
+    }
     if (shot_file == NULL || h->frames != shot_frame)
         return;
     host_build_textures(h);
@@ -153,6 +164,11 @@ int main(int argc, char **argv)
             view_path = argv[++i];
         else if (!strcmp(argv[i], "--texdump") && i + 1 < argc)
             tex_path = argv[++i];
+        else if (!strcmp(argv[i], "--track") && i + 3 < argc) {
+            track_frame = strtoull(argv[++i], NULL, 0);
+            track_trk = argv[++i];
+            track_file = argv[++i];
+        }
         else if (!strcmp(argv[i], "--shot") && i + 2 < argc) {
             shot_frame = strtoull(argv[++i], NULL, 0);
             shot_file = argv[++i];

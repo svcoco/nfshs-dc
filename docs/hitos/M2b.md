@@ -82,7 +82,7 @@ ya lo fija. **Las texturas de pista se hornean**; la cache de VRAM de M2a se que
 |---|---|---|
 | 1 | **Captura de la vista** en el host de C: camara, matriz, proyeccion, rectangulo y lista de trozos | **Hecho (2026-10-23)**: la captura del port y la de la referencia **coinciden** en el guion de carrera |
 | 2 | **Horneado de la pista** (PC, Rust, reutilizando `src/formats`): GRP + PSH -> malla y texturas listas para el PVR | **Hecho (2026-10-23)**: tamano del horneado y de su atlas, medidos |
-| 3 | **Transformacion en el SH-4** (FTRV) y **recorte por plano cercano** | una pista en pantalla; ms/frame y triangulos medidos |
+| 3 | **Transformacion** y **recorte por plano cercano**, y dibujo en el PVR | **Hecho (2026-10-23)**: la pista se ve en Dreamcast a 53-60 fps con 1 038 triangulos por frame |
 | 4 | **El cielo** | el horizonte se ve |
 
 El paso 1 va primero por la misma razon que en M2a: es **codigo portable y tiene
@@ -204,3 +204,59 @@ ancha** que todavia cupiese, que es lo que suena bien. Medido sobre las 40 pista
 **peor**: arrastra piezas anchas y bajas a baldas altas y desperdicia la altura, y las 40
 pasaban a necesitar 1024x1024 (600 a 977 filas) en vez de que 24 cupieran en 1024x512. El
 codigo lo cuenta para que nadie lo reintente.
+
+## 6. Paso 3 hecho: la pista en pantalla (2026-10-23)
+
+`dc/src/render/track.c` (portable) lleva el .TRK a vertices de pantalla;
+`dc/src/platform/dc/render.c` los manda al PVR y `dc/src/platform/pc/raster.c` los pinta
+por software para poder **mirarlos en el PC** antes de encender nada.
+
+### El convenio de la camara, que es donde se juega el partido
+
+Sale de la referencia (`src/game/original.rs`) y conviene no volver a deducirlo:
+
+- `camera_pos` va en **16.16** y su **X esta espejada** respecto al mundo horneado.
+- `camera_rot` son tres filas —derecha, arriba, adelante— y **no estan normalizadas**: el
+  juego aplasta la imagen en vertical escalando la fila de "arriba" (sale sobre 0,85).
+  Dividir las tres por la longitud de "adelante" deja la z en metros y **conserva ese
+  aplastamiento** sin tratarlo aparte.
+- `projection` es la distancia focal en pixeles de PS1, y se proyecta como PS1:
+  `sx = x * projection / z`. Luego se escala de la pantalla de PS1 (320x240 en carrera) a
+  640x480.
+- El **color de vertice** sale de `Chunk_lightTable` (puntero en `0x8013DB0C`), que el
+  host relee solo cuando el puntero se mueve.
+
+### Lo medido en Dreamcast (Flycast, BIOS real, `race_long.txt`)
+
+| | |
+|---|---|
+| **Triangulos por frame** | **1 038** (1 811 067 en 1 744 frames) |
+| **fps en carrera, dibujando** | **53-60** (16,7-18,7 ms por frame) |
+| Bloques por vista | 9-10 |
+
+Contra los **98-113 fps** que daba la carrera **sin dibujar** (M1b), dibujar la pista
+cuesta del orden de la mitad del frame. Sigue por encima del minimo de 30 fps sostenidos
+que fija CLAUDE.md seccion 3, y por ahora **sin FTRV**: la transformacion va en C con
+`float` normal. Esa optimizacion es de M3 y ahora hay con que medirla.
+
+### Cuatro fallos reales, y ninguno estaba donde parecia
+
+1. **Un struct superpuesto al archivo.** El registro de bloque son 44 bytes con pares
+   `(u32, u16)` de **seis**; en C el compilador los rellena a ocho y el struct mide 56.
+   Superponerlo al archivo daba un fallo de segmentacion. Los bloques se **decodifican**
+   byte a byte al cargar, que ademas evita lecturas desalineadas (en SH-4, una excepcion).
+2. **El cuadro se partia como tira.** Sus cuatro vertices van en orden **ciclico**
+   alrededor del cuadro, asi que se parte en (0,1,2) y (0,2,3). Partirlo en (0,1,2) y
+   (1,3,2) dejaba huecos triangulares por toda la pista.
+3. **La lista opaca del PVR estaba en `PVR_BINSIZE_0`.** Mandarle geometria a una lista
+   sin buffer de punteros **no da error**: deja la pantalla en negro y hunde el ritmo a
+   4 fps. M2a solo usaba la lista translucida, asi que nunca se habia notado.
+4. **El nombre de la pista, en minusculas.** El juego abre `zTr06.grp` y el ISO del disco
+   guarda `ZTR06.TRK`. Ademas la carga fallida **se reintentaba en cada frame**, lo que
+   por si solo ya costaba un `fopen` por frame.
+
+### Como sabe el port que pista cargar
+
+No hace falta leerselo al juego por ningun sitio raro: el host se queda con el nombre del
+**`.GRP` que el juego abre** (`host/files.c`) y la plataforma carga
+`/cd/BAKED/<NOMBRE>.TRK`. `mkdisc.sh --baked` mete las pistas horneadas en el disco.

@@ -23,6 +23,9 @@
  */
 #include <kos.h>
 
+#include <stdio.h>
+#include <string.h>
+
 #include "host.h"
 #include "render.h"
 
@@ -36,6 +39,120 @@ static uint64_t  subidas_vistas = (uint64_t)-1;   /* para saber cuando resubir *
 
 static uint64_t s_frames, s_quads, s_strips;
 
+/* ---- la pista (M2b paso 3) ----
+ *
+ * La pista va a la lista OPACA con Z-buffer, al reves que el overlay 2D, que es
+ * algoritmo del pintor en la lista translucida. Son dos regimenes distintos en el mismo
+ * frame, y el PVR los lleva bien porque son listas separadas.
+ *
+ * Cual cargar lo dice el propio juego: el host se queda con el nombre del .GRP que abre
+ * (host/files.c) y aqui se carga /cd/BAKED/<nombre>.TRK.
+ */
+static Track     s_track;
+static char      s_track_cargada[16];
+static pvr_ptr_t s_atlas;
+static uint64_t  s_tri, s_tri_frames;
+
+uint64_t render_tris(void)       { return s_tri; }
+uint64_t render_tri_frames(void) { return s_tri_frames; }
+
+static void pista_carga(const char *nombre)
+{
+    char ruta[64];
+    char may[16];
+    uint32_t i;
+
+    if (s_track.raw != NULL)
+        track_free(&s_track);
+    if (s_atlas != NULL) {
+        pvr_mem_free(s_atlas);
+        s_atlas = NULL;
+    }
+    /* El nombre se anota ANTES de intentar nada: si la carga falla no se reintenta en
+     * cada frame. Reintentarlo costaba un fopen por frame y hundia el ritmo a 4,5 fps. */
+    strncpy(s_track_cargada, nombre, sizeof s_track_cargada - 1u);
+    s_track_cargada[sizeof s_track_cargada - 1u] = 0;
+    if (nombre[0] == 0)
+        return;
+    /* El juego abre "zTr06.grp" y el ISO del disco lo tiene en mayusculas. */
+    for (i = 0; i + 1u < sizeof may && nombre[i] != 0; i++)
+        may[i] = (char)((nombre[i] >= 'a' && nombre[i] <= 'z')
+                        ? nombre[i] - 'a' + 'A' : nombre[i]);
+    may[i] = 0;
+    snprintf(ruta, sizeof ruta, "/cd/BAKED/%s.TRK", may);
+    if (!track_load(&s_track, ruta)) {
+        printf("pista: no pude cargar %s\n", ruta);
+        return;
+    }
+    s_atlas = pvr_mem_malloc((uint32_t)s_track.atlas_w * s_track.atlas_h * 2u);
+    if (s_atlas == NULL) {
+        printf("pista: el atlas de %ux%u no cabe en la VRAM del PVR\n",
+               (unsigned)s_track.atlas_w, (unsigned)s_track.atlas_h);
+        track_free(&s_track);
+        return;
+    }
+    pvr_txr_load((void *)s_track.atlas, s_atlas,
+                 (uint32_t)s_track.atlas_w * s_track.atlas_h * 2u);
+    printf("pista %s: %u bloques, %u cuadros, atlas %ux%u\n", nombre,
+           (unsigned)s_track.blocks, (unsigned)s_track.quads,
+           (unsigned)s_track.atlas_w, (unsigned)s_track.atlas_h);
+}
+
+/* El sumidero. El PVR dibuja TIRAS: para el abanico (0,1,2,3) que emite track_draw, la
+ * tira equivalente es 0, 1, 3, 2. */
+static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
+{
+    pvr_vertex_t pv;
+    uint32_t k;
+
+    (void)user;
+    (void)m;
+    pv.flags = PVR_CMD_VERTEX;
+    pv.oargb = 0;
+    for (k = 0; k < n; k++) {
+        uint32_t i = (n == 4u && k >= 2u) ? (5u - k) : k;
+
+        if (k == n - 1u)
+            pv.flags = PVR_CMD_VERTEX_EOL;
+        pv.x = v[i].x;
+        pv.y = v[i].y;
+        pv.z = v[i].z;
+        pv.u = v[i].u;
+        pv.v = v[i].v;
+        pv.argb = v[i].argb;
+        pvr_prim(&pv, sizeof(pv));
+    }
+    s_tri += n - 2u;
+}
+
+static void pista_dibuja(GameHost *h)
+{
+    pvr_poly_cxt_t cxt;
+    pvr_poly_hdr_t hdr;
+    TrackStats st;
+
+    if (strncmp(h->track_name, s_track_cargada, sizeof s_track_cargada) != 0)
+        pista_carga(h->track_name);
+    if (s_track.raw == NULL || h->views_n == 0u)
+        return;
+
+    pvr_list_begin(PVR_LIST_OP_POLY);
+    /* Un solo contexto para toda la pista: un atlas y nada de mezcla. Sin descarte de
+     * caras, porque el horneado no normaliza el sentido de giro (hay materiales de doble
+     * cara) y del resto se encarga el Z-buffer. */
+    pvr_poly_cxt_txr(&cxt, PVR_LIST_OP_POLY,
+                     PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
+                     s_track.atlas_w, s_track.atlas_h, s_atlas, PVR_FILTER_BILINEAR);
+    cxt.gen.culling = PVR_CULLING_NONE;
+    pvr_poly_compile(&hdr, &cxt);
+    pvr_prim(&hdr, sizeof(hdr));
+
+    track_draw(&s_track, &h->view[0], h->light_ok ? h->light_table : NULL,
+               640.0f, 480.0f, pista_emite, NULL, &st);
+    s_tri_frames++;
+    pvr_list_finish();
+}
+
 uint16_t *render_texbuf(void)   { return tex_staging; }
 uint32_t  render_texcap(void)   { return TEX_TEXELS; }
 uint64_t  render_frames(void)   { return s_frames; }
@@ -45,7 +162,10 @@ int render_init(void)
 {
     pvr_init_params_t p = {
         /* un overlay 2D no usa modificadores ni punch-through */
-        .opb_sizes = { PVR_BINSIZE_0, PVR_BINSIZE_0, PVR_BINSIZE_16,
+        /* OPACA para la pista (M2b) y TRANSLUCIDA para el overlay 2D (M2a). Dejar la
+         * opaca en BINSIZE_0 y mandarle geometria no da un error: deja la pantalla en
+         * negro y hunde el ritmo a 4 fps. */
+        .opb_sizes = { PVR_BINSIZE_16, PVR_BINSIZE_0, PVR_BINSIZE_16,
                        PVR_BINSIZE_0, PVR_BINSIZE_0 },
         .vertex_buf_size = 512 * 1024,
         .dma_enabled = 0,
@@ -155,6 +275,8 @@ void render_frame(GameHost *h)
 
     pvr_wait_ready();
     pvr_scene_begin();
+    /* Primero el mundo, opaco y con Z; despues el overlay 2D encima. */
+    pista_dibuja(h);
     pvr_list_begin(PVR_LIST_TR_POLY);
 
     for (i = h->overlay.n; i > 0u; i--) {

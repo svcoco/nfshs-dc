@@ -55,6 +55,24 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
     if (n > h->race_chunks_max)
         h->race_chunks_max = n;
 
+    /* La tabla de color de vertice. El juego la mueve al cargar una pista, asi que se
+     * relee solo cuando el puntero cambia: son 256 lecturas, no una por frame. */
+    {
+        uint32_t p = ps1_r32(c, ADDR_LIGHT_TABLE);
+
+        if (p != h->light_ptr) {
+            h->light_ptr = p;
+            h->light_ok = 0;
+            if (p != 0u) {
+                uint32_t k;
+
+                for (k = 0; k < 256u; k++)
+                    h->light_table[k] = ps1_r32(c, p + 4u * k);
+                h->light_ok = 1;
+            }
+        }
+    }
+
     /* La captura de la vista: camara, proyeccion, recorte y lista de trozos. A partir
      * de aqui el renderer no necesita volver a preguntarle nada al juego. */
     if (h->views_n < VIEWS_MAX) {

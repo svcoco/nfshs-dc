@@ -29,6 +29,7 @@
 set -eu
 
 ELF=""; DATA="gamedata"; OUT=""; MINIMAL=0; SCRIPT=""; FORMAT="cdi"; VIDEO=""
+BAKED="dc/build/baked"
 KOS_BASE="${KOS_BASE:-/opt/toolchains/dc/kos}"
 AQUI=$(dirname "$0")
 
@@ -36,6 +37,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --elf)     ELF=$2; shift 2 ;;
         --data)    DATA=$2; shift 2 ;;
+        --baked)   BAKED=$2; shift 2 ;;
         --out)     OUT=$2; shift 2 ;;
         --script)  SCRIPT=$2; shift 2 ;;
         --format)  FORMAT=$2; shift 2 ;;
@@ -92,6 +94,9 @@ if [ -n "$VIDEO" ]; then
     echo "$VIDEO" > "$TMP/VIDEO.TXT"
     set -- "$@" "/VIDEO.TXT=$TMP/VIDEO.TXT"
 fi
+# Las pistas horneadas (make -C dc bake), si estan: el port carga /BAKED/<pista>.TRK
+# segun el .GRP que el juego abra.
+[ -d "$BAKED" ] && set -- "$@" "/BAKED=$BAKED"
 if [ "$MINIMAL" -eq 1 ]; then
     for f in NFS4.EXE FRONT.BIN ZZZFE.VIV ZZENGL.VIV ZZZZAMUS.VIV ZZZMSLKH.VIV \
              LICENSEA.DAT; do

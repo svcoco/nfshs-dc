@@ -37,6 +37,7 @@
 #define ADDR_CHUNK_BUILD_LIST_D 0x801102B0u  /* pares (i16 bloque, u16 detalle), 64 max */
 #define ADDR_CAMERA_ZOOM        0x8013DAD0u  /* proyeccion de la camara */
 #define ADDR_DRAW_VIEWS         0x8011FF44u  /* Draw_gViews[]: 200 bytes por vista */
+#define ADDR_LIGHT_TABLE        0x8013DB0Cu  /* PUNTERO a Chunk_lightTable: 256 x 0xBBGGRR */
 #define ADDR_HUD_WRONG_WAY      0x8009BAC4u  /* DashHud_CheckWrongWay(jugador) */
 #define ADDR_HUD_CALC           0x8009BB34u  /* DashHud_HudCalc: velocidad, marcha... */
 /* Scratchpad: el original lo usa de cache de dibujo en estas llamadas. */

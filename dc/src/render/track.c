@@ -27,7 +27,8 @@ int track_load(Track *t, const char *path)
 {
     FILE *f;
     long size;
-    uint32_t off_blk, off_mat, off_sky, off_vtx, off_qd, atlas_off, i;
+    uint32_t off_blk, off_mat, off_sky, off_mdl, off_mvt, off_mqd, off_vtx, off_qd;
+    uint32_t atlas_off, i;
 
     memset(t, 0, sizeof(*t));
     f = fopen(path, "rb");
@@ -52,7 +53,7 @@ int track_load(Track *t, const char *path)
     fclose(f);
     t->size = (uint32_t)size;
 
-    if (memcmp(t->raw, "NFST", 4) != 0 || rd32(t->raw + 4) != 2u) {
+    if (memcmp(t->raw, "NFST", 4) != 0 || rd32(t->raw + 4) != 3u) {
         track_free(t);
         return 0;
     }
@@ -62,14 +63,20 @@ int track_load(Track *t, const char *path)
     t->atlas_h = rd16(t->raw + 14);
     t->verts = rd32(t->raw + 16);
     t->quads = rd32(t->raw + 20);
-    atlas_off = rd32(t->raw + 24);
+    t->models = rd16(t->raw + 24);
+    t->mverts = rd32(t->raw + 28);
+    t->mquads = rd32(t->raw + 32);
+    atlas_off = rd32(t->raw + 36);
 
     /* El horneado ya se verifico a si mismo en el PC (bake.rs); aqui solo se comprueba
      * que los tramos caben, porque un archivo truncado por el disco si es posible. */
-    off_blk = 28u;
+    off_blk = 40u;
     off_mat = off_blk + (uint32_t)t->blocks * 44u;
     off_sky = off_mat + (uint32_t)t->mats * 16u;
-    off_vtx = off_sky + 12u * 8u;
+    off_mdl = off_sky + 12u * 8u;
+    off_mvt = off_mdl + (uint32_t)t->models * 16u;
+    off_mqd = off_mvt + t->mverts * 8u;
+    off_vtx = off_mqd + t->mquads * 10u;
     off_qd = off_vtx + t->verts * 8u;
     if (off_qd + t->quads * 10u != atlas_off ||
         atlas_off + (uint32_t)t->atlas_w * t->atlas_h * 2u != t->size) {
@@ -105,12 +112,29 @@ int track_load(Track *t, const char *path)
     }
     t->vert = (const int16_t *)(const void *)(t->raw + off_vtx);
     t->quad = (const uint16_t *)(const void *)(t->raw + off_qd);
+    t->mvert = (const int16_t *)(const void *)(t->raw + off_mvt);
+    t->mquad = (const uint16_t *)(const void *)(t->raw + off_mqd);
+    t->model = calloc(t->models != 0u ? t->models : 1u, sizeof(*t->model));
+    if (t->model == NULL) {
+        track_free(t);
+        return 0;
+    }
+    for (i = 0; i < t->models; i++) {
+        const uint8_t *p = t->raw + off_mdl + (size_t)i * 16u;
+
+        t->model[i].vert_off = rd32(p);
+        t->model[i].vert_n = rd16(p + 4u);
+        t->model[i].quad_off = rd32(p + 6u);
+        t->model[i].quad_n = rd16(p + 10u);
+        t->model[i].flags = rd16(p + 12u);
+    }
     t->atlas = (const uint16_t *)(const void *)(t->raw + atlas_off);
     return 1;
 }
 
 void track_free(Track *t)
 {
+    free(t->model);
     free(t->block);
     free(t->raw);
     memset(t, 0, sizeof(*t));
@@ -289,18 +313,16 @@ static uint32_t color_sombra(const uint32_t *light, uint32_t s)
 }
 
 /* Dibuja una malla: `verts` es su charco y `quads` sus caras. */
+/* Dibuja una malla colocada en `o` (metros, espacio de PS1) y, si `mat` no es NULL,
+ * girada y escalada por el (3x3 por filas, ya transpuesta por quien llama). La pista usa
+ * `mat` NULL; los objetos del escenario lo usan siempre. */
 static void malla(const Track *t, const View *vw, const uint32_t *light,
-                  const int32_t origin[3], const int16_t *verts, uint32_t nv,
+                  const float o[3], const float *mat,
+                  const int16_t *verts, uint32_t nv,
                   const uint16_t *quads, uint32_t nq,
                   TrackEmit emit, void *user, TrackStats *st)
 {
-    float o[3];
     uint32_t q;
-
-    /* el origen del bloque, ya en metros y con la X espejada */
-    o[0] = -(float)origin[0] / 64.0f;
-    o[1] = (float)origin[1] / 64.0f;
-    o[2] = (float)origin[2] / 64.0f;
 
     if (getenv("PS1_TRACKDBG") != NULL && nq != 0u) {
         const int16_t *v0 = verts;
@@ -347,10 +369,24 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
             if (vi >= nv)
                 vi = 0;
             v = verts + (size_t)vi * 4u;
-            /* 1/64 m y la X espejada, igual que el origen */
-            w[0] = o[0] - (float)v[0] / 64.0f;
-            w[1] = o[1] + (float)v[1] / 64.0f;
-            w[2] = o[2] + (float)v[2] / 64.0f;
+            {
+                float pz[3], g[3];
+
+                pz[0] = (float)v[0] / 64.0f;
+                pz[1] = (float)v[1] / 64.0f;
+                pz[2] = (float)v[2] / 64.0f;
+                if (mat != NULL) {
+                    g[0] = mat[0] * pz[0] + mat[1] * pz[1] + mat[2] * pz[2];
+                    g[1] = mat[3] * pz[0] + mat[4] * pz[1] + mat[5] * pz[2];
+                    g[2] = mat[6] * pz[0] + mat[7] * pz[1] + mat[8] * pz[2];
+                } else {
+                    g[0] = pz[0]; g[1] = pz[1]; g[2] = pz[2];
+                }
+                /* todo se calcula en espacio de PS1 y se espeja la X al final */
+                w[0] = -(o[0] + g[0]);
+                w[1] = o[1] + g[1];
+                w[2] = o[2] + g[2];
+            }
             d[0] = w[0] - vw->cam[0];
             d[1] = w[1] - vw->cam[1];
             d[2] = w[2] - vw->cam[2];
@@ -391,6 +427,7 @@ void track_draw(const Track *t, const struct RaceView *view, const uint32_t *lig
         uint32_t rez = det & 0xFFu;
         const TrackBlock *b;
         uint32_t suelo;
+        float og[3];
 
         if (id < 0 || (uint32_t)id >= t->blocks)
             continue;                    /* hueco en la lista */
@@ -402,17 +439,102 @@ void track_draw(const Track *t, const struct RaceView *view, const uint32_t *lig
 
         /* resolucion distinta de cero = detalle completo; cero = la version lejana */
         suelo = rez != 0u ? (uint32_t)TB_GROUND_QUADS : (uint32_t)TB_GROUND_FAR;
-        malla(t, &vw, light, b->origin,
+        og[0] = (float)b->origin[0] / 64.0f;
+        og[1] = (float)b->origin[1] / 64.0f;
+        og[2] = (float)b->origin[2] / 64.0f;
+        malla(t, &vw, light, og, NULL,
               t->vert + (size_t)b->off[TB_GROUND_VERTS] * 4u,
               b->n[TB_GROUND_VERTS],
               t->quad + (size_t)b->off[suelo] * 5u, b->n[suelo],
               emit, user, st);
         /* las superficies de detalle van siempre con el suelo */
-        malla(t, &vw, light, b->origin,
+        malla(t, &vw, light, og, NULL,
               t->vert + (size_t)b->off[TB_DETAIL_VERTS] * 4u,
               b->n[TB_DETAIL_VERTS],
               t->quad + (size_t)b->off[TB_DETAIL_QUADS] * 5u,
               b->n[TB_DETAIL_QUADS],
+              emit, user, st);
+    }
+}
+
+/* ---- los objetos del escenario (M2c paso 2) ----
+ *
+ * El juego ya decidio cuales se dibujan y donde (host/objects.c). Aqui solo se colocan:
+ *
+ *   - los **fijos** se colocan con la **transpuesta** de su matriz. El original carga el
+ *     GTE con (M * vista)^T = vista^T * M^T, asi que al modelo le toca M^T, o sea las
+ *     COLUMNAS de la matriz tal como viene.
+ *   - los **billboard** se giran hacia la camara alrededor de Y, y su escala sale de la
+ *     longitud de las dos primeras columnas: la primera da el ancho y la segunda el alto.
+ */
+void objects_draw(const Track *t, const struct ObjectDraw *obj, uint32_t n,
+                  const struct RaceView *view, const uint32_t *light,
+                  float sw, float sh, TrackEmit emit, void *user, TrackStats *st)
+{
+    View vw;
+    uint32_t i;
+
+    if (st != NULL)
+        memset(st, 0, sizeof(*st));
+    if (t->raw == NULL || t->models == 0u)
+        return;
+    view_init(&vw, view, sw, sh);
+
+    for (i = 0; i < n; i++) {
+        const struct ObjectDraw *o = &obj[i];
+        const TrackModel *m;
+        float mat[9], pos[3];
+        uint32_t k;
+
+        if (o->model >= t->models)
+            continue;
+        m = &t->model[o->model];
+        if (m->quad_n == 0u)
+            continue;
+
+        pos[0] = (float)o->pos[0] / 65536.0f;
+        pos[1] = (float)o->pos[1] / 65536.0f;
+        pos[2] = (float)o->pos[2] / 65536.0f;
+
+        if (o->billboard) {
+            /* ancho y alto de las dos primeras columnas, y un giro hacia la camara */
+            float c0[3], c1[3], an, al, dx, dz, d;
+
+            for (k = 0; k < 3u; k++) {
+                c0[k] = (float)o->matrix[k * 3u] / 65536.0f;
+                c1[k] = (float)o->matrix[k * 3u + 1u] / 65536.0f;
+            }
+            an = len3(c0);
+            al = len3(c1);
+            /* La camara esta en espacio de MUNDO (X espejada) y el objeto en PS1, asi
+             * que el vector hacia la camara es cam - (-pos.x, pos.y, pos.z). */
+            dx = vw.cam[0] + pos[0];
+            dz = vw.cam[2] - pos[2];
+            d = sqrtf(dx * dx + dz * dz);
+            if (d < 1e-4f) {
+                dx = 0.0f;
+                dz = 1.0f;
+                d = 1.0f;
+            }
+            dx /= d;
+            dz /= d;
+            /* `malla` espeja la X al final, asi que la matriz que hay que darle no es
+             * el giro R(theta) del mundo sino S*R*S*D, y S*R*S = R(-theta). Con
+             * cos = dz y sin = dx (ya normalizados) y la escala por columnas: */
+            mat[0] = dz * an;  mat[1] = 0.0f;  mat[2] = -dx * an;
+            mat[3] = 0.0f;     mat[4] = al;    mat[5] = 0.0f;
+            mat[6] = dx * an;  mat[7] = 0.0f;  mat[8] = dz * an;
+        } else {
+            /* la transpuesta: filas de `mat` = columnas de la matriz del juego */
+            for (k = 0; k < 3u; k++) {
+                mat[k * 3u] = (float)o->matrix[k] / 65536.0f;
+                mat[k * 3u + 1u] = (float)o->matrix[k + 3u] / 65536.0f;
+                mat[k * 3u + 2u] = (float)o->matrix[k + 6u] / 65536.0f;
+            }
+        }
+        malla(t, &vw, light, pos, mat,
+              t->mvert + (size_t)m->vert_off * 4u, m->vert_n,
+              t->mquad + (size_t)m->quad_off * 5u, m->quad_n,
               emit, user, st);
     }
 }

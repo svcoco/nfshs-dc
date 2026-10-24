@@ -48,7 +48,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | # | Paso | Cierra con |
 |---|---|---|
 | 1 | **Grabacion de los objetos** en el host de C | **Hecho (2026-10-24)**: 31 686 objetos identicos a la referencia en 900 frames |
-| 2 | **Horneado y dibujo de los objetos** (modelos del GRP al `.TRK`) | el escenario se puebla; triangulos medidos |
+| 2 | **Horneado y dibujo de los objetos** | **Hecho (2026-10-24)**: el escenario se puebla, 110 triangulos, 60 fps |
 | 3 | **Grabacion de los coches** (`CarFacet`: partes, luz, sombra, codigos) | la captura del port y la de la referencia coinciden |
 | 4 | **Horneado y dibujo de los coches** (GEO + su atlas) | se ven los coches corriendo |
 | 5 | **El HUD**: los cuatro ayudantes de M2a | la carrera se **lee**: velocidad, marcha, tiempos, posicion |
@@ -105,3 +105,40 @@ OK: 669 vistas y 31686 objetos identicos en 900 frames
 
 La estimacion estatica (707 colocaciones entre 136 bloques, por los 8,4 bloques que pide
 una vista) acerto en el primer decimal.
+
+## 6. Paso 2 hecho: hornear y dibujar los objetos (2026-10-24)
+
+Los 353 modelos del GRP van al `.TRK` (version 3) con el mismo formato que las mallas de
+un bloque, pero **cada uno con su propio charco de vertices**: se colocan por separado,
+uno por cada objeto que el juego decide dibujar. Sus vertices estan en 1/64 m alrededor
+del punto de colocacion.
+
+### Como se coloca cada objeto, que es lo unico delicado
+
+- **Los fijos, por la TRANSPUESTA de su matriz.** El original carga el GTE con
+  `(M * vista)^T = vista^T * M^T`, asi que al modelo le toca `M^T`: las **columnas** de la
+  matriz tal como viene.
+- **Los billboard, girados hacia la camara** alrededor de Y, con la escala sacada de la
+  longitud de las dos primeras columnas (la primera da el ancho, la segunda el alto).
+
+Y aqui hay una trampa que conviene dejar escrita. El renderer del port calcula todo en
+espacio de PS1 y **espeja la X al final**. Para un giro eso no es inocente: la matriz que
+hay que darle no es el giro `R(theta)` del mundo sino `S*R*S*D`, y **`S*R*S = R(-theta)`**.
+Pasarle `R(theta)` deja los billboard girados al reves, que es de las cosas que se ven mal
+sin saber por que.
+
+`malla()` se generalizo para aceptar una matriz de colocacion: la pista le pasa NULL y los
+objetos se la pasan siempre.
+
+### Medido
+
+| | |
+|---|---|
+| Objetos dibujados en el frame mirado | **51** |
+| Triangulos que cuestan | **110** |
+| Triangulos de la pista, para comparar | ~1 150 |
+| **fps en carrera, con todo** | **60** |
+
+Los objetos cuestan **menos del 10 %** de lo que cuesta la pista. La estimacion previa
+(2,6 cuadros por objeto, o sea ~240 triangulos para 46 objetos) se quedo **larga**: los
+modelos que de verdad se colocan son mas pequenos que la media de los 353.

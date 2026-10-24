@@ -20,8 +20,13 @@
 //! # Format (little-endian throughout)
 //!
 //! ```text
-//! header   "NFST", u32 version, u16 blocks, u16 materials,
-//!          u16 atlas_w, u16 atlas_h, u32 verts, u32 quads, u32 atlas_offset
+//! header   "NFST", u32 version=3, u16 blocks, u16 materials, u16 atlas_w, u16 atlas_h,
+//!          u32 verts, u32 quads, u16 models, u16 pad, u32 model_verts, u32 model_quads,
+//!          u32 atlas_offset   (40 bytes)
+//! models   models * 16 bytes: u32 vert_off, u16 vert_n, u32 quad_off, u16 quad_n,
+//!          u16 flags, u16 pad. Sus vertices y cuadros van en sus propios tramos, en el
+//!          mismo formato que los de los bloques, y estan en 1/64 m alrededor del punto
+//!          donde se coloca el objeto.
 //! blocks   blocks * 44 bytes: i32 origin[3] (1/64 m), then five (u32 offset, u16 count)
 //!          pairs - ground verts, ground quads, ground far quads, detail verts,
 //!          detail quads - and u16 of padding
@@ -244,6 +249,8 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
 
     // ---- blocks, vertex pools and quads ----
     let (mut blocks, mut verts, mut quads) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut models, mut mverts, mut mquads) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut n_mverts, mut n_mquads) = (0u32, 0u32);
     let mut n_verts = 0u32;
     let mut n_quads = 0u32;
     let pool = |m: &grp::Mesh, verts: &mut Vec<u8>, n: &mut u32| -> (u32, u16) {
@@ -287,6 +294,20 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
     }
 
     let area: u32 = rects.values().map(|r| (r.w + PAD) * (r.h + PAD)).sum();
+    // Los modelos de objeto (M2c). Mismo formato que las mallas de un bloque, pero cada
+    // uno con su propio charco: se colocan por separado, uno por cada objeto que el juego
+    // decide dibujar.
+    for (i, m) in track.models.iter().enumerate() {
+        let (vo, vn) = pool(m, &mut mverts, &mut n_mverts);
+        let (qo, qn) = faces(&m.quads, &mut mquads, &mut n_mquads);
+        put32(&mut models, vo);
+        put16(&mut models, vn);
+        put32(&mut models, qo);
+        put16(&mut models, qn);
+        put16(&mut models, track.model_flags.get(i).copied().unwrap_or(0));
+        put16(&mut models, 0);
+    }
+
     let (usado, formas) = (atlas.h, rects.len());
     // la tabla del cielo: 12 rectangulos de 8 bytes (0 si esa pista no trae esa forma)
     let mut sky = Vec::new();
@@ -302,19 +323,27 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
     let (aw, ah, texels) = atlas.finish();
     let mut out_buf = Vec::new();
     out_buf.extend_from_slice(b"NFST");
-    put32(&mut out_buf, 2);   /* version 2: anade la tabla del cielo */
+    put32(&mut out_buf, 3);   /* version 3: anade los modelos de objeto */
     put16(&mut out_buf, track.blocks.len() as u16);
     put16(&mut out_buf, track.textures.len() as u16);
     put16(&mut out_buf, aw as u16);
     put16(&mut out_buf, ah as u16);
     put32(&mut out_buf, n_verts);
     put32(&mut out_buf, n_quads);
+    put16(&mut out_buf, track.models.len() as u16);
+    put16(&mut out_buf, 0);
+    put32(&mut out_buf, n_mverts);
+    put32(&mut out_buf, n_mquads);
     let atlas_off = out_buf.len() as u32 + 4 + blocks.len() as u32 + mats.len() as u32
-        + sky.len() as u32 + verts.len() as u32 + quads.len() as u32;
+        + sky.len() as u32 + models.len() as u32 + mverts.len() as u32
+        + mquads.len() as u32 + verts.len() as u32 + quads.len() as u32;
     put32(&mut out_buf, atlas_off);
     out_buf.extend_from_slice(&blocks);
     out_buf.extend_from_slice(&mats);
     out_buf.extend_from_slice(&sky);
+    out_buf.extend_from_slice(&models);
+    out_buf.extend_from_slice(&mverts);
+    out_buf.extend_from_slice(&mquads);
     out_buf.extend_from_slice(&verts);
     out_buf.extend_from_slice(&quads);
     for t in &texels {
@@ -369,21 +398,46 @@ fn verifica(d: &[u8]) -> Result<()> {
     let u16a = |o: usize| u16::from_le_bytes([d[o], d[o + 1]]) as usize;
     let u32a = |o: usize| u32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]]) as usize;
 
-    if &d[..4] != b"NFST" || u32a(4) != 2 {
+    if &d[..4] != b"NFST" || u32a(4) != 3 {
         bail!("cabecera equivocada");
     }
     let (nb, nm) = (u16a(8), u16a(10));
-    let (nv, nq, atlas_off) = (u32a(16), u32a(20), u32a(24));
+    let (nv, nq) = (u32a(16), u32a(20));
+    let nmod = u16a(24);
+    let (nmv, nmq, atlas_off) = (u32a(28), u32a(32), u32a(36));
     let (aw, ah) = (u16a(12), u16a(14));
-    let blk = 28;
+    let blk = 40;
     let mat = blk + nb * 44;
-    let vtx = mat + nm * 16 + 12 * 8;   /* materiales + la tabla del cielo */
+    let mdl = mat + nm * 16 + 12 * 8;   /* materiales + la tabla del cielo */
+    let mvt = mdl + nmod * 16;
+    let mqd = mvt + nmv * 8;
+    let vtx = mqd + nmq * 10;
     let qd = vtx + nv * 8;
     if qd + nq * 10 != atlas_off {
         bail!("el atlas no empieza donde dice la cabecera");
     }
     if atlas_off + aw * ah * 2 != d.len() {
         bail!("el archivo no mide lo que dicen sus tramos");
+    }
+    for i in 0..nmod {
+        let o = mdl + i * 16;
+        let (vo, vn) = (u32a(o), u16a(o + 4));
+        let (qo, qn) = (u32a(o + 6), u16a(o + 10));
+
+        if vo + vn > nmv || qo + qn > nmq {
+            bail!("modelo {i}: fuera de rango");
+        }
+        for k in 0..qn {
+            let q = mqd + (qo + k) * 10;
+            for c in 0..4 {
+                if u16a(q + c * 2) as usize >= vn {
+                    bail!("modelo {i} cuadro {k}: vertice fuera de su charco");
+                }
+            }
+            if u16a(q + 8) >= nm {
+                bail!("modelo {i} cuadro {k}: material inexistente");
+            }
+        }
     }
     for b in 0..nb {
         let o = blk + b * 44;

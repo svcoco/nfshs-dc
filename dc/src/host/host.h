@@ -99,7 +99,7 @@ typedef struct SkyData {
 #define OBJECTS_MAX     256u   /* medidos ~47 por frame */
 #define OBJ_MODELS_MAX 1024u   /* el tamano de la tabla del juego */
 
-typedef struct {
+typedef struct ObjectDraw {
     uint16_t model;
     uint8_t  billboard;        /* el motor lo gira hacia la camara */
     uint8_t  pad;

@@ -161,7 +161,7 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
 
 static void pista_dibuja(GameHost *h)
 {
-    TrackStats st, sst;
+    TrackStats st, sst, ost;
 
     if (strncmp(h->track_name, s_track_cargada, sizeof s_track_cargada) != 0)
         pista_carga(h->track_name);
@@ -187,6 +187,10 @@ static void pista_dibuja(GameHost *h)
     modo_pon(MODO_PISTA);
     track_draw(&s_track, &h->view[0], h->light_ok ? h->light_table : NULL,
                640.0f, 480.0f, pista_emite, NULL, &st);
+    /* Los objetos van en la misma pasada: mismos materiales y mismo atlas. */
+    objects_draw(&s_track, h->objects, h->objects_n, &h->view[0],
+                 h->light_ok ? h->light_table : NULL,
+                 640.0f, 480.0f, pista_emite, NULL, &ost);
     s_tri_frames++;
     pvr_list_finish();
 }

@@ -302,7 +302,7 @@ int raster_track(const GameHost *h, const Track *track, const char *path,
     static uint8_t rgb[640 * 480 * 3];
     static float zbuf[640 * 480];
     Pista P;
-    TrackStats st, sst;
+    TrackStats st, sst, ost;
     FILE *f;
 
     if (w <= 0 || hh <= 0 || (size_t)w * hh * 3u > sizeof rgb || h->views_n == 0u)
@@ -330,6 +330,11 @@ int raster_track(const GameHost *h, const Track *track, const char *path,
     P.cielo = 0;
     track_draw(track, &h->view[0], h->light_ok ? h->light_table : NULL,
                (float)w, (float)hh, emite, &P, &st);
+    objects_draw(track, h->objects, h->objects_n, &h->view[0],
+                 h->light_ok ? h->light_table : NULL,
+                 (float)w, (float)hh, emite, &P, &ost);
+    printf("  objetos: %u dibujados -> %u triangulos\n",
+           (unsigned)h->objects_n, (unsigned)ost.quads_out);
     printf("  cielo: %u triangulos (%u recortados, %u detras)\n",
            (unsigned)sst.quads_out, (unsigned)sst.clipped, (unsigned)sst.behind);
     printf("  pista: %u bloques, %u cuadros -> %u triangulos (%u recortados, %u detras), "

@@ -146,6 +146,11 @@ int pad_load_script(GameHost *h, const char *path)
 void host_frame_top(GameHost *h, Cpu *c)
 {
     h->frames++;
+    /* El HUD de carrera, en el mismo punto que la referencia (al empezar frame_top): de
+     * las tablas grabadas en el frame se tira la del mundo y la lista se da la vuelta. */
+    h->otags_frame = 0;
+    if (h->mode == HOST_RACE && ps1_r32(c, SIM_PAUSED) == 0u)
+        overlay_race_compose(h);
     /* en el mismo punto que la referencia (frame.rs, antes de su volcado): cargar una
      * partida vuelve a fijar las banderas, asi que se ponen en cada frame */
     if (h->mode == HOST_FRONTEND)

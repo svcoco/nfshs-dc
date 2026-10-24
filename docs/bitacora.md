@@ -20,7 +20,7 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
-| **M2c** Coches, objetos y efectos | Pasos 1 a 3 de 6 |
+| **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se juega con HUD** |
 | M2b, M2c, M3, M4, M5 | Sin empezar |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
@@ -377,9 +377,9 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 1 | Grabación de los objetos del escenario | **Hecho**, validado contra la referencia |
 | 2 | Horneado y dibujo de los objetos | **Hecho**, el escenario se puebla |
 | 3 | Grabación de los coches | **Hecho**, validado palabra a palabra |
-| 4 | Horneado y dibujo de los coches | Siguiente |
-| 5 | El HUD (los cuatro ayudantes de M2a) | |
-| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | |
+| 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
+| 5 | El HUD | **Hecho**, 4 769 frames idénticos |
+| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | Siguiente |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -427,6 +427,28 @@ suya, no del original**. M1a lo dejó anotado como «si se porta, detrás de una
 apagada por omisión», y así queda: `car_cone_width` vale **1** en el port y el test
 diferencial lo sube a 2, porque si no los dos lados no son comparables. Mismo caso que
 `--unlock`.
+
+### Paso 4: los coches en pantalla
+
+`bake-car` reutiliza `assets::load_car`. Las partes van indexadas igual que los 57 bytes
+de `R3DCar_ObjectVisible`, así que la captura del paso 3 sirve de índice directo. Un
+fallo silencioso cerrado: dos páginas de 256×256 más el texel blanco **no caben en 512
+por una fila** y el cargador tiraba una página sin fallar; se recorta a 512×256 (0,25 MB
+de VRAM por coche).
+
+**Dibujar los coches no cuesta casi nada; lo que cuesta es grabarlos.** Con el dibujo
+apagado el ritmo es el mismo, así que la caída de ~60 a 30–40 fps la produce el paso 3,
+que corre código real del juego cada frame. Es trabajo de M3.
+
+### Paso 5: el HUD
+
+En carrera **no se sustituyen los ayudantes**: corre el código original y el host graba
+sus tablas de ordenación en cada `DrawOTag`, salvo la del mundo. Tenía oráculo desde
+M2a —la misma lista 2D— y ahora da **4 769 frames de carrera idénticos byte a byte**.
+
+Por el camino apareció que **la referencia no era determinista**: buscaba el entorno de
+dibujo por desplazamiento en un `HashMap` de semilla aleatoria. Se arregló en los dos
+lados buscando por la dirección del paquete.
 
 ---
 
@@ -502,6 +524,11 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **El renderer calcula en espacio de PS1 y espeja la X al final.** A un giro no se le
   puede pasar `R(θ)` sino `S·R·S·D`, y **`S·R·S = R(−θ)`**. Pasarle `R(θ)` deja los
   *billboard* girados al revés.
+- **La referencia no es infalible.** Su búsqueda de entornos de dibujo dependía del orden
+  aleatorio de un `HashMap` y daba listas distintas en cada ejecución. Si el oráculo
+  parece cambiar solo, correr la referencia varias veces y comparar.
+- **Un comparador que se para a las N diferencias puede esconder todo lo demás.** Una
+  deuda vieja en los menús tapaba los 669 frames de carrera.
 - **El orden en que el host corre las rutinas del juego importa.** Los coches van después
   del HUD porque es donde los pone el original: ese orden decide qué ve cada rutina.
 - **Los cuatro vértices de un cuadro de pista van en orden cíclico**, no en zigzag: se

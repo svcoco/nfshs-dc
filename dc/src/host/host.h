@@ -119,6 +119,9 @@ typedef struct CarDraw {
 #define CAR_WORDS        99u
 #define CAR_CAPTURE_MAX (CAR_WORDS * 16u)
 
+#define HUD_LISTS_MAX  16u
+#define DRAW_ENVS_MAX  64u
+
 typedef struct ObjectDraw {
     uint16_t model;
     uint8_t  billboard;        /* el motor lo gira hacia la camara */
@@ -296,6 +299,26 @@ typedef struct GameHost {
     uint16_t vram_tmp[VRAM_W * VRAM_H];   /* para MoveImage con solape */
     uint64_t vram_reads, vram_writes;
     uint64_t otags, flips;
+
+    /* ---- el HUD de carrera (M2c paso 5) ----
+     * En carrera los ayudantes del HUD no se sustituyen: corre el codigo original, que
+     * construye sus primitivas en tablas de ordenacion. El host graba, en cada DrawOTag,
+     * todas las tablas salvo la del mundo, y al cerrar el frame se queda con las que van
+     * detras de las vistas de jugador. Cada tabla grabada es un tramo contiguo de la
+     * lista 2D; aqui se apunta donde empieza cada uno. */
+    uint32_t otags_frame;                 /* DrawOTag desde la ultima frontera de frame */
+    uint32_t hud_start[HUD_LISTS_MAX];
+    uint32_t hud_lists;
+    uint64_t hud_single;                  /* frames con una sola tabla (ver overlay.c) */
+    int32_t  area_tl[2];                  /* esquina del ultimo E3 */
+    /* SetDrawEnv: el recorte y el desplazamiento de cada paquete de entorno, para
+     * recortar las vistas de HUD al grabarlas. */
+    /* Es un ANILLO: el front end llama a SetDrawEnv con decenas de paquetes distintos
+     * y una tabla fija se llenaba de ellos antes de la carrera (en la referencia es un
+     * HashMap sin limite). Se busca del mas reciente al mas antiguo. */
+    struct { uint32_t pkt; int16_t clip[4]; int16_t ofs[2]; } draw_envs[DRAW_ENVS_MAX];
+    uint32_t draw_envs_n;     /* entradas validas */
+    uint32_t draw_envs_next;  /* donde va la siguiente nueva */
     uint16_t display[4];                  /* area de pantalla del ultimo PutDispEnv */
 } GameHost;
 
@@ -321,6 +344,12 @@ void host_record_objects(GameHost *h, Cpu *c);
 
 /* Graba lo que el juego decide dibujar de cada coche. */
 void host_record_cars(GameHost *h, Cpu *c);
+
+/* El HUD de carrera: grabar una tabla de ordenacion en DrawOTag, y componer las del
+ * frame en la frontera. Ver overlay.c. */
+uint32_t overlay_ot_len(Cpu *c, uint32_t start);
+void     overlay_record_ot(GameHost *h, Cpu *c, uint32_t start);
+void     overlay_race_compose(GameHost *h);
 void host_unlock_everything(GameHost *h, Cpu *c);
 uint32_t host_capture_prims(GameHost *h, Cpu *c, uint32_t addr);
 int  host_showroom_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);

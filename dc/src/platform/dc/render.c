@@ -360,6 +360,65 @@ static int recorta(float *x0, float *y0, float *x1, float *y1,
     return (*x1 > *x0 && *y1 > *y0);
 }
 
+/* ---- recorte general ----
+ *
+ * Los cuadros que NO estan alineados a los ejes tambien hay que recortarlos: la aguja
+ * del tacometro es una linea inclinada que el HUD recorta a su esfera de 28x28, y sin
+ * recortarla se salia por debajo. Sutherland-Hodgman contra los cuatro bordes del
+ * rectangulo, interpolando UV y color: de un cuadro salen hasta 8 vertices. */
+typedef struct { float x, y, u, v, a, r, g, b; } P2;
+
+static void p2_mezcla(P2 *o, const P2 *p, const P2 *q, float s)
+{
+    o->x = p->x + (q->x - p->x) * s;
+    o->y = p->y + (q->y - p->y) * s;
+    o->u = p->u + (q->u - p->u) * s;
+    o->v = p->v + (q->v - p->v) * s;
+    o->a = p->a + (q->a - p->a) * s;
+    o->r = p->r + (q->r - p->r) * s;
+    o->g = p->g + (q->g - p->g) * s;
+    o->b = p->b + (q->b - p->b) * s;
+}
+
+/* Recorta contra un borde: eje 0 = x, 1 = y; `max` dice si el borde es el de arriba. */
+static int p2_borde(const P2 *in, int n, P2 *out, int eje, int max, float lim)
+{
+    int i, m = 0;
+
+    for (i = 0; i < n; i++) {
+        const P2 *p = &in[i], *q = &in[(i + 1) % n];
+        float vp = eje ? p->y : p->x, vq = eje ? q->y : q->x;
+        int dp = max ? vp <= lim : vp >= lim;
+        int dq = max ? vq <= lim : vq >= lim;
+
+        if (dp)
+            out[m++] = *p;
+        if (dp != dq && vq != vp)
+            p2_mezcla(&out[m++], p, q, (lim - vp) / (vq - vp));
+    }
+    return m;
+}
+
+static int p2_recorta(P2 *pol, int n, const Rect *c)
+{
+    P2 tmp[16];
+
+    n = p2_borde(pol, n, tmp, 0, 0, c->x0);
+    n = p2_borde(tmp, n, pol, 0, 1, c->x1);
+    n = p2_borde(pol, n, tmp, 1, 0, c->y0);
+    n = p2_borde(tmp, n, pol, 1, 1, c->y1);
+    return n;
+}
+
+static uint32_t p2_argb(const P2 *p)
+{
+    uint32_t a = (uint32_t)(p->a + 0.5f), r = (uint32_t)(p->r + 0.5f);
+    uint32_t g = (uint32_t)(p->g + 0.5f), b = (uint32_t)(p->b + 0.5f);
+
+    return (a << 24) | ((r > 255u ? 255u : r) << 16) | ((g > 255u ? 255u : g) << 8) |
+           (b > 255u ? 255u : b);
+}
+
 /* ---- el frame ---- */
 
 static uint32_t color_de(const OverlayQuad *q, int k, int semi)
@@ -430,7 +489,8 @@ void render_frame(GameHost *h)
         pvr_poly_hdr_t hdr;
         pvr_vertex_t v;
         float px[4], py[4], pu[4], pv[4];
-        int k, alineado;
+        int k, alineado, npol;
+        P2 pol[16];
 
         if (q->kind == OVL_CLIP) {
             clip.x0 = (float)q->pts[0][0] * sx;
@@ -456,9 +516,45 @@ void render_frame(GameHost *h)
             }
         }
 
-        /* recorte, solo sobre los alineados a los ejes */
+        /* El poligono en orden de perimetro (la tira TL, TR, BL, BR da 0, 1, 3, 2). */
+        {
+            static const int per[4] = { 0, 1, 3, 2 };
+
+            for (k = 0; k < 4; k++) {
+                uint32_t c = color_de(q, per[k], q->semi);
+
+                pol[k].x = px[per[k]];
+                pol[k].y = py[per[k]];
+                pol[k].u = pu[per[k]];
+                pol[k].v = pv[per[k]];
+                pol[k].a = (float)(c >> 24);
+                pol[k].r = (float)((c >> 16) & 0xFFu);
+                pol[k].g = (float)((c >> 8) & 0xFFu);
+                pol[k].b = (float)(c & 0xFFu);
+            }
+            npol = 4;
+        }
+
+        /* recorte: los alineados por el camino corto, que mueve tambien los texeles */
         alineado = (px[0] == px[2] && px[1] == px[3] &&
                     py[0] == py[1] && py[2] == py[3]);
+        if (!alineado) {
+            float bx0 = pol[0].x, bx1 = pol[0].x, by0 = pol[0].y, by1 = pol[0].y;
+
+            for (k = 1; k < 4; k++) {
+                if (pol[k].x < bx0) bx0 = pol[k].x;
+                if (pol[k].x > bx1) bx1 = pol[k].x;
+                if (pol[k].y < by0) by0 = pol[k].y;
+                if (pol[k].y > by1) by1 = pol[k].y;
+            }
+            if (bx1 < clip.x0 || bx0 > clip.x1 || by1 < clip.y0 || by0 > clip.y1)
+                continue;                      /* entero fuera */
+            if (bx0 < clip.x0 || bx1 > clip.x1 || by0 < clip.y0 || by1 > clip.y1) {
+                npol = p2_recorta(pol, 4, &clip);
+                if (npol < 3)
+                    continue;
+            }
+        }
         if (alineado) {
             if (!recorta(&px[0], &py[0], &px[1], &py[2],
                          &pu[0], &pv[0], &pu[1], &pv[2], &clip))
@@ -467,6 +563,16 @@ void render_frame(GameHost *h)
             py[1] = py[0]; py[3] = py[2];
             pu[2] = pu[0]; pu[3] = pu[1];
             pv[1] = pv[0]; pv[3] = pv[2];
+            {
+                static const int per[4] = { 0, 1, 3, 2 };
+
+                for (k = 0; k < 4; k++) {
+                    pol[k].x = px[per[k]];
+                    pol[k].y = py[per[k]];
+                    pol[k].u = pu[per[k]];
+                    pol[k].v = pv[per[k]];
+                }
+            }
         }
 
         if (e != NULL)
@@ -485,18 +591,21 @@ void render_frame(GameHost *h)
         pvr_poly_compile(&hdr, &cxt);
         pvr_prim(&hdr, sizeof(hdr));
 
-        /* El cuadro va como tira: TL, TR, BL, BR, que es el orden en que se graba. */
+        /* El poligono va como tira en zigzag: p0, p1, p(n-1), p2, p(n-2)... que para un
+         * cuadro sin recortar es la tira TL, TR, BL, BR de siempre. */
         v.flags = PVR_CMD_VERTEX;
         v.z = z;
         v.oargb = 0;
-        for (k = 0; k < 4; k++) {
-            if (k == 3)
+        for (k = 0; k < npol; k++) {
+            int i = (k == 0) ? 0 : ((k & 1) ? (k + 1) / 2 : npol - k / 2);
+
+            if (k == npol - 1)
                 v.flags = PVR_CMD_VERTEX_EOL;
-            v.x = px[k];
-            v.y = py[k];
-            v.u = pu[k];
-            v.v = pv[k];
-            v.argb = color_de(q, k, q->semi);
+            v.x = pol[i].x;
+            v.y = pol[i].y;
+            v.u = pol[i].u;
+            v.v = pol[i].v;
+            v.argb = p2_argb(&pol[i]);
             pvr_prim(&v, sizeof(v));
         }
         z += 0.001f;

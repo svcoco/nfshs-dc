@@ -51,7 +51,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | 2 | **Horneado y dibujo de los objetos** | **Hecho (2026-10-24)**: el escenario se puebla, 110 triangulos, 60 fps |
 | 3 | **Grabacion de los coches** | **Hecho (2026-10-24)**: 9 494 coches identicos a la referencia en 5 000 frames |
 | 4 | **Horneado y dibujo de los coches** | **Hecho (2026-10-24)**: los coches se ven; 30-40 fps, y el coste **no es dibujarlos** |
-| 5 | **El HUD**: los cuatro ayudantes de M2a | la carrera se **lee**: velocidad, marcha, tiempos, posicion |
+| 5 | **El HUD** | **Hecho (2026-10-24)**: 4 769 frames de carrera con la lista 2D identica a la referencia, HUD incluido |
 | 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | la carrera se parece al original |
 
 Los pasos 1 y 3 van primero **porque tienen oraculo**, igual que la lista 2D de M2a y la
@@ -243,3 +243,60 @@ Sigue **por encima del minimo de 30 fps sostenidos** de CLAUDE.md seccion 3, y e
 recompilado: justo lo que M3 ataca («codegen, SH-4 a mano en hooks»). Un candidato
 concreto ya identificado es la **segunda pasada de halos**, cuyo resultado hoy se tira
 porque los halos son el paso 6.
+
+## 9. Paso 5 hecho: el HUD (2026-10-24)
+
+### Lo que M2a creia y no era asi
+
+M2a dejo aplazados «los cuatro ayudantes del HUD» (`Hud_BuildString`, `ThinBox`,
+`PauseBox`, `FBuildF4`) pensando que habia que sustituirlos. **En carrera no se
+sustituyen**: la referencia deja correr el codigo original, que construye el HUD
+—velocimetro, tacometro, marcha, cronometro, posicion, mapa— en **tablas de ordenacion**,
+una por vista. Lo que hace el host es **grabar esas tablas** en cada `DrawOTag`, salvo la
+del mundo (la primera, con miles de paquetes), y al cerrar el frame quedarse con las que
+van detras de las vistas de jugador. Los ayudantes solo se sustituyen con la partida en
+**pausa**, que queda pendiente.
+
+Y tenia oraculo desde M2a: es la misma lista 2D. En carrera daba 68 361 comandos contra
+210 157; ahora, en el guion largo:
+
+```
+carrera (frame >= 232): 4769 de 4769 identicos byte a byte
+```
+
+### Cuatro fallos, por orden de aparicion
+
+1. **El comparador se paraba a las 5 diferencias.** Las de los menus previos a la carrera
+   (la deuda de los dos cuadros, ya anotada) tapaban todos los frames de carrera. Se mide
+   ahora por tramos, con la carrera aparte.
+2. **La linea engordada hacia el lado equivocado.** La referencia redondea la normal de
+   media unidad, y eso solo da +-1 en lineas horizontales o verticales; en las diagonales
+   cae a (0, 1). El port engordaba las diagonales por su eje dominante y movia **la aguja
+   del tacometro** un pixel. Se resuelve en enteros, exacto.
+3. **La tabla de entornos de dibujo se llenaba en el front end.** `SetDrawEnv` se llama
+   con decenas de paquetes distintos antes de la carrera; una tabla fija de 64 se llenaba
+   de ellos y los de carrera nunca entraban, asi que el recorte de la esfera del
+   tacometro salia a pantalla completa. Ahora es un anillo.
+4. **La referencia no era determinista.** Buscaba el entorno por desplazamiento en un
+   `HashMap` de semilla aleatoria, y hay varios con el mismo: tres ejecuciones de la
+   referencia daban listas distintas (14 y 177 frames). Lo correcto es buscar por la
+   **direccion del paquete**, que es justo la que se le dio a `SetDrawEnv`, sin
+   ambiguedad. **Se arreglo en los dos lados** —en la referencia, en
+   `src/ps1/host/overlay.rs`, como arreglo de determinismo del oraculo—, con el
+   desplazamiento de respaldo. Tres ejecuciones dan ahora el mismo hash.
+
+### En el PVR: recortar tambien lo inclinado
+
+El render 2D solo recortaba los cuadros alineados a los ejes, y la aguja del tacometro
+—una linea inclinada que el HUD recorta a su esfera de 28x28— se salia por debajo. Ahora
+los no alineados se recortan con **Sutherland-Hodgman** contra los cuatro bordes,
+interpolando UV y color (hasta 8 vertices), y se mandan como tira en zigzag.
+
+### Medido
+
+| | |
+|---|---|
+| Comandos del HUD por frame | ~58 |
+| fps en carrera con HUD, coches, objetos, pista y cielo | **30-43** |
+
+El HUD no mueve el ritmo: el coste sigue siendo el de grabar los coches (paso 4).

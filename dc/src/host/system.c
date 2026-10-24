@@ -6,6 +6,7 @@
  * es la lista que el recompilador excluye: aqui no hay nada que caiga despues al
  * codigo recompilado.
  */
+#include "addr.h"
 #include "host.h"
 
 /* El reloj avanza en unidades de 1/1920 s. Cada frontera de HOST_TICK encola una
@@ -201,6 +202,49 @@ void host_hook(GameHost *h, Cpu *c, uint32_t addr)
             /* systemtask dentro de un bucle de espera: dejar pasar el tiempo hasta el
              * siguiente tick del timer es lo que saca al juego de la espera activa. */
             host_advance_to(h, c, (h->clock / HOST_TICK + 1u) * HOST_TICK);
+        }
+        return;
+    }
+    if (addr == 0x800EED6Cu) {
+        /* SetDrawEnv(paquete, entorno): se apunta el recorte y el desplazamiento de cada
+         * paquete, para recortar las vistas de HUD al grabarlas (overlay_record_ot). Uno
+         * a pantalla completa, o el de la primera vista, es el buffer donde estan. */
+        uint32_t pkt = c->r[4], env = c->r[5], j, k;
+        int16_t clip[4], ofs[2];
+        int primera = 0;
+
+        for (k = 0; k < 4u; k++)
+            clip[k] = (int16_t)ps1_r16(c, env + 2u * k);
+        ofs[0] = (int16_t)ps1_r16(c, env + 8u);
+        ofs[1] = (int16_t)ps1_r16(c, env + 10u);
+        for (j = 0; j < h->draw_envs_n; j++)
+            if (h->draw_envs[j].pkt == pkt)
+                break;
+        if (j == h->draw_envs_n) {
+            /* nuevo: al hueco siguiente del anillo, pisando el mas antiguo si esta lleno */
+            j = h->draw_envs_next;
+            h->draw_envs_next = (h->draw_envs_next + 1u) % DRAW_ENVS_MAX;
+            if (h->draw_envs_n < DRAW_ENVS_MAX)
+                h->draw_envs_n++;
+        }
+        {
+            h->draw_envs[j].pkt = pkt;
+            for (k = 0; k < 4u; k++)
+                h->draw_envs[j].clip[k] = clip[k];
+            h->draw_envs[j].ofs[0] = ofs[0];
+            h->draw_envs[j].ofs[1] = ofs[1];
+        }
+        for (k = 0; k < 2u; k++) {
+            int16_t v0 = (int16_t)ps1_r16(c, ADDR_DRAW_VIEWS + 8u + 92u * k);
+            int16_t v1 = (int16_t)ps1_r16(c, ADDR_DRAW_VIEWS + 8u + 92u * k + 2u);
+
+            if (v0 == clip[0] && v1 == clip[1])
+                primera = 1;
+        }
+        primera = primera && clip[2] >= 256;
+        if ((clip[2] >= 256 && clip[3] >= 200) || primera) {
+            h->draw_origin[0] = clip[0];
+            h->draw_origin[1] = clip[1];
         }
         return;
     }

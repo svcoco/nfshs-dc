@@ -163,7 +163,14 @@ impl GameHost {
                     let sx = |v: u32| ((v as i32) << 21) >> 21;
                     let ofs = [sx(e5 & 0x7FF), sx((e5 >> 11) & 0x7FF)];
                     let [ox, oy] = self.draw_origin;
-                    let clip = self.draw_envs.values().find(|(_, o)| o[0] as i32 == ofs[0] && o[1] as i32 == ofs[1]).map(|e| e.0);
+                    // (nfshs-dc) The packet being walked IS the one SetDrawEnv was given, so
+                    // look it up by its address first. Searching only by offset was
+                    // ambiguous (the front end leaves stale entries with the same offset)
+                    // and, over a HashMap's random iteration order, gave a different
+                    // answer on every run.
+                    let clip = self.draw_envs.get(&a).map(|e| e.0).or_else(|| {
+                        self.draw_envs.values().find(|(_, o)| o[0] as i32 == ofs[0] && o[1] as i32 == ofs[1]).map(|e| e.0)
+                    });
                     match clip {
                         Some(cl) => self.overlay.push(OverlayCmd::Clip { x: (cl[0] as i32 - ox) as i16, y: (cl[1] as i32 - oy) as i16, w: cl[2], h: cl[3] }),
                         None => self.overlay.push(OverlayCmd::Clip { x: 0, y: 0, w: 1024, h: 512 }),

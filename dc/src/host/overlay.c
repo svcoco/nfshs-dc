@@ -2,6 +2,7 @@
 #include "addr.h"
 #include "host.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 void overlay_reset(Overlay *o)
@@ -328,15 +329,21 @@ static void parse_prim(GameHost *h, Cpu *c, uint32_t a, uint32_t len)
         }
         dx = p1[0] - p0[0];
         dy = p1[1] - p0[1];
-        /* La normal de media unidad, sin coma flotante: en SH-4 el double es caro y
-         * aqui solo hace falta el signo del desplazamiento de un pixel. */
+        /* La referencia toma la normal de media unidad y la redondea:
+         * (round(-dy/n * 0,5), round(dx/n * 0,5)). Eso solo da +-1 cuando la linea es
+         * horizontal o vertical (el componente vale justo 0,5); en cualquier diagonal
+         * los dos quedan por debajo de 0,5, redondean a 0 y se cae al (0, 1). Con
+         * coordenadas de pantalla (menos de 1024) eso es exacto tambien en float, asi
+         * que aqui va en enteros, sin coma flotante. Engordar las diagonales por su eje
+         * dominante, como se hacia antes, movia la aguja del tacometro un pixel. */
         n2 = dx * dx + dy * dy;
-        if (n2 == 0) {
-            nx = 0; ny = 1;
-        } else if (dx * dx >= dy * dy) {
+        (void)n2;
+        if (dy == 0 && dx != 0) {
             nx = 0; ny = (dx > 0) ? 1 : -1;
-        } else {
+        } else if (dx == 0 && dy != 0) {
             nx = (dy > 0) ? -1 : 1; ny = 0;
+        } else {
+            nx = 0; ny = 1;
         }
         pts[0][0] = p0[0];            pts[0][1] = p0[1];
         pts[1][0] = p1[0];            pts[1][1] = p1[1];
@@ -386,6 +393,192 @@ void overlay_record_packets(GameHost *h, Cpu *c, uint32_t start, uint32_t end)
             parse_prim(h, c, pos[i] + 4u, lens[i]);
     }
     h->overlay.draw_mode = entrada;
+}
+
+/* ---- el HUD de carrera (M2c paso 5) ----
+ *
+ * En carrera el juego construye el HUD (velocimetro, tacometro, marcha, tiempos, posicion,
+ * mapa) con su propio codigo, en tablas de ordenacion, una por vista. El host no lo
+ * sustituye: en cada DrawOTag graba la tabla entera, salvo la del mundo, que es la
+ * primera y trae miles de paquetes. Portado de record_ot y frame_top de la referencia
+ * (src/ps1/host/overlay.rs y frame.rs).
+ */
+
+/* Paquetes de una tabla, siguiendo los punteros hasta el final. */
+uint32_t overlay_ot_len(Cpu *c, uint32_t start)
+{
+    uint32_t a = start, n = 0;
+
+    while (n < 20000u) {
+        uint32_t next = ps1_r32(c, a) & 0xFFFFFFu;
+
+        n++;
+        if (next == 0xFFFFFFu)
+            break;
+        a = 0x80000000u | next;
+    }
+    return n;
+}
+
+static int32_t sx11(uint32_t v)
+{
+    return ((int32_t)(v << 21)) >> 21;
+}
+
+/* Un comando de entorno suelto (E1..E5). */
+static void entorno(GameHost *h, uint32_t w)
+{
+    int32_t ox = h->draw_origin[0], oy = h->draw_origin[1];
+
+    switch (w >> 24) {
+    case 0xE1u:
+        h->overlay.draw_mode = (uint16_t)(w & 0x1FFu);
+        break;
+    case 0xE3u:
+        h->area_tl[0] = (int32_t)(w & 0x3FFu) - ox;
+        h->area_tl[1] = (int32_t)((w >> 10) & 0x3FFu) - oy;
+        break;
+    case 0xE4u: {
+        int32_t x1 = (int32_t)(w & 0x3FFu) - ox;
+        int32_t y1 = (int32_t)((w >> 10) & 0x3FFu) - oy;
+
+        overlay_clip(h, (int16_t)h->area_tl[0], (int16_t)h->area_tl[1],
+                     (int16_t)(x1 - h->area_tl[0] + 1), (int16_t)(y1 - h->area_tl[1] + 1));
+        break;
+    }
+    case 0xE5u:
+        h->overlay.prim_offset[0] = (int16_t)(sx11(w & 0x7FFu) - ox);
+        h->overlay.prim_offset[1] = (int16_t)(sx11((w >> 11) & 0x7FFu) - oy);
+        break;
+    default:
+        break;
+    }
+}
+
+/* Recorre una tabla desde `start` en orden de dibujo y graba sus primitivas. */
+void overlay_record_ot(GameHost *h, Cpu *c, uint32_t start)
+{
+    uint32_t a = start, i;
+
+    h->overlay.prim_offset[0] = 0;
+    h->overlay.prim_offset[1] = 0;
+    /* cada lista empieza sin recortar (su propio entorno de dibujo, si lo trae, recorta) */
+    overlay_clip(h, 0, 0, 1024, 512);
+
+    for (i = 0; i < 20000u; i++) {
+        uint32_t tag = ps1_r32(c, a);
+        uint32_t len = tag >> 24, next = tag & 0xFFFFFFu, k;
+
+        if (len > 0u) {
+            uint8_t code = (uint8_t)ps1_r8(c, a + 7u);
+
+            if (code >= 0xE0u) {
+                /* El paquete de entorno de una vista (el de SetDrawEnv): el desplazamiento
+                 * sale de su palabra E5 y el recorte del que se le dio a SetDrawEnv para
+                 * ese desplazamiento (las palabras de area del paquete no las usa). */
+                uint32_t e5 = 0;
+                int hay_e5 = 0;
+
+                for (k = 0; k < len; k++) {
+                    uint32_t w = ps1_r32(c, a + 4u + 4u * k);
+
+                    if ((w >> 24) == 0xE5u) {
+                        e5 = w;
+                        hay_e5 = 1;
+                        break;
+                    }
+                }
+                if (hay_e5) {
+                    int32_t ofs[2], ox = h->draw_origin[0], oy = h->draw_origin[1];
+                    uint32_t j = 0, jj;
+                    int hallado = 0;
+
+                    ofs[0] = sx11(e5 & 0x7FFu);
+                    ofs[1] = sx11((e5 >> 11) & 0x7FFu);
+                    /* Primero por la DIRECCION del paquete: el que se recorre es el mismo
+                     * que se le dio a SetDrawEnv, sin ambiguedad. Buscar solo por el
+                     * desplazamiento era ambiguo (el front end deja entradas viejas con el
+                     * mismo) y en la referencia daba una respuesta distinta en cada
+                     * ejecucion. El desplazamiento queda de respaldo. */
+                    for (jj = 0; jj < h->draw_envs_n; jj++)
+                        if (h->draw_envs[jj].pkt == a) {
+                            j = jj;
+                            overlay_clip(h, (int16_t)(h->draw_envs[j].clip[0] - ox),
+                                         (int16_t)(h->draw_envs[j].clip[1] - oy),
+                                         h->draw_envs[j].clip[2], h->draw_envs[j].clip[3]);
+                            hallado = 1;
+                            break;
+                        }
+                    /* del mas reciente al mas antiguo del anillo */
+                    for (jj = 0; !hallado && jj < h->draw_envs_n; jj++)
+                        if ((j = (h->draw_envs_next + DRAW_ENVS_MAX - 1u - jj) % DRAW_ENVS_MAX),
+                            h->draw_envs[j].ofs[0] == ofs[0] && h->draw_envs[j].ofs[1] == ofs[1]) {
+                            overlay_clip(h, (int16_t)(h->draw_envs[j].clip[0] - ox),
+                                         (int16_t)(h->draw_envs[j].clip[1] - oy),
+                                         h->draw_envs[j].clip[2], h->draw_envs[j].clip[3]);
+                            hallado = 1;
+                            break;
+                        }
+                    if (!hallado)
+                        overlay_clip(h, 0, 0, 1024, 512);
+                    h->overlay.prim_offset[0] = (int16_t)(ofs[0] - ox);
+                    h->overlay.prim_offset[1] = (int16_t)(ofs[1] - oy);
+                    for (k = 0; k < len; k++) {
+                        uint32_t w = ps1_r32(c, a + 4u + 4u * k);
+
+                        if ((w >> 24) == 0xE1u)
+                            h->overlay.draw_mode = (uint16_t)(w & 0x1FFu);
+                    }
+                } else {
+                    /* comandos de entorno, varios por paquete */
+                    for (k = 0; k < len; k++)
+                        entorno(h, ps1_r32(c, a + 4u + 4u * k));
+                }
+            } else {
+                parse_prim(h, c, a + 4u, len);
+            }
+        }
+        if (next == 0xFFFFFFu)
+            break;
+        a = 0x80000000u | next;
+    }
+}
+
+/* La frontera de frame en carrera: de las tablas grabadas, las de las vistas de jugador
+ * (la del mundo) se tiran y el resto es el HUD. Luego la lista entera se da la vuelta,
+ * porque se guarda con lo ultimo dibujado primero. */
+void overlay_race_compose(GameHost *h)
+{
+    Overlay *o = &h->overlay;
+    uint32_t n = h->hud_lists, i;
+
+    if (n >= 2u) {
+        uint32_t vistas = h->views_n;
+        uint32_t desde, hasta;
+
+        if (vistas < 1u)
+            vistas = 1u;
+        if (vistas > n - 1u)
+            vistas = n - 1u;
+        desde = h->hud_start[0];
+        hasta = h->hud_start[vistas];
+        if (hasta > desde && hasta <= o->n) {
+            memmove(&o->quad[desde], &o->quad[hasta],
+                    (size_t)(o->n - hasta) * sizeof(o->quad[0]));
+            o->n -= hasta - desde;
+        }
+    } else if (n == 1u) {
+        /* Una sola tabla: la referencia acumula aqui el menu de una partida pausada sobre
+         * el ultimo HUD completo. Todavia no esta portado; se cuenta para saber si pasa. */
+        h->hud_single++;
+    }
+    for (i = 0; i < o->n / 2u; i++) {
+        OverlayQuad t = o->quad[i];
+
+        o->quad[i] = o->quad[o->n - 1u - i];
+        o->quad[o->n - 1u - i] = t;
+    }
+    h->hud_lists = 0;
 }
 
 /* Recorre la lista del frame y le dice a la cache que texturas hacen falta; luego

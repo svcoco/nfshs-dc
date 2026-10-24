@@ -131,9 +131,18 @@ int host_gpu_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
         return 1;
     }
     case 0x800EE610u:                       /* DrawOTag */
-        /* El dibujo lo hace el motor del host. En M2a esta lista se grabara; por
-         * ahora solo se cuenta, que ya dice cuanto esta dibujando el juego. */
+        /* El dibujo lo hace el motor del host. En carrera, las tablas que van despues
+         * de la del mundo (HUD, tacometro, mapa) se graban como 2D (M2c paso 5). La del
+         * mundo, la primera y con miles de paquetes, solo se cuenta: su contenido lo
+         * dibuja el renderer desde los assets. */
         h->otags++;
+        if (h->mode == HOST_RACE && ps1_r32(c, SIM_PAUSED) == 0u) {
+            if (h->hud_lists < HUD_LISTS_MAX)
+                h->hud_start[h->hud_lists++] = h->overlay.n;
+            if (h->otags_frame > 0u || overlay_ot_len(c, a0) < 1500u)
+                overlay_record_ot(h, c, a0);
+            h->otags_frame++;
+        }
         *ret = 0;
         return 1;
     case 0x800EE680u:                       /* PutDrawEnv(env) */

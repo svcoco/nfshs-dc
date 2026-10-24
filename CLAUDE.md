@@ -17,7 +17,8 @@ pasa **227/227** en SH-4 y el código generado ocupa **3,43 MB** con `-Os` (sin 
 Falta solo **probarlo en una consola real**: el CDI es grabable en CD-R y es el formato
 que la consola acepta, pero nadie lo ha quemado todavía. **M2a tiene sus cinco pasos
 hechos**: el front end **se dibuja con el PVR en Dreamcast a ~60 fps**, completo y
-legible; queda mirarlo en 480i en una tele, que es el criterio de salida del hito.**
+legible; queda mirarlo en 480i en una tele, que es el criterio de salida del hito.
+**M2b también está hecho en emulador**: la carrera se dibuja —pista y cielo— a **60 fps**.**
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y
@@ -117,7 +118,7 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 | M1a | Backend C + ps1rt en C, en PC (x86) | **Hecho (2026-10-18).** Test diferencial contra la versión Rust: **120 frames idénticos** en el front end y **231** en la carrera (incluida la transición), comparando 512 hashes de página, los 32 registros, hi, lo, cop0, los 64 del GTE, `cont` y ticks. **Cinco bugs reales** encontrados, todos de integración host/juego. Pruebas unitarias 227/227. El manejador de `Render_RenderPlayerView` queda para M2b (`docs/hitos/M1a.md`) |
 | M1b | Cross-compilar a SH-4 (KOS, `-m4-single`) + host mínimo (archivos, pad, timers, VSync, BIOS) | **Hecho en Flycast con BIOS real (2026-10-23).** Arranca desde CDI; front end a 69–78 fps y carrera simulando a **98–113 fps**; `.text` de 3,43 MB con `-Os`, ELF `text 3,8 MB / bss 4,85 MB`; 227/227 unitarias en SH-4. Falta quemarlo y probarlo en una consola |
 | M2a | Grabación en C + modos 480p/480i + 2D en PVR + espejo de VRAM y texturas | Front end navegable y legible en ambos modos |
-| M2b | Pista y cielo en PVR (transformación en SH-4 con FTRV, recorte por plano cercano) | Una pista recorrible; ms/frame y polígonos medidos |
+| M2b | Pista y cielo en PVR (transformación en SH-4, recorte por plano cercano) | **Hecho en emulador (2026-10-23).** La carrera se dibuja a **60 fps** con ~1 150 triángulos de pista y 104 de cielo. La transformación va en C con `float`, **sin FTRV**: esa optimización queda para M3 y ahora hay con qué medirla (`docs/hitos/M2b.md`) |
 | M2c | Coches, props y efectos | Carrera completa de un jugador |
 | M3 | Optimización (codegen, SH-4 a mano en hooks, LOD) + audio SPU→AICA | **30 fps sostenidos** en carrera como mínimo, sin tope por arriba (60 es el objetivo ideal); música, motor y efectos |
 | M4 "Enhancements" | Escalado de texturas horneado en el PC | Texturas de pista, coches y HUD escaladas dentro del presupuesto de VRAM, con respaldo a las originales |

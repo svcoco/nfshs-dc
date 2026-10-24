@@ -19,15 +19,15 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1a** Backend C + `ps1rt` en C, en x86 | Cerrado (2026-10-18) |
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
-| **M2b** La pista y el cielo en el PVR | Pasos 1 a 3 de 4; **la pista ya se ve** |
+| **M2b** La pista y el cielo en el PVR | Los cuatro pasos hechos; **la carrera se ve a 60 fps** |
 | M2b, M2c, M3, M4, M5 | Sin empezar |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
 datos del disco y **dibuja el front end con el PVR a ~60 fps**, legible y completo: el
 menú *game setup*, sus opciones, la foto del coche y el texto de ayuda. La carrera
-**dibuja ya la pista de la carrera** a 53–60 fps: edificios, asfalto, barandillas y
-arbolado, con las texturas y el color de vértice del original. Falta el cielo (negro
-ahora mismo), los coches y los objetos.
+**dibuja ya la carrera** a 60 fps: la pista con sus edificios, asfalto, barandillas y
+arbolado, y el cielo completo —cúpula y banda de horizonte— con las texturas y el color
+de vértice del original. Faltan los coches y los objetos, que son M2c.
 
 ---
 
@@ -256,7 +256,7 @@ El hito que convierte el negro de la carrera en algo mirable.
 | 1 | Captura de la vista de carrera | **Hecho**, validado contra la referencia |
 | 2 | Horneado de la pista en el PC | **Hecho**, las 40 pistas |
 | 3 | Transformación, recorte y dibujo en el PVR | **Hecho**, la pista se ve |
-| 4 | El cielo | Siguiente |
+| 4 | El cielo | **Hecho**, 104 triángulos |
 
 ### El dimensionado, que cambió el planteamiento
 
@@ -343,6 +343,26 @@ Dibujar la pista cuesta del orden de medio frame. Sigue por encima del mínimo d
 sostenidos, y **todavía sin FTRV**: la transformación va en C con `float` normal. Esa
 optimización es de M3 y ahora hay con qué medirla.
 
+### Paso 4: el cielo
+
+**No es un asset.** Sus vértices y colores viven en la RAM del juego; del PSH solo salen
+las texturas `HZ01..HZ12`, que el horneado mete al atlas a propósito porque ningún
+material de la pista las referencia. Son la **cúpula** (4×16 cuadros sobre una malla de
+5×17 puntos, con color por vértice y a veces textura) y la **banda de horizonte** (16
+segmentos de un anillo de 17 puntos), las dos centradas en la cámara. El host lo relee
+cada frame, así que el cielo sigue los cambios de luz sin adivinar cuándo pasan.
+
+**104 triángulos**, menos del 10 % del frame, y el ritmo no se mueve de 60 fps.
+
+Dos fallos que solo se ven con el mundo delante:
+
+- **A la pista le faltaba el ×2.** El `0x80` de PS1 es el 1,0 y el color de vértice iba
+  al PVR sin doblar: todo salía a media luz.
+- **El color clave en la lista opaca sale negro.** Las copas de los árboles son cuadros
+  con texeles transparentes y la lista opaca del PVR no hace prueba de alfa: cada
+  silueta llevaba un fleco negro. **No era el filtro bilineal** —con muestreo puntual
+  seguía igual—. El mundo va ahora a la lista **punch-through**.
+
 ---
 
 ## Decisiones vigentes
@@ -405,6 +425,10 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **Mandar geometría a una lista del PVR con `PVR_BINSIZE_0` no da error:** deja la
   pantalla negra y hunde el ritmo a 4 fps. M2a solo usaba la translúcida, así que la
   opaca se quedó a cero sin que se notara.
+- **En la lista opaca del PVR, un texel con color clave se pinta NEGRO.** No hay prueba
+  de alfa. Lo que lleve color clave va a *punch-through*.
+- **El `0x80` de PS1 es el 1,0 en todas partes**, también en el color de vértice del
+  mundo: hay que doblar y saturar, o la escena sale a media luz.
 - **Los cuatro vértices de un cuadro de pista van en orden cíclico**, no en zigzag: se
   parte en (0,1,2) y (0,2,3). Como tira deja huecos triangulares por toda la pista.
 - **El juego abre sus archivos en minúsculas** (`zTr06.grp`) y el ISO del disco los

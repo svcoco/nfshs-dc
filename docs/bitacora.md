@@ -19,15 +19,15 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1a** Backend C + `ps1rt` en C, en x86 | Cerrado (2026-10-18) |
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
-| **M2b** La pista y el cielo en el PVR | Pasos 1 y 2 de 4 |
+| **M2b** La pista y el cielo en el PVR | Pasos 1 a 3 de 4; **la pista ya se ve** |
 | M2b, M2c, M3, M4, M5 | Sin empezar |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
 datos del disco y **dibuja el front end con el PVR a ~60 fps**, legible y completo: el
 menú *game setup*, sus opciones, la foto del coche y el texto de ayuda. La carrera
-ejecuta su lógica pero todavía no se dibuja: el port ya tiene la cámara y la lista de
-trozos de pista que el juego decide (M2b paso 1) y la pista horneada lista para el PVR
-(paso 2); falta transformarla y pintarla.
+**dibuja ya la pista de la carrera** a 53–60 fps: edificios, asfalto, barandillas y
+arbolado, con las texturas y el color de vértice del original. Falta el cielo (negro
+ahora mismo), los coches y los objetos.
 
 ---
 
@@ -255,8 +255,8 @@ El hito que convierte el negro de la carrera en algo mirable.
 |---|---|---|
 | 1 | Captura de la vista de carrera | **Hecho**, validado contra la referencia |
 | 2 | Horneado de la pista en el PC | **Hecho**, las 40 pistas |
-| 3 | Transformación en el SH-4 y dibujo en el PVR | En curso |
-| 4 | El cielo | |
+| 3 | Transformación, recorte y dibujo en el PVR | **Hecho**, la pista se ve |
+| 4 | El cielo | Siguiente |
 
 ### El dimensionado, que cambió el planteamiento
 
@@ -323,6 +323,26 @@ En el peor caso van ~4,2 MB de los 8 del PVR entre atlas, caché de M2a y los do
 de pantalla. Entra, pero M2c todavía tiene que meter coches: si aprieta, el atlas se puede
 partir en varios, porque la pista es opaca con Z-buffer y el orden no importa.
 
+### Paso 3: la pista en pantalla
+
+`dc/src/render/track.c` (portable) lleva el `.TRK` a vértices de pantalla y
+`platform/dc/render.c` los manda a la lista **opaca con Z-buffer** —al revés que el
+overlay 2D, que es algoritmo del pintor en la translúcida—. El arnés de PC los pinta por
+software (`--track`), que es lo único parecido a un oráculo que tiene este paso.
+
+Qué pista cargar lo dice el propio juego: el host se queda con el nombre del **`.GRP` que
+abre** y la plataforma carga `/cd/BAKED/<NOMBRE>.TRK`.
+
+| Medido en Flycast con BIOS real | |
+|---|---|
+| **Triángulos por frame** | **1 038** |
+| **fps en carrera, dibujando** | **53–60** (16,7–18,7 ms) |
+| fps en carrera sin dibujar (M1b) | 98–113 |
+
+Dibujar la pista cuesta del orden de medio frame. Sigue por encima del mínimo de 30 fps
+sostenidos, y **todavía sin FTRV**: la transformación va en C con `float` normal. Esa
+optimización es de M3 y ahora hay con qué medirla.
+
 ---
 
 ## Decisiones vigentes
@@ -382,6 +402,16 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **Los campos del descriptor de pista de un CDI se miden desde el final del nombre del
   archivo**, que va dentro del propio descriptor.
 - **El intérprete de respaldo no es código muerto:** 21 378 entradas en 900 frames.
+- **Mandar geometría a una lista del PVR con `PVR_BINSIZE_0` no da error:** deja la
+  pantalla negra y hunde el ritmo a 4 fps. M2a solo usaba la translúcida, así que la
+  opaca se quedó a cero sin que se notara.
+- **Los cuatro vértices de un cuadro de pista van en orden cíclico**, no en zigzag: se
+  parte en (0,1,2) y (0,2,3). Como tira deja huecos triangulares por toda la pista.
+- **El juego abre sus archivos en minúsculas** (`zTr06.grp`) y el ISO del disco los
+  guarda en mayúsculas.
+- **Un registro de archivo con pares `(u32, u16)` no se puede superponer a un struct de
+  C:** el compilador rellena cada par a ocho bytes. Hay que decodificarlo, que además
+  evita lecturas desalineadas, que en SH-4 son una excepción.
 - **Las capturas de la ventana de Flycast salen recortadas por el DPI.** PowerShell pide
   el rectángulo del cliente en píxeles lógicos y `PrintWindow` dibuja en físicos: con
   Windows al 125 % hay que crear el mapa de bits a ×1,25 o se pierde la derecha y el

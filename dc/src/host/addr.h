@@ -38,6 +38,21 @@
 #define ADDR_CAMERA_ZOOM        0x8013DAD0u  /* proyeccion de la camara */
 #define ADDR_DRAW_VIEWS         0x8011FF44u  /* Draw_gViews[]: 200 bytes por vista */
 #define ADDR_LIGHT_TABLE        0x8013DB0Cu  /* PUNTERO a Chunk_lightTable: 256 x 0xBBGGRR */
+
+/* El cielo (M2b paso 4). No es un asset: sus vertices y colores viven en la RAM del
+ * juego; del PSH solo salen las texturas HZ01..HZ12.
+ *   - la cupula son 5 anillos x 17 puntos, el horizonte primero
+ *   - el horizonte es un anillo de 17 puntos de radio 32000
+ */
+#define ADDR_SKY_HREC      (ADDR_GP + 4916u)  /* PUNTERO al registro del horizonte */
+#define ADDR_SKY_DOMETEX   (ADDR_GP + 4920u)  /* PUNTERO al registro de textura de cupula */
+#define ADDR_SKY_RING      (ADDR_GP + 4924u)  /* PUNTERO al anillo del horizonte */
+#define ADDR_SKY_MESH          0x80121668u    /* gSkyMesh: 85 x 8 bytes (x, y, z) */
+#define ADDR_SKY_COLOR         0x80121910u    /* gSkyColor: 85 x 4 bytes RGB */
+#define ADDR_SKY_DOMETEX_TAB   0x80121A64u    /* 64 bytes: pixmap por cuadro de cupula */
+#define ADDR_SKY_BOTTOM_COLORS 0x80121AE8u    /* 17 x 4 bytes RGB, borde bajo del horizonte */
+#define ADDR_SKY_TOP_COLORS    0x80121B28u    /* 17 x 4 bytes RGB, borde alto */
+#define ADDR_SKY_BAND          0x80124570u    /* si vale 0, el horizonte no se dibuja */
 #define ADDR_HUD_WRONG_WAY      0x8009BAC4u  /* DashHud_CheckWrongWay(jugador) */
 #define ADDR_HUD_CALC           0x8009BB34u  /* DashHud_HudCalc: velocidad, marcha... */
 /* Scratchpad: el original lo usa de cache de dibujo en estas llamadas. */

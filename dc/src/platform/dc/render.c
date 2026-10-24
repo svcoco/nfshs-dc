@@ -98,6 +98,39 @@ static void pista_carga(const char *nombre)
            (unsigned)s_track.atlas_w, (unsigned)s_track.atlas_h);
 }
 
+/* Modos de dibujo del mundo. El cielo no escribe profundidad (va detras de todo) y sus
+ * cuadros son unos con textura y otros planos, asi que hay que cambiar de contexto sobre
+ * la marcha: cada llamada al sumidero es una tira entera, asi que basta con mirar si el
+ * modo cambio y emitir una cabecera nueva. */
+#define MODO_CIELO_PLANO 0
+#define MODO_CIELO_TEX   1
+#define MODO_PISTA       2
+
+static int s_modo;
+
+static void modo_pon(int modo)
+{
+    pvr_poly_cxt_t cxt;
+    pvr_poly_hdr_t hdr;
+
+    if (modo == s_modo)
+        return;
+    s_modo = modo;
+    if (modo == MODO_CIELO_PLANO)
+        pvr_poly_cxt_col(&cxt, PVR_LIST_PT_POLY);
+    else
+        pvr_poly_cxt_txr(&cxt, PVR_LIST_PT_POLY,
+                         PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
+                         s_track.atlas_w, s_track.atlas_h, s_atlas, PVR_FILTER_NONE);
+    cxt.gen.culling = PVR_CULLING_NONE;
+    if (modo != MODO_PISTA) {
+        cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
+        cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+    }
+    pvr_poly_compile(&hdr, &cxt);
+    pvr_prim(&hdr, sizeof(hdr));
+}
+
 /* El sumidero. El PVR dibuja TIRAS: para el abanico (0,1,2,3) que emite track_draw, la
  * tira equivalente es 0, 1, 3, 2. */
 static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
@@ -106,7 +139,8 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
     uint32_t k;
 
     (void)user;
-    (void)m;
+    if (s_modo != MODO_PISTA)
+        modo_pon(m != NULL ? MODO_CIELO_TEX : MODO_CIELO_PLANO);
     pv.flags = PVR_CMD_VERTEX;
     pv.oargb = 0;
     for (k = 0; k < n; k++) {
@@ -127,26 +161,30 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
 
 static void pista_dibuja(GameHost *h)
 {
-    pvr_poly_cxt_t cxt;
-    pvr_poly_hdr_t hdr;
-    TrackStats st;
+    TrackStats st, sst;
 
     if (strncmp(h->track_name, s_track_cargada, sizeof s_track_cargada) != 0)
         pista_carga(h->track_name);
     if (s_track.raw == NULL || h->views_n == 0u)
         return;
+    /* Por encima del anillo mas alto de la cupula no hay geometria: ese hueco lo cubre
+     * el color de fondo. */
+    {
+        uint32_t cz = sky_zenith(&h->sky);
 
-    pvr_list_begin(PVR_LIST_OP_POLY);
-    /* Un solo contexto para toda la pista: un atlas y nada de mezcla. Sin descarte de
-     * caras, porque el horneado no normaliza el sentido de giro (hay materiales de doble
-     * cara) y del resto se encarga el Z-buffer. */
-    pvr_poly_cxt_txr(&cxt, PVR_LIST_OP_POLY,
-                     PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
-                     s_track.atlas_w, s_track.atlas_h, s_atlas, PVR_FILTER_BILINEAR);
-    cxt.gen.culling = PVR_CULLING_NONE;
-    pvr_poly_compile(&hdr, &cxt);
-    pvr_prim(&hdr, sizeof(hdr));
+        if (cz != 0u)
+            pvr_set_bg_color((float)((cz >> 16) & 0xFFu) / 255.0f,
+                             (float)((cz >> 8) & 0xFFu) / 255.0f,
+                             (float)(cz & 0xFFu) / 255.0f);
+    }
 
+    pvr_list_begin(PVR_LIST_PT_POLY);
+    /* El cielo primero, sin escribir profundidad; la pista despues, con Z. Sin descarte
+     * de caras, porque el horneado no normaliza el sentido de giro (hay materiales de
+     * doble cara) y del resto se encarga el Z-buffer. */
+    s_modo = -1;
+    sky_draw(&s_track, &h->sky, &h->view[0], 640.0f, 480.0f, pista_emite, NULL, &sst);
+    modo_pon(MODO_PISTA);
     track_draw(&s_track, &h->view[0], h->light_ok ? h->light_table : NULL,
                640.0f, 480.0f, pista_emite, NULL, &st);
     s_tri_frames++;
@@ -163,10 +201,14 @@ int render_init(void)
     pvr_init_params_t p = {
         /* un overlay 2D no usa modificadores ni punch-through */
         /* OPACA para la pista (M2b) y TRANSLUCIDA para el overlay 2D (M2a). Dejar la
-         * opaca en BINSIZE_0 y mandarle geometria no da un error: deja la pantalla en
-         * negro y hunde el ritmo a 4 fps. */
-        .opb_sizes = { PVR_BINSIZE_16, PVR_BINSIZE_0, PVR_BINSIZE_16,
-                       PVR_BINSIZE_0, PVR_BINSIZE_0 },
+         * lista en BINSIZE_0 y mandarle geometria no da un error: deja la pantalla en
+         * negro y hunde el ritmo a 4 fps.
+         *
+         * El mundo va en PUNCH-THROUGH y no en opaca: sus texturas tienen color clave
+         * (los huecos entre las copas de los arboles) y la lista opaca no hace prueba de
+         * alfa, asi que esos texeles salian NEGROS y dejaban un fleco en cada silueta. */
+        .opb_sizes = { PVR_BINSIZE_0, PVR_BINSIZE_0, PVR_BINSIZE_16,
+                       PVR_BINSIZE_0, PVR_BINSIZE_16 },
         .vertex_buf_size = 512 * 1024,
         .dma_enabled = 0,
         .fsaa_enabled = 0,

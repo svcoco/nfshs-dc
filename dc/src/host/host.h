@@ -75,6 +75,26 @@ typedef struct {
 #define VIEWS_MAX        2u    /* un jugador; dos en M5 */
 #define VIEW_CHUNKS_MAX 64u    /* lo que cabe en la lista del juego */
 
+/* El cielo, tal como el juego lo deja en su RAM (M2b paso 4).
+ *
+ * Son dos piezas: una **cupula** de 5 anillos x 17 puntos con color por vertice (y, en
+ * algunas pistas, textura por cuadro), y una **banda de horizonte** de 16 segmentos
+ * alrededor de un anillo de 17 puntos. Las dos se dibujan centradas en la camara, asi que
+ * solo les afecta su giro. */
+typedef struct SkyData {
+    int      ok;                /* el juego tiene cielo preparado */
+    int16_t  dome[85][3];       /* gSkyMesh, radio 1000 */
+    uint8_t  dome_rgb[85][3];
+    int16_t  ring[17][2];       /* radio 32000 */
+    int16_t  bottom, height;    /* alto de la banda, en unidades del anillo */
+    uint8_t  top_rgb[17][3];
+    uint8_t  bottom_rgb[17][3];
+    uint8_t  segment_tex[16];   /* HZ01..HZ08 por segmento (indice & 7) */
+    int      band;              /* la banda se dibuja (en los circuitos, no) */
+    int      dome_tex_ok;
+    uint8_t  dome_tex[64];      /* pixmap por cuadro: 0..11 HZ01..HZ12, 12..15 espejados */
+} SkyData;
+
 typedef struct RaceView {
     uint32_t player;
     int16_t  rect[4];          /* recorte relativo al de la vista 0, y su tamano */
@@ -191,6 +211,7 @@ typedef struct GameHost {
      * variante y el clima, asi que se relee cuando el puntero se mueve. */
     uint32_t light_table[256];
     uint32_t light_ptr;
+    SkyData  sky;
 
     /* El nombre base del ultimo .GRP que el juego abrio: es como el port sabe QUE pista
      * tiene que cargar horneada, sin tener que leerselo al juego por otro sitio. */

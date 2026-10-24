@@ -25,6 +25,8 @@
 //! blocks   blocks * 44 bytes: i32 origin[3] (1/64 m), then five (u32 offset, u16 count)
 //!          pairs - ground verts, ground quads, ground far quads, detail verts,
 //!          detail quads - and u16 of padding
+//! sky      12 * 8 bytes: u16 atlas x, y, w, h de HZ01..HZ12 (ceros si la pista no la
+//!          trae). Van despues de los materiales.
 //! materials materials * 16 bytes: u16 atlas x, y, w, h, u8 corner[4] (which rect
 //!          corner each of the four vertices takes), u8 flags (1 doble cara,
 //!          2 semitransparente, 4 suma en vez de mitad, 8 textura que se desplaza),
@@ -177,6 +179,17 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
     let used: std::collections::BTreeSet<u16> =
         track.textures.iter().map(|t| t.shape).collect();
     // a 1x1 shape is one texel over the whole polygon; "TRAN" is colour 0, invisible
+    // El cielo (M2b paso 4) usa HZ01..HZ12, que NO son materiales de la pista: ningun
+    // Trk_Material las referencia, asi que hay que meterlas al atlas a proposito.
+    let mut cielo: [Option<u16>; 12] = [None; 12];
+    let mut used = used;
+    for k in 0..12usize {
+        let nombre = format!("HZ{:02}", k + 1);
+        if let Some(i) = shapes.shapes.iter().position(|s| s.name == nombre) {
+            cielo[k] = Some(i as u16);
+            used.insert(i as u16);
+        }
+    }
     let items: Vec<(u16, u32, u32)> = used
         .iter()
         .filter_map(|&s| {
@@ -275,10 +288,21 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
 
     let area: u32 = rects.values().map(|r| (r.w + PAD) * (r.h + PAD)).sum();
     let (usado, formas) = (atlas.h, rects.len());
+    // la tabla del cielo: 12 rectangulos de 8 bytes (0 si esa pista no trae esa forma)
+    let mut sky = Vec::new();
+    for k in 0..12usize {
+        let r = cielo[k].and_then(|s| rects.get(&s));
+        let (x, y, w, h) = r.map_or((0, 0, 0, 0), |r| (r.x, r.y, r.w, r.h));
+        put16(&mut sky, x as u16);
+        put16(&mut sky, y as u16);
+        put16(&mut sky, w as u16);
+        put16(&mut sky, h as u16);
+    }
+
     let (aw, ah, texels) = atlas.finish();
     let mut out_buf = Vec::new();
     out_buf.extend_from_slice(b"NFST");
-    put32(&mut out_buf, 1);
+    put32(&mut out_buf, 2);   /* version 2: anade la tabla del cielo */
     put16(&mut out_buf, track.blocks.len() as u16);
     put16(&mut out_buf, track.textures.len() as u16);
     put16(&mut out_buf, aw as u16);
@@ -286,10 +310,11 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
     put32(&mut out_buf, n_verts);
     put32(&mut out_buf, n_quads);
     let atlas_off = out_buf.len() as u32 + 4 + blocks.len() as u32 + mats.len() as u32
-        + verts.len() as u32 + quads.len() as u32;
+        + sky.len() as u32 + verts.len() as u32 + quads.len() as u32;
     put32(&mut out_buf, atlas_off);
     out_buf.extend_from_slice(&blocks);
     out_buf.extend_from_slice(&mats);
+    out_buf.extend_from_slice(&sky);
     out_buf.extend_from_slice(&verts);
     out_buf.extend_from_slice(&quads);
     for t in &texels {
@@ -333,7 +358,7 @@ fn verifica(d: &[u8]) -> Result<()> {
     let u16a = |o: usize| u16::from_le_bytes([d[o], d[o + 1]]) as usize;
     let u32a = |o: usize| u32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]]) as usize;
 
-    if &d[..4] != b"NFST" {
+    if &d[..4] != b"NFST" || u32a(4) != 2 {
         bail!("cabecera equivocada");
     }
     let (nb, nm) = (u16a(8), u16a(10));
@@ -341,7 +366,7 @@ fn verifica(d: &[u8]) -> Result<()> {
     let (aw, ah) = (u16a(12), u16a(14));
     let blk = 28;
     let mat = blk + nb * 44;
-    let vtx = mat + nm * 16;
+    let vtx = mat + nm * 16 + 12 * 8;   /* materiales + la tabla del cielo */
     let qd = vtx + nv * 8;
     if qd + nq * 10 != atlas_off {
         bail!("el atlas no empieza donde dice la cabecera");

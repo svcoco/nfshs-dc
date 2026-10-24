@@ -28,6 +28,7 @@
 
 /* La vista la define el host (host.h); aqui basta con el nombre. */
 struct RaceView;
+struct SkyData;
 
 /* Indicadores que el juego pone en la parte alta de cada entrada de la lista de trozos.
  * La parte baja es la resolucion: distinta de cero pide el detalle completo. */
@@ -65,6 +66,9 @@ typedef struct {
 #define TB_DETAIL_VERTS 3
 #define TB_DETAIL_QUADS 4
 
+/* El rectangulo de una forma HZ01..HZ12 en el atlas; w = 0 si la pista no la trae. */
+typedef struct { uint16_t x, y, w, h; } TrackSkyRect;
+
 typedef struct {
     uint8_t         *raw;     /* el archivo entero, tal cual */
     uint32_t         size;
@@ -73,6 +77,7 @@ typedef struct {
     const int16_t    *vert;   /* 4 int16 por vertice: x, y, z y la sombra en el byte bajo */
     const uint16_t   *quad;   /* 5 uint16 por cuadro: v[4] y el material */
     const uint16_t   *atlas;  /* ARGB1555 */
+    TrackSkyRect      sky[12];   /* HZ01..HZ12, para el cielo */
     uint16_t          blocks, mats, atlas_w, atlas_h;
     uint32_t          verts, quads;
 } Track;
@@ -105,5 +110,15 @@ void track_free(Track *t);
  * NULL, los vertices salen grises. `sw` y `sh` son el tamano de la pantalla de salida. */
 void track_draw(const Track *t, const struct RaceView *view, const uint32_t *light,
                 float sw, float sh, TrackEmit emit, void *user, TrackStats *st);
+
+/* Dibuja el CIELO: la cupula y la banda de horizonte, las dos centradas en la camara.
+ * Los datos salen de la RAM del juego (SkyData en host.h), no del .TRK; del .TRK solo
+ * salen las texturas. Se dibuja ANTES que la pista y sin escribir profundidad. */
+void sky_draw(const Track *t, const struct SkyData *s, const struct RaceView *view,
+              float sw, float sh, TrackEmit emit, void *user, TrackStats *st);
+
+/* El color del cenit: por encima del anillo mas alto de la cupula no hay geometria, asi
+ * que ese hueco lo cubre el fondo. Devuelve 0 si no hay cielo. */
+uint32_t sky_zenith(const struct SkyData *s);
 
 #endif /* PS1_RENDER_TRACK_H */

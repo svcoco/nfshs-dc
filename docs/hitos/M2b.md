@@ -83,7 +83,7 @@ ya lo fija. **Las texturas de pista se hornean**; la cache de VRAM de M2a se que
 | 1 | **Captura de la vista** en el host de C: camara, matriz, proyeccion, rectangulo y lista de trozos | **Hecho (2026-10-23)**: la captura del port y la de la referencia **coinciden** en el guion de carrera |
 | 2 | **Horneado de la pista** (PC, Rust, reutilizando `src/formats`): GRP + PSH -> malla y texturas listas para el PVR | **Hecho (2026-10-23)**: tamano del horneado y de su atlas, medidos |
 | 3 | **Transformacion** y **recorte por plano cercano**, y dibujo en el PVR | **Hecho (2026-10-23)**: la pista se ve en Dreamcast a 53-60 fps con 1 038 triangulos por frame |
-| 4 | **El cielo** | el horizonte se ve |
+| 4 | **El cielo** | **Hecho (2026-10-23)**: cupula y banda de horizonte, 104 triangulos |
 
 El paso 1 va primero por la misma razon que en M2a: es **codigo portable y tiene
 oraculo**. La referencia graba exactamente lo mismo en su `ViewCapture`, asi que se puede
@@ -260,3 +260,51 @@ que fija CLAUDE.md seccion 3, y por ahora **sin FTRV**: la transformacion va en 
 No hace falta leerselo al juego por ningun sitio raro: el host se queda con el nombre del
 **`.GRP` que el juego abre** (`host/files.c`) y la plataforma carga
 `/cd/BAKED/<NOMBRE>.TRK`. `mkdisc.sh --baked` mete las pistas horneadas en el disco.
+
+## 7. Paso 4 hecho: el cielo (2026-10-23)
+
+### El cielo no es un asset
+
+Sus vertices y sus colores **viven en la RAM del juego**; del PSH solo salen las
+texturas `HZ01..HZ12`. Son dos piezas, las dos **centradas en la camara** (solo les
+afecta su giro):
+
+- la **cupula**, 4 anillos x 16 segmentos sobre una malla de 5x17 puntos de radio 1000,
+  con color por vertice. Algunas pistas la texturan por cuadro (los indices 12..15 son
+  `HZ09..HZ12` **espejadas**); otras la dejan en color plano;
+- la **banda de horizonte**, 16 segmentos sobre un anillo de 17 puntos de radio 32000,
+  cada uno con su textura `HZ01..HZ08` y tan alto como diga su forma frente a la mas alta
+  del anillo. Las formas de 1x1 que algunas pistas usan de relleno no dibujan nada, y en
+  los circuitos la banda esta apagada del todo.
+
+El host lo lee de la RAM **cada frame** (unas 700 lecturas, nada al lado de los ~15 000
+ticks que cuesta un frame), asi que el cielo sigue los cambios de luz sin tener que
+adivinar cuando pasan. Las `HZ` **no son materiales de la pista** —ningun `Trk_Material`
+las referencia—, asi que el horneado las mete al atlas a proposito y guarda sus doce
+rectangulos (version 2 del `.TRK`).
+
+Por encima del anillo mas alto de la cupula no hay geometria: ese hueco lo cubre el
+**color de fondo**, tomado de ese mismo anillo.
+
+### Dos fallos que solo se ven con el mundo delante
+
+1. **A la pista le faltaba el x2.** El `0x80` de PS1 es el 1,0, y el color de vertice se
+   pasaba al PVR sin doblar: todo salia **a media luz**. Se vio al leer como la
+   referencia trata los cuadros planos del cielo (divide por 510 "para cancelar el x2 del
+   shader"), que es la pista de que en todos los demas sitios ese x2 existe.
+2. **El color clave en la lista opaca sale NEGRO.** Las copas de los arboles son cuadros
+   con texeles transparentes; la lista opaca del PVR no hace prueba de alfa, asi que cada
+   silueta llevaba un fleco negro y el horizonte una banda negra. **No era el filtro
+   bilineal**: con muestreo puntual seguia igual. El mundo va ahora a la lista
+   **punch-through**, que si hace prueba de alfa, y las siluetas salen limpias.
+
+### Medido
+
+| | |
+|---|---|
+| Triangulos del cielo | **104** (33 recortados por el plano cercano) |
+| Triangulos de la pista | ~1 150 |
+| **fps en carrera, con cielo y pista** | **60** |
+
+El cielo cuesta menos del 10 % de los triangulos del frame y no mueve el ritmo: sigue
+clavado en los 60 Hz del campo de video, que es el techo de la pantalla.

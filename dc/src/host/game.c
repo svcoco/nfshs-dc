@@ -25,6 +25,51 @@
  * destellos de farolas, humo de ruedas, clima, facetas y halos de los coches, y los
  * objetos del escenario. Eso es lo que M2b y M2c escriben con el PVR delante.
  */
+
+/* Lee el cielo de la RAM del juego (M2b paso 4). Son unas 700 lecturas por frame, que al
+ * lado de los ~15 000 ticks que cuesta un frame no se notan, y asi el cielo sigue los
+ * cambios de luz sin tener que adivinar cuando cambian. */
+static void sky_read(GameHost *h, Cpu *c)
+{
+    SkyData *s = &h->sky;
+    uint32_t hrec = ps1_r32(c, ADDR_SKY_HREC);
+    uint32_t ring = ps1_r32(c, ADDR_SKY_RING);
+    uint32_t rec, i, k;
+
+    s->ok = 0;
+    if (hrec == 0u || ring == 0u)
+        return;
+
+    for (i = 0; i < 85u; i++) {
+        for (k = 0; k < 3u; k++) {
+            s->dome[i][k] = (int16_t)ps1_r16(c, ADDR_SKY_MESH + 8u * i + 2u * k);
+            s->dome_rgb[i][k] = (uint8_t)ps1_r8(c, ADDR_SKY_COLOR + 4u * i + k);
+        }
+    }
+    for (i = 0; i < 17u; i++) {
+        s->ring[i][0] = (int16_t)ps1_r16(c, ring + 8u * i);
+        s->ring[i][1] = (int16_t)ps1_r16(c, ring + 8u * i + 4u);
+        for (k = 0; k < 3u; k++) {
+            s->top_rgb[i][k] = (uint8_t)ps1_r8(c, ADDR_SKY_TOP_COLORS + 4u * i + k);
+            s->bottom_rgb[i][k] = (uint8_t)ps1_r8(c, ADDR_SKY_BOTTOM_COLORS + 4u * i + k);
+        }
+    }
+    s->bottom = (int16_t)ps1_r16(c, hrec + 8u);
+    s->height = (int16_t)ps1_r16(c, hrec + 12u);
+    for (i = 0; i < 16u; i++)
+        s->segment_tex[i] = (uint8_t)ps1_r8(c, hrec + 32u + i);
+    s->band = ps1_r16(c, ADDR_SKY_BAND) != 0u;
+
+    /* La cupula lleva textura solo si el juego lo pide: la primera palabra de su registro
+     * vale 1. Si no, va con color plano por vertice. */
+    rec = ps1_r32(c, ADDR_SKY_DOMETEX);
+    s->dome_tex_ok = (rec != 0u && ps1_r32(c, rec) == 1u);
+    if (s->dome_tex_ok)
+        for (i = 0; i < 64u; i++)
+            s->dome_tex[i] = (uint8_t)ps1_r8(c, ADDR_SKY_DOMETEX_TAB + i);
+    s->ok = 1;
+}
+
 static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
 {
     uint32_t args[2];
@@ -72,6 +117,8 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
             }
         }
     }
+
+    sky_read(h, c);
 
     /* La captura de la vista: camara, proyeccion, recorte y lista de trozos. A partir
      * de aqui el renderer no necesita volver a preguntarle nada al juego. */

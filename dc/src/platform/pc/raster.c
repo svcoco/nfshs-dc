@@ -197,6 +197,8 @@ typedef struct {
     const uint16_t *atlas;
     int      aw, ah;
     uint32_t pintados;
+    int      cielo;           /* dibujando el cielo: no escribe profundidad */
+    int      plano;           /* el cuadro en curso no lleva textura */
 } Pista;
 
 static void tri_pista(Pista *P, const TrackVert *a, const TrackVert *b,
@@ -245,6 +247,19 @@ static void tri_pista(Pista *P, const TrackVert *a, const TrackVert *b,
             o = (size_t)y * P->w + x;
             if (iz <= P->z[o])
                 continue;                /* hay algo mas cerca */
+            if (P->plano) {
+                /* sin textura: PS1 pinta el color del vertice tal cual */
+                r = (int)((a->argb >> 16) & 0xFF);
+                g = (int)((a->argb >> 8) & 0xFF);
+                bb = (int)(a->argb & 0xFF);
+                if (!P->cielo)
+                    P->z[o] = iz;
+                P->rgb[o * 3u + 0u] = (uint8_t)CLAMP255(r);
+                P->rgb[o * 3u + 1u] = (uint8_t)CLAMP255(g);
+                P->rgb[o * 3u + 2u] = (uint8_t)CLAMP255(bb);
+                P->pintados++;
+                continue;
+            }
 
             tu = (int)((la * a->u + lb * b->u + lc * c->u) * (float)P->aw);
             tv = (int)((la * a->v + lb * b->v + lc * c->v) * (float)P->ah);
@@ -256,11 +271,13 @@ static void tri_pista(Pista *P, const TrackVert *a, const TrackVert *b,
             if (!(t & 0x8000u))
                 continue;                /* color clave */
 
-            /* modulacion de PS1: textura * color * 2, con 0x80 como el 1,0 */
-            r = (int)(((t >> 10) & 0x1F) << 3) * (int)((a->argb >> 16) & 0xFF) / 128;
-            g = (int)(((t >> 5) & 0x1F) << 3) * (int)((a->argb >> 8) & 0xFF) / 128;
-            bb = (int)((t & 0x1F) << 3) * (int)(a->argb & 0xFF) / 128;
-            P->z[o] = iz;
+            /* El color del vertice ya viene doblado por track.c, asi que aqui la
+             * modulacion es la del PVR: textura * color, con 0xFF como el 1,0. */
+            r = (int)(((t >> 10) & 0x1F) << 3) * (int)((a->argb >> 16) & 0xFF) / 255;
+            g = (int)(((t >> 5) & 0x1F) << 3) * (int)((a->argb >> 8) & 0xFF) / 255;
+            bb = (int)((t & 0x1F) << 3) * (int)(a->argb & 0xFF) / 255;
+            if (!P->cielo)
+                P->z[o] = iz;
             P->rgb[o * 3u + 0u] = (uint8_t)CLAMP255(r);
             P->rgb[o * 3u + 1u] = (uint8_t)CLAMP255(g);
             P->rgb[o * 3u + 2u] = (uint8_t)CLAMP255(bb);
@@ -274,7 +291,7 @@ static void emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
     Pista *P = (Pista *)user;
     uint32_t k;
 
-    (void)m;
+    P->plano = (m == NULL);
     for (k = 2; k < n; k++)
         tri_pista(P, &v[0], &v[k - 1u], &v[k]);
 }
@@ -285,19 +302,36 @@ int raster_track(const GameHost *h, const Track *track, const char *path,
     static uint8_t rgb[640 * 480 * 3];
     static float zbuf[640 * 480];
     Pista P;
-    TrackStats st;
+    TrackStats st, sst;
     FILE *f;
 
     if (w <= 0 || hh <= 0 || (size_t)w * hh * 3u > sizeof rgb || h->views_n == 0u)
         return 0;
-    memset(rgb, 0, (size_t)w * hh * 3u);
+    {
+        uint32_t cenit = sky_zenith(&h->sky);
+        size_t i;
+
+        for (i = 0; i < (size_t)w * hh; i++) {
+            rgb[i * 3u + 0u] = (uint8_t)((cenit >> 16) & 0xFFu);
+            rgb[i * 3u + 1u] = (uint8_t)((cenit >> 8) & 0xFFu);
+            rgb[i * 3u + 2u] = (uint8_t)(cenit & 0xFFu);
+        }
+    }
     memset(zbuf, 0, (size_t)w * hh * sizeof zbuf[0]);
     P.rgb = rgb; P.z = zbuf; P.w = w; P.h = hh;
     P.atlas = track->atlas; P.aw = track->atlas_w; P.ah = track->atlas_h;
     P.pintados = 0;
+    P.cielo = 0;
+    P.plano = 0;
 
+    /* El cielo primero: va detras de todo y no escribe profundidad. */
+    P.cielo = 1;
+    sky_draw(track, &h->sky, &h->view[0], (float)w, (float)hh, emite, &P, &sst);
+    P.cielo = 0;
     track_draw(track, &h->view[0], h->light_ok ? h->light_table : NULL,
                (float)w, (float)hh, emite, &P, &st);
+    printf("  cielo: %u triangulos (%u recortados, %u detras)\n",
+           (unsigned)sst.quads_out, (unsigned)sst.clipped, (unsigned)sst.behind);
     printf("  pista: %u bloques, %u cuadros -> %u triangulos (%u recortados, %u detras), "
            "%u pixeles\n",
            (unsigned)st.blocks_drawn, (unsigned)st.quads_in, (unsigned)st.quads_out,

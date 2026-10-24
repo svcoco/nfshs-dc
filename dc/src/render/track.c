@@ -27,7 +27,7 @@ int track_load(Track *t, const char *path)
 {
     FILE *f;
     long size;
-    uint32_t off_blk, off_mat, off_vtx, off_qd, atlas_off, i;
+    uint32_t off_blk, off_mat, off_sky, off_vtx, off_qd, atlas_off, i;
 
     memset(t, 0, sizeof(*t));
     f = fopen(path, "rb");
@@ -52,7 +52,7 @@ int track_load(Track *t, const char *path)
     fclose(f);
     t->size = (uint32_t)size;
 
-    if (memcmp(t->raw, "NFST", 4) != 0 || rd32(t->raw + 4) != 1u) {
+    if (memcmp(t->raw, "NFST", 4) != 0 || rd32(t->raw + 4) != 2u) {
         track_free(t);
         return 0;
     }
@@ -68,7 +68,8 @@ int track_load(Track *t, const char *path)
      * que los tramos caben, porque un archivo truncado por el disco si es posible. */
     off_blk = 28u;
     off_mat = off_blk + (uint32_t)t->blocks * 44u;
-    off_vtx = off_mat + (uint32_t)t->mats * 16u;
+    off_sky = off_mat + (uint32_t)t->mats * 16u;
+    off_vtx = off_sky + 12u * 8u;
     off_qd = off_vtx + t->verts * 8u;
     if (off_qd + t->quads * 10u != atlas_off ||
         atlas_off + (uint32_t)t->atlas_w * t->atlas_h * 2u != t->size) {
@@ -94,6 +95,14 @@ int track_load(Track *t, const char *path)
         }
     }
     t->mat = (const TrackMat *)(const void *)(t->raw + off_mat);
+    for (i = 0; i < 12u; i++) {
+        const uint8_t *p = t->raw + off_sky + (size_t)i * 8u;
+
+        t->sky[i].x = rd16(p);
+        t->sky[i].y = rd16(p + 2u);
+        t->sky[i].w = rd16(p + 4u);
+        t->sky[i].h = rd16(p + 6u);
+    }
     t->vert = (const int16_t *)(const void *)(t->raw + off_vtx);
     t->quad = (const uint16_t *)(const void *)(t->raw + off_qd);
     t->atlas = (const uint16_t *)(const void *)(t->raw + atlas_off);
@@ -247,6 +256,17 @@ static void triangulo(const View *vw, const Cv *tri, const TrackMat *m,
     }
 }
 
+/* Dobla y satura: el 0x80 de PS1 es el 1,0, igual que en el overlay 2D de M2a. */
+static uint32_t dobla(const uint8_t *c)
+{
+    uint32_t r = (uint32_t)c[0] * 2u, g = (uint32_t)c[1] * 2u, b = (uint32_t)c[2] * 2u;
+
+    if (r > 255u) r = 255u;
+    if (g > 255u) g = 255u;
+    if (b > 255u) b = 255u;
+    return 0xFF000000u | (r << 16) | (g << 8) | b;
+}
+
 /* ---- el dibujo ---- */
 
 static uint32_t color_sombra(const uint32_t *light, uint32_t s)
@@ -254,10 +274,18 @@ static uint32_t color_sombra(const uint32_t *light, uint32_t s)
     uint32_t c;
 
     if (light == NULL)
-        return 0xFF808080u;   /* gris neutro: el 0x80 de PS1 es el x1 */
+        return 0xFFFFFFFFu;   /* neutro ya doblado */
     c = light[s & 0xFFu];
-    /* Chunk_lightTable guarda 0xBBGGRR; el PVR quiere ARGB */
-    return 0xFF000000u | ((c & 0xFFu) << 16) | (c & 0xFF00u) | ((c >> 16) & 0xFFu);
+    /* Chunk_lightTable guarda 0xBBGGRR; el PVR quiere ARGB. Y se dobla, porque el 0x80
+     * de PS1 es el 1,0: sin doblar, la pista sale a media luz. */
+    {
+        uint8_t rgb[3];
+
+        rgb[0] = (uint8_t)(c & 0xFFu);
+        rgb[1] = (uint8_t)((c >> 8) & 0xFFu);
+        rgb[2] = (uint8_t)((c >> 16) & 0xFFu);
+        return dobla(rgb);
+    }
 }
 
 /* Dibuja una malla: `verts` es su charco y `quads` sus caras. */
@@ -387,4 +415,152 @@ void track_draw(const Track *t, const struct RaceView *view, const uint32_t *lig
               b->n[TB_DETAIL_QUADS],
               emit, user, st);
     }
+}
+
+/* ---- el cielo (M2b paso 4) ----
+ *
+ * Dos piezas, las dos CENTRADAS EN LA CAMARA: solo les afecta su giro, no su posicion.
+ *
+ *   - la **cupula**: 4 anillos x 16 segmentos sobre una malla de 5x17 puntos de radio
+ *     1000, con color por vertice. Algunas pistas la texturan por cuadro (HZ01..HZ12, y
+ *     los indices 12..15 son HZ09..HZ12 espejadas); otras la dejan en color plano.
+ *   - la **banda de horizonte**: 16 segmentos alrededor de un anillo de 17 puntos de
+ *     radio 32000, cada uno con su textura HZ01..HZ08 y tan alto como diga su forma
+ *     frente a la mas alta del anillo. Las formas de 1x1 que algunas pistas usan de
+ *     relleno no dibujan nada. En los circuitos la banda esta apagada.
+ *
+ * El color va sin doblar cuando el cuadro NO lleva textura, porque ahi PS1 pinta el
+ * color del vertice tal cual; con textura se dobla, como en todo lo demas.
+ */
+static void sky_quad(const View *vw, const Cv *q, const TrackMat *m,
+                     TrackEmit emit, void *user, TrackStats *st)
+{
+    Cv tri[3];
+
+    tri[0] = q[0]; tri[1] = q[1]; tri[2] = q[2];
+    triangulo(vw, tri, m, emit, user, st);
+    tri[0] = q[0]; tri[1] = q[2]; tri[2] = q[3];
+    triangulo(vw, tri, m, emit, user, st);
+}
+
+/* Pone un punto del cielo en espacio de camara (solo giro). */
+static void sky_punto(const View *vw, Cv *o, float x, float y, float z)
+{
+    o->x = vw->row[0][0] * x + vw->row[0][1] * y + vw->row[0][2] * z;
+    o->y = vw->row[1][0] * x + vw->row[1][1] * y + vw->row[1][2] * z;
+    o->z = vw->row[2][0] * x + vw->row[2][1] * y + vw->row[2][2] * z;
+}
+
+void sky_draw(const Track *t, const struct SkyData *s, const struct RaceView *view,
+              float sw, float sh, TrackEmit emit, void *user, TrackStats *st)
+{
+    View vw;
+    TrackMat m;
+    Cv q[4];
+    uint32_t anillo, seg, k;
+    float ky;
+    int mas_alta = 1;
+
+    if (st != NULL)
+        memset(st, 0, sizeof(*st));
+    if (!s->ok)
+        return;
+    view_init(&vw, view, sw, sh);
+    memset(&m, 0, sizeof m);
+
+    /* ---- la cupula ---- */
+    for (anillo = 0; anillo < 4u; anillo++) {
+        for (seg = 0; seg < 16u; seg++) {
+            uint32_t idx[4];
+            const TrackSkyRect *r = NULL;
+            int espejada = 0;
+
+            idx[0] = anillo * 17u + seg;
+            idx[1] = anillo * 17u + seg + 1u;
+            idx[2] = (anillo + 1u) * 17u + seg + 1u;
+            idx[3] = (anillo + 1u) * 17u + seg;
+
+            if (s->dome_tex_ok) {
+                uint32_t c = s->dome_tex[anillo * 16u + seg];
+                uint32_t forma = c < 12u ? c : c - 4u;   /* 12..15 son HZ09..HZ12 */
+
+                espejada = c >= 12u;
+                if (forma < 12u && t->sky[forma].w != 0u)
+                    r = &t->sky[forma];
+            }
+            for (k = 0; k < 4u; k++) {
+                const int16_t *v = s->dome[idx[k]];
+                const uint8_t *c = s->dome_rgb[idx[k]];
+
+                /* radio 1000 -> 100, y la X espejada como todo lo demas */
+                sky_punto(&vw, &q[k], -(float)v[0] * 0.1f, (float)v[1] * 0.1f,
+                          (float)v[2] * 0.1f);
+                if (r != NULL) {
+                    /* el borde alto de la textura va en el anillo de arriba */
+                    static const uint8_t esq[4] = { 0, 1, 1, 0 };  /* izquierda/derecha */
+                    static const uint8_t alto[4] = { 1, 1, 0, 0 }; /* abajo/arriba */
+                    float iz = espejada ? (float)r->w : 0.0f;
+                    float de = espejada ? 0.0f : (float)r->w;
+
+                    q[k].u = ((float)r->x + (esq[k] != 0u ? de : iz)) / (float)t->atlas_w;
+                    q[k].v = ((float)r->y + (alto[k] != 0u ? (float)r->h : 0.0f)) /
+                             (float)t->atlas_h;
+                    q[k].argb = dobla(c);
+                } else {
+                    q[k].u = 0.0f;
+                    q[k].v = 0.0f;
+                    /* sin textura PS1 pinta el color del vertice tal cual */
+                    q[k].argb = 0xFF000000u | ((uint32_t)c[0] << 16) |
+                                ((uint32_t)c[1] << 8) | c[2];
+                }
+            }
+            sky_quad(&vw, q, r != NULL ? &m : NULL, emit, user, st);
+        }
+    }
+
+    /* ---- la banda de horizonte ---- */
+    if (!s->band)
+        return;
+    for (seg = 0; seg < 16u; seg++) {
+        uint32_t f = (uint32_t)s->segment_tex[seg] & 7u;
+        int e = t->sky[f].h != 0 ? (int)t->sky[f].h - 1 : 0;
+
+        if (e > mas_alta)
+            mas_alta = e;
+    }
+    ky = 100.0f / 32000.0f;
+    for (seg = 0; seg < 16u; seg++) {
+        uint32_t f = (uint32_t)s->segment_tex[seg] & 7u;
+        const TrackSkyRect *r = &t->sky[f];
+        int e = r->h != 0 ? (int)r->h - 1 : 0;
+        float ratio, y0, y1;
+        static const uint8_t pi[4] = { 0, 1, 1, 0 };   /* punto del anillo */
+        static const uint8_t arr[4] = { 1, 1, 0, 0 };  /* borde alto */
+
+        if (r->w == 0u || e <= 0)
+            continue;                 /* forma de relleno: no dibuja nada */
+        ratio = (float)e / (float)mas_alta;
+        y0 = (float)s->bottom * ky;
+        y1 = ((float)s->bottom + (float)s->height * ratio) * ky;
+        for (k = 0; k < 4u; k++) {
+            uint32_t i = seg + pi[k];
+            const uint8_t *c = arr[k] != 0u ? s->top_rgb[i] : s->bottom_rgb[i];
+
+            sky_punto(&vw, &q[k], -(float)s->ring[i][0] * ky,
+                      arr[k] != 0u ? y1 : y0, (float)s->ring[i][1] * ky);
+            q[k].u = ((float)r->x + (pi[k] != 0u ? (float)r->w : 0.0f)) / (float)t->atlas_w;
+            q[k].v = ((float)r->y + (arr[k] != 0u ? 0.0f : (float)r->h)) / (float)t->atlas_h;
+            q[k].argb = dobla(c);
+        }
+        sky_quad(&vw, q, &m, emit, user, st);
+    }
+}
+
+uint32_t sky_zenith(const struct SkyData *s)
+{
+    if (!s->ok)
+        return 0;
+    /* el anillo 4 es el mas alto de los cinco */
+    return 0xFF000000u | ((uint32_t)s->dome_rgb[4 * 17][0] << 16) |
+           ((uint32_t)s->dome_rgb[4 * 17][1] << 8) | s->dome_rgb[4 * 17][2];
 }

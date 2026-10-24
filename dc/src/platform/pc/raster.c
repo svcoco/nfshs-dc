@@ -10,6 +10,7 @@
  */
 #include "host.h"
 #include "raster.h"
+#include "car.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -303,6 +304,7 @@ int raster_track(const GameHost *h, const Track *track, const char *path,
     static float zbuf[640 * 480];
     Pista P;
     TrackStats st, sst, ost;
+    uint32_t coches_tri = 0;
     FILE *f;
 
     if (w <= 0 || hh <= 0 || (size_t)w * hh * 3u > sizeof rgb || h->views_n == 0u)
@@ -333,6 +335,36 @@ int raster_track(const GameHost *h, const Track *track, const char *path,
     objects_draw(track, h->objects, h->objects_n, &h->view[0],
                  h->light_ok ? h->light_table : NULL,
                  (float)w, (float)hh, emite, &P, &ost);
+    /* Los coches: cada uno con su modelo horneado, que se carga la primera vez que
+     * aparece su codigo. Su atlas es otro, asi que se cambia de textura. */
+    {
+        static CarModel modelo;
+        uint32_t ci;
+
+        for (ci = 0; ci < h->cars_n && ci < CARS_MAX; ci++) {
+            const CarDraw *d = &h->car_draw[ci];
+            char ruta[64];
+            TrackStats cst;
+
+            if (d->code[0] == 0)
+                continue;
+            if (strncmp(modelo.code, d->code, sizeof modelo.code) != 0) {
+                car_free(&modelo);
+                snprintf(ruta, sizeof ruta, "dc/build/baked/%s.CAR", d->code);
+                if (!car_load(&modelo, ruta)) {
+                    printf("  coche: no pude cargar %s\n", ruta);
+                    continue;
+                }
+                strncpy(modelo.code, d->code, sizeof modelo.code - 1u);
+            }
+            P.atlas = modelo.atlas; P.aw = modelo.atlas_w; P.ah = modelo.atlas_h;
+            car_draw(&modelo, d, &h->view[0], (float)w, (float)hh, emite, &P, &cst);
+            coches_tri += cst.quads_out;
+        }
+        P.atlas = track->atlas; P.aw = track->atlas_w; P.ah = track->atlas_h;
+    }
+    printf("  coches: %u dibujados -> %u triangulos\n",
+           (unsigned)h->cars_n, (unsigned)coches_tri);
     printf("  objetos: %u dibujados -> %u triangulos\n",
            (unsigned)h->objects_n, (unsigned)ost.quads_out);
     printf("  cielo: %u triangulos (%u recortados, %u detras)\n",

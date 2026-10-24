@@ -1,6 +1,7 @@
 /* La pista en pantalla. Ver track.h para el convenio de la camara. */
 #include "host.h"
 #include "track.h"
+#include "trackint.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -142,20 +143,12 @@ void track_free(Track *t)
 
 /* ---- la camara ---- */
 
-typedef struct {
-    float cam[3];             /* posicion, en metros y en espacio de mundo */
-    float row[3][3];          /* derecha, arriba y adelante, divididas por |adelante| */
-    float focal;              /* projection, en pixeles de la pantalla de PS1 */
-    float ox, oy;             /* centro de la pantalla de salida */
-    float kx, ky;             /* de pixeles de PS1 a pixeles de salida */
-} View;
-
 static float len3(const float v[3])
 {
     return sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
 
-static void view_init(View *vw, const struct RaceView *v, float sw, float sh)
+void view_init(View *vw, const struct RaceView *v, float sw, float sh)
 {
     float pw = v->rect[2] > 0 ? (float)v->rect[2] : 320.0f;
     float ph = v->rect[3] > 0 ? (float)v->rect[3] : 240.0f;
@@ -187,14 +180,6 @@ static void view_init(View *vw, const struct RaceView *v, float sw, float sh)
     vw->ox = sw * 0.5f;
     vw->oy = sh * 0.5f;
 }
-
-/* ---- un vertice en espacio de camara ---- */
-
-typedef struct {
-    float x, y, z;            /* camara: x derecha, y arriba, z adelante (metros) */
-    float u, v;               /* atlas, 0..1 */
-    uint32_t argb;
-} Cv;
 
 static void proyecta(const View *vw, const Cv *c, TrackVert *o)
 {
@@ -231,8 +216,8 @@ static void mezcla(Cv *o, const Cv *a, const Cv *b, float s)
 /* Recorta un triangulo contra el plano cercano y lo emite. El PVR no recorta: un vertice
  * con z <= 0 se proyectaria detras de la camara y saldria un triangulo gigante al reves.
  * Cortar da 0, 3 o 4 vertices. */
-static void triangulo(const View *vw, const Cv *tri, const TrackMat *m,
-                      TrackEmit emit, void *user, TrackStats *st)
+void triangulo(const View *vw, const Cv *tri, const TrackMat *m,
+               TrackEmit emit, void *user, TrackStats *st)
 {
     Cv dentro[4];
     TrackVert out[4];

@@ -19,4 +19,6 @@ uint64_t render_quads(void);
 uint64_t render_tris(void);
 uint64_t render_tri_frames(void);
 
+uint64_t render_car_tris(void);
+
 #endif /* PLATFORM_DC_RENDER_H */

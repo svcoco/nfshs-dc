@@ -9,6 +9,8 @@ pub mod soft;
 // (CLAUDE.md section 8), and it is pulled in here so it can reuse src/formats.
 #[path = "../../dc/tools/bake/bake.rs"]
 mod bake;
+#[path = "../../dc/tools/bake/bakecar.rs"]
+mod bakecar;
 
 use crate::{app, assets, formats, game, opt, ps1, render};
 use anyhow::{Context as _, Result};
@@ -17,7 +19,7 @@ use std::path::Path;
 pub use headless::{front_end_play, screenshot};
 
 /// The commands [`run`] knows.
-pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "bake-track", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car"];
+pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "bake-track", "bake-car", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car"];
 
 /// Run developer command `cmd` (`args` as on the command line); false if there is none.
 pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::RaceConfig) -> Result<bool> {
@@ -81,6 +83,14 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
         "dump-track" => dump_track(&args[2], &args[3], Path::new(&args[4]), args.get(5).map(String::as_str))?,
         // bake-track TRACK.GRP TRACK.PSH OUT.TRK: the Dreamcast port's track bake
         "bake-track" => bake::bake(&args[2], &args[3], Path::new(&args[4]))?,
+        // bake-car CODE OUT.CAR [--rival] [--colour N]: the Dreamcast port's car bake
+        "bake-car" => bakecar::bake(
+            data,
+            &args[2],
+            !args.iter().any(|a| a == "--rival"),
+            opt(args, "--colour").and_then(|v| v.parse().ok()).unwrap_or(0),
+            Path::new(&args[3]),
+        )?,
         "verify-decompress" => {
             // compare against reference outputs produced by tools/mipsemu.py (re/dec/<name>.bin)
             let (mut ok, mut bad) = (0, 0);

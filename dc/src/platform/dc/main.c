@@ -173,6 +173,9 @@ static void *diag_thread(void *arg)
                host.track_name[0] != '\0' ? host.track_name : "(ninguna)",
                (unsigned long long)render_tris(),
                (unsigned long long)render_tri_frames());
+        printf("        coches: %lu vistos, %llu triangulos   objetos %lu\n",
+               (unsigned long)host.cars_n, (unsigned long long)render_car_tris(),
+               (unsigned long)host.objects_n);
         prev_calls = cpu.calls;
     }
     return NULL;

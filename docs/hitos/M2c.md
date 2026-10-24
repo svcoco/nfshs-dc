@@ -50,7 +50,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | 1 | **Grabacion de los objetos** en el host de C | **Hecho (2026-10-24)**: 31 686 objetos identicos a la referencia en 900 frames |
 | 2 | **Horneado y dibujo de los objetos** | **Hecho (2026-10-24)**: el escenario se puebla, 110 triangulos, 60 fps |
 | 3 | **Grabacion de los coches** | **Hecho (2026-10-24)**: 9 494 coches identicos a la referencia en 5 000 frames |
-| 4 | **Horneado y dibujo de los coches** (GEO + su atlas) | se ven los coches corriendo |
+| 4 | **Horneado y dibujo de los coches** | **Hecho (2026-10-24)**: los coches se ven; 30-40 fps, y el coste **no es dibujarlos** |
 | 5 | **El HUD**: los cuatro ayudantes de M2a | la carrera se **lee**: velocidad, marcha, tiempos, posicion |
 | 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | la carrera se parece al original |
 
@@ -186,3 +186,60 @@ OK: 4769 vistas, 220002 objetos y 9494 coches identicos en 5000 frames
 
 Con hasta 4 coches a la vez, y sus modelos siendo triangulos y no cuadros, el paso 4 es
 la primera vez en el hito que el conteo de poligonos puede acercarse al del mundo.
+
+## 8. Paso 4 hecho: los coches en pantalla (2026-10-24)
+
+### El horneado
+
+`dc/tools/bake/bakecar.rs` (`nfshs bake-car CODE OUT.CAR [--rival]`) reutiliza
+`assets::load_car`, que ya sabe lo dificil: el nombre del VIV (`ZZZ<code>H.VIV` para el
+del jugador, `S` para los demas), las dos paginas de textura, la pintura y las partes con
+su rueda y su buje.
+
+Un modelo son **partes indexadas igual que los 57 bytes de `R3DCar_ObjectVisible`** que el
+paso 3 ya graba, asi que el port usa esa captura como indice directo: 1 a 16 se dibuja,
+de 17 en adelante es un halo de luz (2D, va en el paso 6). Sus poligonos son **triangulos**,
+no cuadros como la pista.
+
+**Un fallo silencioso que hubo que cerrar.** `load_car` empaqueta en un atlas cuadrado, y
+las dos paginas de 256x256 mas el texel blanco del cargador **no caben en 512 por una
+fila**: avisa y **tira una pagina entera sin fallar**. El horneado carga en uno holgado y
+despues **recorta a 512x256** —solo las dos paginas, una al lado de otra, recolocando las
+UV—, que ademas baja la VRAM del PVR de 2 MB a **0,25 MB por coche**.
+
+| Modelo | Partes | Triangulos | Archivo |
+|---|---|---|---|
+| MSLK (el del jugador) | 57 (10 de rueda) | 1 222 | 343 KB |
+| WOLW, MERC, ARMY (trafico) | 57 | 218-224 | ~272 KB |
+
+### La colocacion
+
+El origen del modelo esta **a ras de suelo** y la posicion que simula el juego es el
+centro de la caja del cuerpo, asi que el coche se baja por la media extension en Y de esa
+caja. Las filas de `orient` son derecha, arriba y adelante en espacio de PS1, y el modelo
+tiene **+X a la izquierda** del coche, asi que su eje x es `-derecha`; las tres se
+ortonormalizan como hace la referencia. Las **ruedas** giran alrededor de su buje: las
+delanteras por `wheel_rot[0]` y ademas viran, las traseras por `wheel_rot[1]`.
+
+### Lo medido, y donde esta de verdad el coste
+
+En Flycast con BIOS real, `race_long`:
+
+| | |
+|---|---|
+| Coches dibujados a la vez | 2 a 4 |
+| Triangulos que cuestan | ~110 a 360 |
+| Triangulos de la pista | ~1 370 |
+| **fps con los coches dibujados** | **29-38** (media 28,0) |
+| **fps con el dibujo de coches APAGADO** | **31-40** (media 28,6) |
+
+**Dibujar los coches no cuesta casi nada: lo que cuesta es GRABARLOS.** Apagar el dibujo
+deja el ritmo practicamente igual, asi que la caida de ~60 a ~30-40 fps la produce el
+**paso 3**, que corre codigo real del juego en cada frame: `R3DCar_InsertAllListFacet`
+anidada y, por coche, `BWorldSm_QuadLight`, `DrawC_PrimStart` y **una segunda pasada
+entera** de `R3DCar_InsertCarFacetII` para los halos.
+
+Sigue **por encima del minimo de 30 fps sostenidos** de CLAUDE.md seccion 3, y es codigo
+recompilado: justo lo que M3 ataca («codegen, SH-4 a mano en hooks»). Un candidato
+concreto ya identificado es la **segunda pasada de halos**, cuyo resultado hoy se tira
+porque los halos son el paso 6.

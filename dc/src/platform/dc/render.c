@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "host.h"
+#include "car.h"
 #include "render.h"
 
 /* Staging en RAM principal: la cache convierte aqui y de aqui se sube al PVR. Medido:
@@ -107,6 +108,12 @@ static void pista_carga(const char *nombre)
 #define MODO_PISTA       2
 
 static int s_modo;
+/* Fase del dibujo del mundo. Solo el cielo cambia de contexto sobre la marcha (sus
+ * cuadros son unos planos y otros con textura); la pista y los coches lo fijan antes y
+ * el sumidero no lo toca. */
+#define FASE_CIELO 0
+#define FASE_RESTO 1
+static int s_fase;
 
 static void modo_pon(int modo)
 {
@@ -139,7 +146,7 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
     uint32_t k;
 
     (void)user;
-    if (s_modo != MODO_PISTA)
+    if (s_fase == FASE_CIELO)
         modo_pon(m != NULL ? MODO_CIELO_TEX : MODO_CIELO_PLANO);
     pv.flags = PVR_CMD_VERTEX;
     pv.oargb = 0;
@@ -157,6 +164,93 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
         pvr_prim(&pv, sizeof(pv));
     }
     s_tri += n - 2u;
+}
+
+/* ---- los coches (M2c paso 4) ----
+ *
+ * Cada modelo trae su propio atlas (512x256, un cuarto de megabyte), asi que hay una
+ * cache pequena: los que caben a la vez en una vista. Se cargan la primera vez que su
+ * codigo aparece y se quedan; el guion de una carrera no usa muchos mas.
+ */
+#define CARS_CACHE 6u
+
+static struct {
+    CarModel  modelo;
+    pvr_ptr_t atlas;
+} s_coches[CARS_CACHE];
+static uint32_t s_coches_n;
+static uint64_t s_tri_coches;
+
+uint64_t render_car_tris(void) { return s_tri_coches; }
+
+/* Devuelve el indice en la cache, o 0xFFFFFFFF si no se pudo. */
+static uint32_t coche_modelo(const char *code)
+{
+    char ruta[64];
+    uint32_t i;
+    CarModel *m;
+
+    for (i = 0; i < s_coches_n; i++)
+        if (strncmp(s_coches[i].modelo.code, code, 8) == 0)
+            return i;
+    if (s_coches_n >= CARS_CACHE)
+        return 0xFFFFFFFFu;
+
+    m = &s_coches[s_coches_n].modelo;
+    snprintf(ruta, sizeof ruta, "/cd/BAKED/%s.CAR", code);
+    if (!car_load(m, ruta)) {
+        printf("coche: no pude cargar %s\n", ruta);
+        /* se anota igualmente, con el codigo puesto, para no reintentarlo cada frame */
+        memset(m, 0, sizeof(*m));
+        strncpy(m->code, code, sizeof m->code - 1u);
+        s_coches[s_coches_n].atlas = NULL;
+        return s_coches_n++;
+    }
+    strncpy(m->code, code, sizeof m->code - 1u);
+    s_coches[s_coches_n].atlas =
+        pvr_mem_malloc((uint32_t)m->atlas_w * m->atlas_h * 2u);
+    if (s_coches[s_coches_n].atlas == NULL) {
+        printf("coche %s: no cabe su atlas en la VRAM del PVR\n", code);
+        car_free(m);
+        strncpy(m->code, code, sizeof m->code - 1u);
+        return s_coches_n++;
+    }
+    pvr_txr_load((void *)m->atlas, s_coches[s_coches_n].atlas,
+                 (uint32_t)m->atlas_w * m->atlas_h * 2u);
+    printf("coche %s: %u partes, %u triangulos, atlas %ux%u\n", code,
+           (unsigned)m->parts, (unsigned)(m->verts / 3u),
+           (unsigned)m->atlas_w, (unsigned)m->atlas_h);
+    return s_coches_n++;
+}
+
+static void coches_dibuja(GameHost *h)
+{
+    uint32_t ci;
+
+    for (ci = 0; ci < h->cars_n && ci < CARS_MAX; ci++) {
+        const CarDraw *d = &h->car_draw[ci];
+        pvr_poly_cxt_t cxt;
+        pvr_poly_hdr_t hdr;
+        TrackStats cst;
+        uint32_t k;
+
+        if (d->code[0] == 0)
+            continue;
+        k = coche_modelo(d->code);
+        if (k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL)
+            continue;
+        /* cada coche tiene su atlas, asi que toca contexto nuevo */
+        pvr_poly_cxt_txr(&cxt, PVR_LIST_PT_POLY,
+                         PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
+                         s_coches[k].modelo.atlas_w, s_coches[k].modelo.atlas_h,
+                         s_coches[k].atlas, PVR_FILTER_BILINEAR);
+        cxt.gen.culling = PVR_CULLING_NONE;
+        pvr_poly_compile(&hdr, &cxt);
+        pvr_prim(&hdr, sizeof(hdr));
+        car_draw(&s_coches[k].modelo, d, &h->view[0], 640.0f, 480.0f,
+                 pista_emite, NULL, &cst);
+        s_tri_coches += cst.quads_out;
+    }
 }
 
 static void pista_dibuja(GameHost *h)
@@ -183,7 +277,9 @@ static void pista_dibuja(GameHost *h)
      * de caras, porque el horneado no normaliza el sentido de giro (hay materiales de
      * doble cara) y del resto se encarga el Z-buffer. */
     s_modo = -1;
+    s_fase = FASE_CIELO;
     sky_draw(&s_track, &h->sky, &h->view[0], 640.0f, 480.0f, pista_emite, NULL, &sst);
+    s_fase = FASE_RESTO;
     modo_pon(MODO_PISTA);
     track_draw(&s_track, &h->view[0], h->light_ok ? h->light_table : NULL,
                640.0f, 480.0f, pista_emite, NULL, &st);
@@ -191,6 +287,8 @@ static void pista_dibuja(GameHost *h)
     objects_draw(&s_track, h->objects, h->objects_n, &h->view[0],
                  h->light_ok ? h->light_table : NULL,
                  640.0f, 480.0f, pista_emite, NULL, &ost);
+    /* y los coches, cada uno con su atlas */
+    coches_dibuja(h);
     s_tri_frames++;
     pvr_list_finish();
 }

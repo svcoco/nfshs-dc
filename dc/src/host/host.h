@@ -99,6 +99,22 @@ typedef struct SkyData {
 #define OBJECTS_MAX     256u   /* medidos ~47 por frame */
 #define OBJ_MODELS_MAX 1024u   /* el tamano de la tabla del juego */
 
+/* Lo que hace falta para DIBUJAR un coche, aparte de la captura que compara el oraculo:
+ * su modelo, su pose y que partes se ven. Va separado a proposito, porque la captura
+ * tiene que seguir siendo palabra a palabra la de la referencia. */
+#define CARS_MAX 8u
+
+typedef struct CarDraw {
+    char     code[8];          /* las 4 letras del modelo, de Car_tObj + 0x240 */
+    int32_t  pos[3];           /* 16.16 */
+    int32_t  orient[9];        /* filas: derecha, arriba, adelante; 1,0 = 0x10000 */
+    int32_t  dimension[3];     /* medias extensiones de la caja; la Y levanta el modelo */
+    uint32_t light;            /* la luz de la pista en el coche, 0xBBGGRR */
+    uint16_t wheel_rot[2];     /* giro de las ruedas delanteras y traseras */
+    int32_t  wheel_steer;
+    uint8_t  parts[57];        /* R3DCar_ObjectVisible: 1..16 se dibuja, >=17 es halo */
+} CarDraw;
+
 /* 99 palabras por coche; hasta 8 coches mas holgura. */
 #define CAR_WORDS        99u
 #define CAR_CAPTURE_MAX (CAR_WORDS * 16u)
@@ -232,6 +248,7 @@ typedef struct GameHost {
     /* Lo que el juego decide dibujar de cada coche, como lista de palabras (99 por
      * coche; ver cars.c para el orden). Se guarda en crudo para poder compararla palabra
      * a palabra con la referencia. */
+    CarDraw  car_draw[CARS_MAX];
     uint32_t cars_cap_buf[CAR_CAPTURE_MAX];
     uint32_t cars_cap;        /* palabras escritas */
     uint32_t cars_n;          /* coches anotados */

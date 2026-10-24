@@ -141,6 +141,41 @@ static int car_hook(Cpu *c, uint32_t addr)
     anota(h, ps1_r16(c, ADDR_R3DCAR_CENTER + 0x14u));
     for (i = 0; i < 26u; i++)
         anota(h, ps1_r32(c, ADDR_LIGHT_CODES + 4u * i));
+
+    /* Y aparte, lo que hace falta para DIBUJARLO. Va separado de la captura porque esa
+     * tiene que seguir siendo palabra a palabra la de la referencia. */
+    if (h->cars_n < CARS_MAX) {
+        CarDraw *d = &h->car_draw[h->cars_n];
+
+        for (i = 0; i < 4u; i++)
+            d->code[i] = (char)ps1_r8(c, car + 0x240u + i);
+        d->code[4] = 0;
+        for (i = 0; i < 3u; i++) {
+            d->pos[i] = (int32_t)ps1_r32(c, car + 0xA0u + 4u * i);
+            d->dimension[i] = (int32_t)ps1_r32(c, car + 0x134u + 4u * i);
+        }
+        for (i = 0; i < 9u; i++)
+            d->orient[i] = (int32_t)ps1_r32(c, car + 0xF0u + 4u * i);
+        d->light = light;
+        d->wheel_rot[0] = (uint16_t)ps1_r32(c, car + 0xD0u);
+        d->wheel_rot[1] = (uint16_t)ps1_r32(c, car + 0xD4u);
+        /* El giro de las ruedas delanteras: el original escala la direccion con la
+         * velocidad por encima de 30 m/s. Copiado de CarState::wheel_steer. */
+        {
+            int64_t s = (int32_t)ps1_r32(c, car + 0x450u);
+            int64_t vel = (int32_t)ps1_r32(c, car + 0x420u);
+
+            if (vel > 0x1E0000) {
+                int64_t den = (vel * 2184) >> 16;
+
+                if (den != 0)
+                    s = ((s << 32) / den) >> 16;
+            }
+            d->wheel_steer = (int32_t)(s * 32);
+        }
+        for (i = 0; i < 57u; i++)
+            d->parts[i] = (uint8_t)ps1_r8(c, ADDR_R3DCAR_OBJECT_VISIBLE + i);
+    }
     h->cars_n++;
 
     /* y despues el original, que anade los halos de los faros y los frenos al buffer de

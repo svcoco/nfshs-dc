@@ -1,0 +1,265 @@
+/* Los coches en pantalla. Ver car.h para el porque. */
+#include "host.h"
+#include "car.h"
+#include "trackint.h"
+
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define TAU 6.28318530718f
+
+static uint16_t crd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
+static uint32_t crd32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+
+static float crdf(const uint8_t *p)
+{
+    uint32_t w = crd32(p);
+    float f;
+
+    /* el horneado escribe IEEE-754 little-endian, que es lo que el SH-4 usa */
+    memcpy(&f, &w, sizeof f);
+    return f;
+}
+
+int car_load(CarModel *m, const char *path)
+{
+    FILE *f;
+    long size;
+    uint32_t off_parts, off_verts, atlas_off, i;
+
+    memset(m, 0, sizeof(*m));
+    f = fopen(path, "rb");
+    if (f == NULL)
+        return 0;
+    if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) <= 36 ||
+        fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return 0;
+    }
+    m->raw = malloc((size_t)size);
+    if (m->raw == NULL) {
+        fclose(f);
+        return 0;
+    }
+    if (fread(m->raw, 1, (size_t)size, f) != (size_t)size) {
+        fclose(f);
+        car_free(m);
+        return 0;
+    }
+    fclose(f);
+    m->size = (uint32_t)size;
+
+    if (memcmp(m->raw, "NFSC", 4) != 0 || crd32(m->raw + 4) != 1u) {
+        car_free(m);
+        return 0;
+    }
+    m->parts = crd16(m->raw + 8);
+    m->atlas_w = crd16(m->raw + 10);
+    m->atlas_h = crd16(m->raw + 12);
+    m->verts = crd32(m->raw + 16);
+    atlas_off = crd32(m->raw + 20);
+    for (i = 0; i < 3u; i++)
+        m->half_extents[i] = crdf(m->raw + 24u + 4u * i);
+
+    off_parts = 36u;   /* la cabecera: 4+4+2+2+2+2+4+4+12 */
+    off_verts = off_parts + (uint32_t)m->parts * 24u;
+    if (off_verts + m->verts * 24u != atlas_off ||
+        atlas_off + (uint32_t)m->atlas_w * m->atlas_h * 2u != m->size) {
+        car_free(m);
+        return 0;
+    }
+    /* Las partes se decodifican, igual que los bloques de la pista: el registro mezcla
+     * u32, u8 y float y superponerlo seria contar con el relleno del compilador. */
+    m->part = calloc(m->parts != 0u ? m->parts : 1u, sizeof(*m->part));
+    if (m->part == NULL) {
+        car_free(m);
+        return 0;
+    }
+    for (i = 0; i < m->parts; i++) {
+        const uint8_t *p = m->raw + off_parts + (size_t)i * 24u;
+        uint32_t k;
+
+        m->part[i].vert_off = crd32(p);
+        m->part[i].vert_n = crd32(p + 4u);
+        m->part[i].wheel = p[8];
+        m->part[i].subtract = p[9];
+        for (k = 0; k < 3u; k++)
+            m->part[i].hub[k] = crdf(p + 12u + 4u * k);
+    }
+    m->vert = (const float *)(const void *)(m->raw + off_verts);
+    m->atlas = (const uint16_t *)(const void *)(m->raw + atlas_off);
+    return 1;
+}
+
+void car_free(CarModel *m)
+{
+    free(m->part);
+    free(m->raw);
+    memset(m, 0, sizeof(*m));
+}
+
+/* ---- el dibujo ---- */
+
+/* El tono de la pista sobre el color del vertice, con 128 como el 1,0. */
+static uint32_t tinta(uint32_t canal, uint32_t tono)
+{
+    uint32_t v = canal * tono / 128u;
+
+    return v > 255u ? 255u : v;
+}
+
+static void norm3(float v[3])
+{
+    float n = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+
+    if (n > 1e-6f) {
+        v[0] /= n;
+        v[1] /= n;
+        v[2] /= n;
+    } else {
+        v[0] = 0.0f;
+        v[1] = 0.0f;
+        v[2] = 1.0f;
+    }
+}
+
+void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView *view,
+              float sw, float sh, TrackEmit emit, void *user, TrackStats *st)
+{
+    View vw;
+    TrackMat mat;
+    float ejes[3][3];            /* x, y, z del coche, en espacio de mundo */
+    float pos[3], up[3];
+    uint32_t pi, k, tono;
+
+    if (st != NULL)
+        memset(st, 0, sizeof(*st));
+    if (m->raw == NULL)
+        return;
+    view_init(&vw, view, sw, sh);
+    memset(&mat, 0, sizeof mat);
+
+    /* Las filas de `orient` son derecha, arriba y adelante en espacio de PS1; en mundo la
+     * X va espejada. El modelo tiene +Y arriba, +Z adelante y +X a la IZQUIERDA del
+     * coche, asi que su eje x es -derecha. */
+    for (k = 0; k < 3u; k++) {
+        ejes[0][k] = (float)d->orient[k] / 65536.0f;
+        ejes[1][k] = (float)d->orient[3u + k] / 65536.0f;
+        ejes[2][k] = (float)d->orient[6u + k] / 65536.0f;
+    }
+    for (k = 0; k < 3u; k++) {
+        /* a mundo: X espejada */
+        ejes[0][k] = (k == 0u ? 1.0f : -1.0f) * ejes[0][k];
+        ejes[1][k] = (k == 0u ? -1.0f : 1.0f) * ejes[1][k];
+        ejes[2][k] = (k == 0u ? -1.0f : 1.0f) * ejes[2][k];
+    }
+    /* ejes[0] quedo como -derecha ya espejada (el signo de la X se cancela en la
+     * componente 0 y se invierte en las otras dos), que es justo el eje x del modelo */
+    up[0] = ejes[1][0]; up[1] = ejes[1][1]; up[2] = ejes[1][2];
+    norm3(up);
+    /* Gram-Schmidt, como la referencia: z adelante, y arriba, x = y x z */
+    norm3(ejes[2]);
+    {
+        float dp = ejes[1][0] * ejes[2][0] + ejes[1][1] * ejes[2][1] + ejes[1][2] * ejes[2][2];
+
+        for (k = 0; k < 3u; k++)
+            ejes[1][k] -= ejes[2][k] * dp;
+        norm3(ejes[1]);
+        ejes[0][0] = ejes[1][1] * ejes[2][2] - ejes[1][2] * ejes[2][1];
+        ejes[0][1] = ejes[1][2] * ejes[2][0] - ejes[1][0] * ejes[2][2];
+        ejes[0][2] = ejes[1][0] * ejes[2][1] - ejes[1][1] * ejes[2][0];
+    }
+
+    /* El origen del modelo esta a ras de suelo y la posicion simulada es el centro de la
+     * caja del cuerpo: hay que bajarlo por la media extension en Y. */
+    {
+        float lift = (float)d->dimension[1] / 65536.0f;
+
+        pos[0] = -(float)d->pos[0] / 65536.0f - up[0] * lift;
+        pos[1] = (float)d->pos[1] / 65536.0f - up[1] * lift;
+        pos[2] = (float)d->pos[2] / 65536.0f - up[2] * lift;
+    }
+
+    /* el tono: la media de los canales de la luz de la pista, con 128 como el 1,0 */
+    {
+        uint32_t r = d->light & 0xFFu, g = (d->light >> 8) & 0xFFu, b = (d->light >> 16) & 0xFFu;
+
+        tono = (r + g + b) / 3u;
+        if (tono > 255u)
+            tono = 255u;
+    }
+
+    for (pi = 0; pi < m->parts && pi < 57u; pi++) {
+        const CarPart *p = &m->part[pi];
+        uint8_t on = d->parts[pi];
+        float rw[3][3];          /* giro propio de la parte (las ruedas) */
+        int es_rueda = p->wheel != 0xFFu;
+        uint32_t t;
+
+        /* 1..16 se dibuja; 0 no esta y 17 en adelante son halos de luz, que son 2D */
+        if (on == 0u || on >= 17u || p->subtract || p->vert_n == 0u)
+            continue;
+
+        if (es_rueda) {
+            int tras = p->wheel >= 2u;
+            float giro = (float)d->wheel_rot[tras ? 1u : 0u] * (TAU / 65536.0f);
+            float vira = tras ? 0.0f : -(float)d->wheel_steer * (TAU / 65536.0f);
+            float cg = cosf(giro), sg = sinf(giro);
+            float cv = cosf(vira), sv = sinf(vira);
+
+            /* Ry(vira) * Rx(giro) */
+            rw[0][0] = cv;  rw[0][1] = sv * sg;  rw[0][2] = sv * cg;
+            rw[1][0] = 0.0f; rw[1][1] = cg;      rw[1][2] = -sg;
+            rw[2][0] = -sv; rw[2][1] = cv * sg;  rw[2][2] = cv * cg;
+        }
+
+        for (t = 0; t + 3u <= p->vert_n; t += 3u) {
+            Cv tri[3];
+            float wld[3][3];
+
+            for (k = 0; k < 3u; k++) {
+                const float *v = m->vert + (size_t)(p->vert_off + t + k) * 6u;
+                float lv[3], q[3];
+                uint32_t c;
+
+                lv[0] = v[0]; lv[1] = v[1]; lv[2] = v[2];
+                if (es_rueda) {
+                    uint32_t j;
+
+                    for (j = 0; j < 3u; j++)
+                        q[j] = rw[j][0] * lv[0] + rw[j][1] * lv[1] + rw[j][2] * lv[2];
+                    for (j = 0; j < 3u; j++)
+                        q[j] += p->hub[j];
+                } else {
+                    q[0] = lv[0]; q[1] = lv[1]; q[2] = lv[2];
+                }
+                /* del espacio del modelo al mundo: las columnas son los ejes del coche */
+                wld[k][0] = pos[0] + ejes[0][0] * q[0] + ejes[1][0] * q[1] + ejes[2][0] * q[2];
+                wld[k][1] = pos[1] + ejes[0][1] * q[0] + ejes[1][1] * q[1] + ejes[2][1] * q[2];
+                wld[k][2] = pos[2] + ejes[0][2] * q[0] + ejes[1][2] * q[1] + ejes[2][2] * q[2];
+
+                memcpy(&c, &v[5], sizeof c);
+                tri[k].u = v[3];
+                tri[k].v = v[4];
+                tri[k].argb = 0xFF000000u | (tinta((c >> 16) & 0xFFu, tono) << 16) |
+                              (tinta((c >> 8) & 0xFFu, tono) << 8) | tinta(c & 0xFFu, tono);
+            }
+            for (k = 0; k < 3u; k++) {
+                float dd[3];
+                uint32_t j;
+
+                for (j = 0; j < 3u; j++)
+                    dd[j] = wld[k][j] - vw.cam[j];
+                tri[k].x = vw.row[0][0] * dd[0] + vw.row[0][1] * dd[1] + vw.row[0][2] * dd[2];
+                tri[k].y = vw.row[1][0] * dd[0] + vw.row[1][1] * dd[1] + vw.row[1][2] * dd[2];
+                tri[k].z = vw.row[2][0] * dd[0] + vw.row[2][1] * dd[1] + vw.row[2][2] * dd[2];
+            }
+            triangulo(&vw, tri, &mat, emit, user, st);
+        }
+    }
+}

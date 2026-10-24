@@ -323,6 +323,17 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
     std::fs::write(out, &out_buf)?;
     verifica(&out_buf)?;
 
+    // Dimensionado de M2c: los modelos de objeto (0x21/0x08) y lo que se coloca de ellos.
+    let mq: usize = track.models.iter().map(|m| m.quads.len()).sum();
+    let mv: usize = track.models.iter().map(|m| m.verts.len()).sum();
+    let pl: usize = track.blocks.iter().map(|b| b.placements.len()).sum();
+    println!(
+        "  (M2c) {} modelos de objeto: {mv} vertices, {mq} cuadros; {pl} colocaciones en bloques, {} globales, {} con animacion",
+        track.models.len(),
+        track.globals.len(),
+        track.keyframed.len()
+    );
+
     let geom = blocks.len() + mats.len() + verts.len() + quads.len();
     println!(
         "{}: {} bloques, {} materiales, {} vertices, {} cuadros",

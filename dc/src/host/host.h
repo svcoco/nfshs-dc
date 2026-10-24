@@ -95,6 +95,18 @@ typedef struct SkyData {
     uint8_t  dome_tex[64];      /* pixmap por cuadro: 0..11 HZ01..HZ12, 12..15 espejados */
 } SkyData;
 
+/* Un objeto del escenario que el juego decidio dibujar este frame (M2c paso 1). */
+#define OBJECTS_MAX     256u   /* medidos ~47 por frame */
+#define OBJ_MODELS_MAX 1024u   /* el tamano de la tabla del juego */
+
+typedef struct {
+    uint16_t model;
+    uint8_t  billboard;        /* el motor lo gira hacia la camara */
+    uint8_t  pad;
+    int32_t  matrix[9];        /* giro y escala en espacio de PS1, 16.16, por filas */
+    int32_t  pos[3];           /* 16.16 */
+} ObjectDraw;
+
 typedef struct RaceView {
     uint32_t player;
     int16_t  rect[4];          /* recorte relativo al de la vista 0, y su tamano */
@@ -213,6 +225,13 @@ typedef struct GameHost {
     uint32_t light_ptr;
     SkyData  sky;
 
+    /* Los objetos del escenario del frame en curso. */
+    ObjectDraw objects[OBJECTS_MAX];
+    uint32_t   objects_n;
+    uint32_t   obj_models[OBJ_MODELS_MAX];
+    uint64_t   objects_sum, objects_lost;
+    uint32_t   objects_max;
+
     /* El nombre base del ultimo .GRP que el juego abrio: es como el port sabe QUE pista
      * tiene que cargar horneada, sin tener que leerselo al juego por otro sitio. */
     char     track_name[16];
@@ -262,6 +281,9 @@ int  host_video_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
  * efecto lateral y despues deja correr el codigo original. */
 void host_hook(GameHost *h, Cpu *c, uint32_t addr);
 int  host_views_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
+
+/* Graba los objetos del escenario que el juego dibuja en la vista preparada. */
+void host_record_objects(GameHost *h, Cpu *c);
 void host_unlock_everything(GameHost *h, Cpu *c);
 uint32_t host_capture_prims(GameHost *h, Cpu *c, uint32_t addr);
 int  host_showroom_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);

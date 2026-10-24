@@ -335,7 +335,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     use std::io::Write;
                     let mut f = std::io::BufWriter::new(std::fs::File::create(&path).expect("NFSHS_DIFF_VIEW"));
                     f.write_all(b"NFSV").expect("cabecera");
-                    f.write_all(&1u32.to_le_bytes()).expect("cabecera");
+                    f.write_all(&2u32.to_le_bytes()).expect("cabecera");
                     f
                 });
             let mut diff_steps: Vec<(u32, u16)> = Vec::new();
@@ -438,6 +438,21 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                         for (block, detail) in &v.chunks {
                             rec.extend_from_slice(&block.to_le_bytes());
                             rec.extend_from_slice(&detail.to_le_bytes());
+                        }
+                    }
+                    // the scenery objects the original draws, after the views
+                    let objs: &[ps1::host::ObjectDraw] =
+                        info.views.first().map_or(&[], |v| v.objects.as_slice());
+                    rec.extend_from_slice(&(objs.len() as u32).to_le_bytes());
+                    for o in objs {
+                        rec.extend_from_slice(&o.model.to_le_bytes());
+                        rec.push(o.billboard as u8);
+                        rec.push(0);
+                        for t in o.matrix {
+                            rec.extend_from_slice(&t.to_le_bytes());
+                        }
+                        for t in o.pos {
+                            rec.extend_from_slice(&t.to_le_bytes());
                         }
                     }
                     out.write_all(&rec).expect("NFSHS_DIFF_VIEW");

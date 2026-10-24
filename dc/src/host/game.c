@@ -118,6 +118,9 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
         }
     }
 
+    /* Los objetos del escenario: hay que grabarlos DESPUES de la lista de trozos,
+     * porque es sobre ella sobre la que el juego decide. */
+    host_record_objects(h, c);
     sky_read(h, c);
 
     /* La captura de la vista: camara, proyeccion, recorte y lista de trozos. A partir
@@ -242,7 +245,7 @@ int view_dump_open(GameHost *h, const char *path)
     if (f == NULL)
         return 0;
     fwrite("NFSV", 1, 4, f);
-    putv32(f, 1u);
+    putv32(f, 2u);   /* version 2: anade los objetos */
     h->view_dump = f;
     return 1;
 }
@@ -272,6 +275,20 @@ void view_dump_frame(GameHost *h)
             putv16(f, (uint16_t)v->chunk[k]);
             putv16(f, v->detail[k]);
         }
+    }
+    /* Los objetos del escenario van detras de las vistas: el port los graba una vez por
+     * frame, no por vista, que en un jugador es lo mismo. */
+    putv32(f, h->objects_n);
+    for (i = 0; i < h->objects_n; i++) {
+        const ObjectDraw *o = &h->objects[i];
+
+        putv16(f, o->model);
+        fputc(o->billboard, f);
+        fputc(0, f);
+        for (k = 0; k < 9u; k++)
+            putv32(f, (uint32_t)o->matrix[k]);
+        for (k = 0; k < 3u; k++)
+            putv32(f, (uint32_t)o->pos[k]);
     }
 }
 

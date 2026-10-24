@@ -1,11 +1,11 @@
-"""Compara la vista de carrera del port contra la de la referencia.
+"""Compara la vista de carrera y los objetos del escenario del port contra la referencia.
 
-Es el oraculo del paso 1 de M2b. El juego no construye la malla del mundo en su RAM:
-solo deja preparada la camara y la lista de trozos de pista que se ven. Eso es todo lo
-que el renderer recibe de el, asi que si esta captura coincide, el port tiene los datos
-correctos para dibujar aunque todavia no dibuje.
+Es el oraculo del paso 1 de M2b (la vista) y del paso 1 de M2c (los objetos). El juego
+no construye el mundo en su RAM: deja preparada la camara, dice que trozos de pista se
+ven y **dibuja** los objetos. Si esta captura coincide, el port tiene los datos correctos
+aunque todavia no los dibuje.
 
-Formato en dc/src/host/game.c y src/dev/mod.rs (NFSHS_DIFF_VIEW).
+Formato en dc/src/host/game.c y src/dev/mod.rs (NFSHS_DIFF_VIEW), version 2.
 
     uso: python -I dc/test/diff/cmpview.py <c.view> <rust.view> [--max N]
 """
@@ -14,10 +14,13 @@ import sys
 
 
 def leer(path):
-    """Devuelve {frame: [vista, ...]}, cada vista como un diccionario de campos."""
+    """Devuelve {frame: (vistas, objetos)}."""
     d = open(path, 'rb').read()
     if d[:4] != b'NFSV':
         raise SystemExit(f'{path}: no es un volcado de vista de carrera')
+    version, = struct.unpack_from('<I', d, 4)
+    if version != 2:
+        raise SystemExit(f'{path}: version {version}, esperaba 2')
     o, frames = 8, {}
     while o + 8 <= len(d):
         frame, nv = struct.unpack_from('<II', d, o)
@@ -34,7 +37,15 @@ def leer(path):
             pares = struct.unpack_from('<%dh' % (2 * n), d, o); o += 4 * n
             v['trozos'] = [(pares[2 * i], pares[2 * i + 1] & 0xFFFF) for i in range(n)]
             vistas.append(v)
-        frames[frame] = vistas
+        n, = struct.unpack_from('<I', d, o); o += 4
+        objetos = []
+        for _ in range(n):
+            model, bb = struct.unpack_from('<HB', d, o)
+            mat = struct.unpack_from('<9i', d, o + 4)
+            pos = struct.unpack_from('<3i', d, o + 40)
+            o += 52
+            objetos.append((model, bb, mat, pos))
+        frames[frame] = (vistas, objetos)
         if o > len(d):
             raise SystemExit(f'{path}: volcado truncado')
     return frames
@@ -53,14 +64,15 @@ def main(argv):
     print('  C: %d frames, referencia: %d frames (%d en comun)'
           % (len(a), len(b), len(comunes)))
 
-    vistas = sum(len(a[f]) for f in comunes)
-    if vistas == 0:
+    vistas = sum(len(a[f][0]) for f in comunes)
+    objetos = sum(len(a[f][1]) for f in comunes)
+    if vistas == 0 and objetos == 0:
         print('  sin vistas de carrera en el guion: nada que comparar')
         return 0
 
     fallos = 0
     for f in comunes:
-        va, vb = a[f], b[f]
+        (va, oa), (vb, ob) = a[f], b[f]
         if len(va) != len(vb):
             print(f'  frame {f}: {len(va)} vistas contra {len(vb)}')
             fallos += 1
@@ -72,14 +84,23 @@ def main(argv):
                     print(f'    ref {y[campo]}')
                     fallos += 1
                     break
+        if oa != ob:
+            if len(oa) != len(ob):
+                print(f'  frame {f}: {len(oa)} objetos contra {len(ob)}')
+            else:
+                k = next(i for i in range(len(oa)) if oa[i] != ob[i])
+                print(f'  frame {f} objeto {k} de {len(oa)}:')
+                print(f'    C   {oa[k]}')
+                print(f'    ref {ob[k]}')
+            fallos += 1
         if fallos >= tope:
             print(f'  ... (cortado en {tope} diferencias)')
             break
 
     if fallos:
-        print(f'\nFALLO: {fallos} frames con la vista distinta')
+        print(f'\nFALLO: {fallos} frames con la vista o los objetos distintos')
         return 1
-    print(f'\nOK: {vistas} vistas identicas en {len(comunes)} frames')
+    print(f'\nOK: {vistas} vistas y {objetos} objetos identicos en {len(comunes)} frames')
     return 0
 
 

@@ -37,6 +37,17 @@
 #define ADDR_CHUNK_BUILD_LIST_D 0x801102B0u  /* pares (i16 bloque, u16 detalle), 64 max */
 #define ADDR_CAMERA_ZOOM        0x8013DAD0u  /* proyeccion de la camara */
 #define ADDR_DRAW_VIEWS         0x8011FF44u  /* Draw_gViews[]: 200 bytes por vista */
+/* Los objetos del escenario (M2c paso 1). El juego no los deja listos en su RAM: los
+ * dibuja, asi que se corre DrawW_DoObjects anidada y se interceptan sus rutinas. */
+#define ADDR_DRAWW_DO_OBJECTS        0x800C9A24u  /* DoObjects(vista, lista de trozos) */
+#define ADDR_OBJECT_DEFS             0x8013E7BCu  /* PUNTERO a la tabla de definiciones */
+#define ADDR_DRAW_OBJECT_TRANSFORM   0x800C8C1Cu
+#define ADDR_DRAW_OBJECT_SIMPLE      0x800C8F74u
+#define ADDR_OBJECT_CLIPPED          0x800C9930u  /* recorta con el cono 4:3 de PS1 */
+#define ADDR_CHUNK_OBJECT_DRAW_RA    0x800C989Cu  /* donde vuelve el dibujo de un bloque */
+#define ADDR_FLARE_HALO              0x800CEBFCu
+#define ADDR_FLARE_HALO2             0x800CE290u
+
 #define ADDR_LIGHT_TABLE        0x8013DB0Cu  /* PUNTERO a Chunk_lightTable: 256 x 0xBBGGRR */
 
 /* El cielo (M2b paso 4). No es un asset: sus vertices y colores viven en la RAM del

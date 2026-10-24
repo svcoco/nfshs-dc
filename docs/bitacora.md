@@ -19,15 +19,18 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1a** Backend C + `ps1rt` en C, en x86 | Cerrado (2026-10-18) |
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
-| **M2b** La pista y el cielo en el PVR | Los cuatro pasos hechos; **la carrera se ve a 60 fps** |
+| **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
+| **M2c** Coches, objetos y efectos | Pasos 1 a 3 de 6 |
 | M2b, M2c, M3, M4, M5 | Sin empezar |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
 datos del disco y **dibuja el front end con el PVR a ~60 fps**, legible y completo: el
 menú *game setup*, sus opciones, la foto del coche y el texto de ayuda. La carrera
 **dibuja ya la carrera** a 60 fps: la pista con sus edificios, asfalto, barandillas y
-arbolado, y el cielo completo —cúpula y banda de horizonte— con las texturas y el color
-de vértice del original. Faltan los coches y los objetos, que son M2c.
+arbolado, el cielo completo —cúpula y banda de horizonte— y los objetos del escenario
+(cipreses, farolas, arbolado), con las texturas y el color de vértice del original. Lo
+que el juego decide de cada coche ya se graba y está validado; falta **dibujarlos**, el
+HUD y los efectos.
 
 ---
 
@@ -365,6 +368,68 @@ Dos fallos que solo se ven con el mundo delante:
 
 ---
 
+## M2c — Coches, objetos y efectos (en curso)
+
+El hito que convierte un paseo por un escenario en una carrera.
+
+| # | Paso | Estado |
+|---|---|---|
+| 1 | Grabación de los objetos del escenario | **Hecho**, validado contra la referencia |
+| 2 | Horneado y dibujo de los objetos | **Hecho**, el escenario se puebla |
+| 3 | Grabación de los coches | **Hecho**, validado palabra a palabra |
+| 4 | Horneado y dibujo de los coches | Siguiente |
+| 5 | El HUD (los cuatro ayudantes de M2a) | |
+| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | |
+
+El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
+carrera no se puede jugar, y los efectos son adorno al lado de eso.
+
+### El patrón que se repite: el juego no deja nada escrito, lo dibuja
+
+Ni los objetos ni los coches están listos en la RAM del juego: los va **dibujando**, y por
+el camino decide cuáles entran. Así que el port corre su rutina **anidada** con un **hook
+interno** que la sustituye y **anota** la decisión en vez de construir primitivas. Es el
+mismo mecanismo que ya usaba `showroom.c` desde M1a.
+
+### Pasos 1 y 3: las grabaciones, con oráculo
+
+```
+OK: 4769 vistas, 220002 objetos y 9494 coches identicos en 5000 frames
+```
+
+Los coches se comparan **en crudo**, palabra a palabra (99 por coche), que es menos código
+y más estricto que comparar campos interpretados.
+
+| Medido, 5 000 frames de carrera | |
+|---|---|
+| **Objetos por vista** | media **46,1**, máximo 92 |
+| **Coches por vista** | media **1,99**, máximo 4 |
+
+La estimación estática de objetos hecha antes de escribir código (707 colocaciones entre
+136 bloques, por 8,4 bloques por vista → ~47) acertó en el primer decimal.
+
+### Paso 2: los objetos en pantalla
+
+Los 353 modelos del GRP van al `.TRK` (versión 3), cada uno con su propio charco de
+vértices. Lo delicado es la colocación: los **fijos** van por la **transpuesta** de su
+matriz —el original carga el GTE con `(M·vista)ᵀ`—, y los **billboard** se giran hacia la
+cámara con la escala sacada de las dos primeras columnas.
+
+**51 objetos por 110 triángulos**, contra ~1 150 de la pista: menos del 10 %. La
+estimación previa (~240) se quedó larga — los modelos que de verdad se colocan son más
+pequeños que la media de los 353.
+
+### Una deuda de M1a que este hito tuvo que resolver
+
+El **ancho del cono de visibilidad de los coches**. La referencia lo ensancha
+(`CAR_CONE_WIDTH = 2`) porque su renderer es más ancho que el 4:3 de PS1; es **mejora
+suya, no del original**. M1a lo dejó anotado como «si se porta, detrás de una opción
+apagada por omisión», y así queda: `car_cone_width` vale **1** en el port y el test
+diferencial lo sube a 2, porque si no los dos lados no son comparables. Mismo caso que
+`--unlock`.
+
+---
+
 ## Decisiones vigentes
 
 Las de `CLAUDE.md` §3 siguen en pie. Lo que ha cambiado o se ha precisado:
@@ -434,6 +499,11 @@ incompleta— los encontró el oráculo, no la lectura del código.
   de alfa. Lo que lleve color clave va a *punch-through*.
 - **El `0x80` de PS1 es el 1,0 en todas partes**, también en el color de vértice del
   mundo: hay que doblar y saturar, o la escena sale a media luz.
+- **El renderer calcula en espacio de PS1 y espeja la X al final.** A un giro no se le
+  puede pasar `R(θ)` sino `S·R·S·D`, y **`S·R·S = R(−θ)`**. Pasarle `R(θ)` deja los
+  *billboard* girados al revés.
+- **El orden en que el host corre las rutinas del juego importa.** Los coches van después
+  del HUD porque es donde los pone el original: ese orden decide qué ve cada rutina.
 - **Los cuatro vértices de un cuadro de pista van en orden cíclico**, no en zigzag: se
   parte en (0,1,2) y (0,2,3). Como tira deja huecos triangulares por toda la pista.
 - **El juego abre sus archivos en minúsculas** (`zTr06.grp`) y el ISO del disco los

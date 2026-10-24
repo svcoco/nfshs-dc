@@ -335,7 +335,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     use std::io::Write;
                     let mut f = std::io::BufWriter::new(std::fs::File::create(&path).expect("NFSHS_DIFF_VIEW"));
                     f.write_all(b"NFSV").expect("cabecera");
-                    f.write_all(&2u32.to_le_bytes()).expect("cabecera");
+                    f.write_all(&3u32.to_le_bytes()).expect("cabecera");
                     f
                 });
             let mut diff_steps: Vec<(u32, u16)> = Vec::new();
@@ -454,6 +454,12 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                         for t in o.pos {
                             rec.extend_from_slice(&t.to_le_bytes());
                         }
+                    }
+                    // the cars, as raw capture words (99 per car), after the objects
+                    let cap = &c.capture;
+                    rec.extend_from_slice(&(cap.len() as u32).to_le_bytes());
+                    for w in cap {
+                        rec.extend_from_slice(&w.to_le_bytes());
                     }
                     out.write_all(&rec).expect("NFSHS_DIFF_VIEW");
                 }

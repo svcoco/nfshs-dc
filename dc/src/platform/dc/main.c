@@ -309,6 +309,10 @@ int main(int argc, char **argv)
     /* Como la referencia por omision: marca pistas y coches como disponibles. Sin esto
      * no hay acceso a carreras (ver docs/hitos/M1a.md). */
     host.unlock = 1;
+    /* El cono de visibilidad de los coches: 1 es el del original (4:3 de PS1). La
+     * referencia usa 2, pero eso es una mejora suya y en el port va apagada
+     * (docs/hitos/M1a.md). */
+    host.car_cone_width = 1u;
     host.poll_input = on_frame;
     /* El PVR: a partir de aqui el juego se DIBUJA, no solo se cuenta. */
     if (render_init()) {

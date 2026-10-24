@@ -37,6 +37,21 @@
 #define ADDR_CHUNK_BUILD_LIST_D 0x801102B0u  /* pares (i16 bloque, u16 detalle), 64 max */
 #define ADDR_CAMERA_ZOOM        0x8013DAD0u  /* proyeccion de la camara */
 #define ADDR_DRAW_VIEWS         0x8011FF44u  /* Draw_gViews[]: 200 bytes por vista */
+/* Los coches (M2c paso 3). El juego decide que se dibuja de cada uno y lo dibuja; el
+ * port corre su rutina anidada y lo anota. */
+#define ADDR_R3DCAR_INSERT_ALL_LIST  0x800B38C0u  /* R3DCar_InsertAllListFacet(vista) */
+#define ADDR_R3DCAR_INSERT_CAR_FACET_II 0x800B2E30u
+#define ADDR_R3DCAR_VISIBILITY       0x800B03E4u
+#define ADDR_CAR_DETAIL              0x8C2u       /* desplazamiento dentro de Car_tObj */
+#define ADDR_R3DCAR_OBJECT_VISIBLE   0x80117B64u  /* 57 bytes: que partes se dibujan */
+#define ADDR_LIGHT_CODES             0x801207F8u  /* 26 palabras, por textura */
+#define ADDR_DRAWC_PRIM_START        0x800BFAC8u
+#define ADDR_R3DCAR_CENTER           0x8013E674u
+#define ADDR_CAR_CACHE               0x1F800000u  /* el scratchpad */
+#define ADDR_BWORLDSM_QUAD_LIGHT     0x80080868u
+#define ADDR_SHADOW_ON               (ADDR_GP + 3648u)
+#define ADDR_SHADOW_COLOUR           (ADDR_GP + 3652u)
+
 /* Los objetos del escenario (M2c paso 1). El juego no los deja listos en su RAM: los
  * dibuja, asi que se corre DrawW_DoObjects anidada y se interceptan sus rutinas. */
 #define ADDR_DRAWW_DO_OBJECTS        0x800C9A24u  /* DoObjects(vista, lista de trozos) */

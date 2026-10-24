@@ -99,6 +99,10 @@ typedef struct SkyData {
 #define OBJECTS_MAX     256u   /* medidos ~47 por frame */
 #define OBJ_MODELS_MAX 1024u   /* el tamano de la tabla del juego */
 
+/* 99 palabras por coche; hasta 8 coches mas holgura. */
+#define CAR_WORDS        99u
+#define CAR_CAPTURE_MAX (CAR_WORDS * 16u)
+
 typedef struct ObjectDraw {
     uint16_t model;
     uint8_t  billboard;        /* el motor lo gira hacia la camara */
@@ -225,6 +229,19 @@ typedef struct GameHost {
     uint32_t light_ptr;
     SkyData  sky;
 
+    /* Lo que el juego decide dibujar de cada coche, como lista de palabras (99 por
+     * coche; ver cars.c para el orden). Se guarda en crudo para poder compararla palabra
+     * a palabra con la referencia. */
+    uint32_t cars_cap_buf[CAR_CAPTURE_MAX];
+    uint32_t cars_cap;        /* palabras escritas */
+    uint32_t cars_n;          /* coches anotados */
+    uint64_t cars_sum, cars_lost;
+    uint32_t cars_max;
+    /* Ancho del cono de visibilidad de los coches. 1 es el original (4:3 de PS1); 2 es
+     * la mejora de la referencia, que hace falta para que los dos lados se puedan
+     * comparar. Ver docs/hitos/M1a.md. */
+    uint32_t car_cone_width;
+
     /* Los objetos del escenario del frame en curso. */
     ObjectDraw objects[OBJECTS_MAX];
     uint32_t   objects_n;
@@ -284,6 +301,9 @@ int  host_views_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 
 /* Graba los objetos del escenario que el juego dibuja en la vista preparada. */
 void host_record_objects(GameHost *h, Cpu *c);
+
+/* Graba lo que el juego decide dibujar de cada coche. */
+void host_record_cars(GameHost *h, Cpu *c);
 void host_unlock_everything(GameHost *h, Cpu *c);
 uint32_t host_capture_prims(GameHost *h, Cpu *c, uint32_t addr);
 int  host_showroom_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);

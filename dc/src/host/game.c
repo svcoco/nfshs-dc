@@ -154,6 +154,10 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
     args[0] = player;
     (void)ps1_call_nested(c, ADDR_HUD_WRONG_WAY, args, 1u);
     (void)ps1_call_nested(c, ADDR_HUD_CALC, args, 1u);
+
+    /* Los coches van DESPUES del HUD, en el mismo orden que la referencia: el original
+     * los dibuja ahi y ese orden decide que ve cada rutina. */
+    host_record_cars(h, c);
 }
 
 int host_game_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
@@ -245,7 +249,7 @@ int view_dump_open(GameHost *h, const char *path)
     if (f == NULL)
         return 0;
     fwrite("NFSV", 1, 4, f);
-    putv32(f, 2u);   /* version 2: anade los objetos */
+    putv32(f, 3u);   /* version 3: anade la captura de los coches */
     h->view_dump = f;
     return 1;
 }
@@ -290,6 +294,11 @@ void view_dump_frame(GameHost *h)
         for (k = 0; k < 3u; k++)
             putv32(f, (uint32_t)o->pos[k]);
     }
+    /* La captura de los coches, en crudo: palabra a palabra como la graba la referencia
+     * (99 por coche). Comparar el crudo es mas estricto que comparar campos. */
+    putv32(f, h->cars_cap);
+    for (i = 0; i < h->cars_cap; i++)
+        putv32(f, h->cars_cap_buf[i]);
 }
 
 void view_dump_close(GameHost *h)

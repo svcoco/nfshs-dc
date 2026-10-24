@@ -117,6 +117,7 @@ int main(int argc, char **argv)
     const char *dump_path = NULL;
     const char *ovl_path = NULL;
     const char *view_path = NULL;
+    uint32_t cone = 1u;   /* el cono de visibilidad del original */
     const char *tex_path = NULL;
     const char *counts_path = NULL;
     uint64_t win_lo = 0, win_hi = 0, ram_at_call = 0, frame_dump_at = 0;
@@ -148,6 +149,8 @@ int main(int argc, char **argv)
             idlelog = 1;
         else if (!strcmp(argv[i], "--textlog"))
             textlog = 1;
+        else if (!strcmp(argv[i], "--carcone") && i + 1 < argc)
+            cone = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "--unlock"))
             unlock = 1;
         else if (!strcmp(argv[i], "--filelog"))
@@ -234,6 +237,7 @@ int main(int argc, char **argv)
     host.idlelog = idlelog;
     host.textlog = textlog;
     host.unlock = unlock;
+    host.car_cone_width = cone != 0u ? cone : 1u;
     host.files.log = filelog;
     host.tex_buf = texbuf;
     host.poll_input = pc_on_frame;

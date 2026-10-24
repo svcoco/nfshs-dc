@@ -1,6 +1,8 @@
 """Compara la vista de carrera y los objetos del escenario del port contra la referencia.
 
-Es el oraculo del paso 1 de M2b (la vista) y del paso 1 de M2c (los objetos). El juego
+Es el oraculo de la vista (M2b paso 1), los objetos (M2c paso 1) y los coches
+(M2c paso 3). Los coches se comparan **en crudo**, palabra a palabra (99 por coche),
+que es mas estricto que comparar campos. El juego
 no construye el mundo en su RAM: deja preparada la camara, dice que trozos de pista se
 ven y **dibuja** los objetos. Si esta captura coincide, el port tiene los datos correctos
 aunque todavia no los dibuje.
@@ -19,8 +21,8 @@ def leer(path):
     if d[:4] != b'NFSV':
         raise SystemExit(f'{path}: no es un volcado de vista de carrera')
     version, = struct.unpack_from('<I', d, 4)
-    if version != 2:
-        raise SystemExit(f'{path}: version {version}, esperaba 2')
+    if version != 3:
+        raise SystemExit(f'{path}: version {version}, esperaba 3')
     o, frames = 8, {}
     while o + 8 <= len(d):
         frame, nv = struct.unpack_from('<II', d, o)
@@ -45,7 +47,10 @@ def leer(path):
             pos = struct.unpack_from('<3i', d, o + 40)
             o += 52
             objetos.append((model, bb, mat, pos))
-        frames[frame] = (vistas, objetos)
+        n, = struct.unpack_from('<I', d, o); o += 4
+        coches = struct.unpack_from('<%dI' % n, d, o) if n else ()
+        o += 4 * n
+        frames[frame] = (vistas, objetos, coches)
         if o > len(d):
             raise SystemExit(f'{path}: volcado truncado')
     return frames
@@ -66,13 +71,14 @@ def main(argv):
 
     vistas = sum(len(a[f][0]) for f in comunes)
     objetos = sum(len(a[f][1]) for f in comunes)
-    if vistas == 0 and objetos == 0:
+    coches = sum(len(a[f][2]) // 99 for f in comunes)
+    if vistas == 0 and objetos == 0 and coches == 0:
         print('  sin vistas de carrera en el guion: nada que comparar')
         return 0
 
     fallos = 0
     for f in comunes:
-        (va, oa), (vb, ob) = a[f], b[f]
+        (va, oa, ca), (vb, ob, cb) = a[f], b[f]
         if len(va) != len(vb):
             print(f'  frame {f}: {len(va)} vistas contra {len(vb)}')
             fallos += 1
@@ -93,14 +99,23 @@ def main(argv):
                 print(f'    C   {oa[k]}')
                 print(f'    ref {ob[k]}')
             fallos += 1
+        if ca != cb:
+            if len(ca) != len(cb):
+                print(f'  frame {f}: {len(ca) // 99} coches contra {len(cb) // 99}')
+            else:
+                k = next(i for i in range(len(ca)) if ca[i] != cb[i])
+                print(f'  frame {f} coche {k // 99}, palabra {k % 99}: '
+                      f'C {ca[k]:#x} contra {cb[k]:#x}')
+            fallos += 1
         if fallos >= tope:
             print(f'  ... (cortado en {tope} diferencias)')
             break
 
     if fallos:
-        print(f'\nFALLO: {fallos} frames con la vista o los objetos distintos')
+        print(f'\nFALLO: {fallos} frames con la vista, los objetos o los coches distintos')
         return 1
-    print(f'\nOK: {vistas} vistas y {objetos} objetos identicos en {len(comunes)} frames')
+    print(f'\nOK: {vistas} vistas, {objetos} objetos y {coches} coches identicos '
+          f'en {len(comunes)} frames')
     return 0
 
 

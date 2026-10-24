@@ -94,7 +94,8 @@ def main(argv):
         # sin esto no existe el escenario de carrera que pide el criterio de M1a. En el
         # port la bandera esta apagada por defecto (ver dc/src/host/unlock.c).
         run([C_EXE, '--script', script, '--ticks', ticks, '--unlock', '--dump', c_dump,
-             '--overlaydump', c_ovl, '--viewdump', c_view],
+             '--overlaydump', c_ovl, '--viewdump', c_view,
+             '--carcone', '2'],
             {}, os.path.join(OUT, 'c.log'), 'C')
         n = fresh(c_dump, t0, 'C')
         print(f'  {n} frames')

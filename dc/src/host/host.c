@@ -330,6 +330,11 @@ void host_report(const GameHost *h, const Cpu *c)
     printf("  modo:                      %s\n",
            h->mode == HOST_RACE ? "carrera" : "front end");
     if (h->race_views != 0u)
+        printf("  coches por vista:          media %.2f, maximo %u%s\n",
+               (double)h->cars_sum / (double)h->race_views,
+               (unsigned)h->cars_max,
+               h->cars_lost != 0u ? " (EL BUFFER SE LLENO)" : "");
+    if (h->race_views != 0u)
         printf("  objetos por vista:         media %.1f, maximo %u%s\n",
                (double)h->objects_sum / (double)h->race_views,
                (unsigned)h->objects_max,

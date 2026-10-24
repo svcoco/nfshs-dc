@@ -49,7 +49,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 |---|---|---|
 | 1 | **Grabacion de los objetos** en el host de C | **Hecho (2026-10-24)**: 31 686 objetos identicos a la referencia en 900 frames |
 | 2 | **Horneado y dibujo de los objetos** | **Hecho (2026-10-24)**: el escenario se puebla, 110 triangulos, 60 fps |
-| 3 | **Grabacion de los coches** (`CarFacet`: partes, luz, sombra, codigos) | la captura del port y la de la referencia coinciden |
+| 3 | **Grabacion de los coches** | **Hecho (2026-10-24)**: 9 494 coches identicos a la referencia en 5 000 frames |
 | 4 | **Horneado y dibujo de los coches** (GEO + su atlas) | se ven los coches corriendo |
 | 5 | **El HUD**: los cuatro ayudantes de M2a | la carrera se **lee**: velocidad, marcha, tiempos, posicion |
 | 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | la carrera se parece al original |
@@ -142,3 +142,47 @@ objetos se la pasan siempre.
 Los objetos cuestan **menos del 10 %** de lo que cuesta la pista. La estimacion previa
 (2,6 cuadros por objeto, o sea ~240 triangulos para 46 objetos) se quedo **larga**: los
 modelos que de verdad se colocan son mas pequenos que la media de los 353.
+
+## 7. Paso 3 hecho: la grabacion de los coches (2026-10-24)
+
+`dc/src/host/cars.c`. Mismo patron que los objetos: el juego **dibuja** los coches y por
+el camino decide que partes de cada modelo entran, con que luz, con que sombra y con que
+mapas de reflejo. El port corre `R3DCar_InsertAllListFacet` **anidada** con un hook
+interno que sustituye `R3DCar_InsertCarFacetII` y anota la decision en vez de construir
+primitivas.
+
+Por coche salen **99 palabras**: el `Car_tObj`, la luz de la pista en el, si hay sombra y
+sus cuatro esquinas (relativas a la posicion del coche en x y z, porque se dibuja en una
+pose interpolada), su color, los **57 bytes de `R3DCar_ObjectVisible`** que dicen que
+partes se dibujan, el resultado de `DrawC_PrimStart`, los mapas de reflejo del cache del
+coche y los **26 codigos de luz y abolladura** por textura.
+
+### El oraculo compara el crudo
+
+Los dos lados vuelcan **la lista de palabras tal cual**, no campos interpretados. Es
+menos codigo y mas estricto: cualquier diferencia en cualquiera de las 99 salta.
+
+```
+OK: 4769 vistas, 220002 objetos y 9494 coches identicos en 5000 frames
+```
+
+### Dos cosas que hubo que respetar al pie de la letra
+
+1. **El orden.** Los coches van **despues** del HUD, que es donde los pone el original.
+   El port los tenia antes y hubo que moverlos: ese orden decide que ve cada rutina.
+2. **El ancho del cono de visibilidad.** La referencia divide la fila x de la vista
+   (`CAR_CONE_WIDTH = 2`) para ensanchar el cono, porque su renderer es mas ancho que el
+   4:3 de PS1. Es una **mejora suya**, no del original, y M1a la dejo anotada como deuda
+   «si se porta, detras de una opcion apagada por omision». Asi queda: `car_cone_width`
+   vale **1** en el port (el comportamiento del original) y el test diferencial lo sube a
+   2 con `--carcone 2`, porque si no los dos lados no son comparables. Es el mismo caso
+   que `--unlock`.
+
+### Medido, 5 000 frames de carrera
+
+| | |
+|---|---|
+| **Coches por vista** | **media 1,99, maximo 4** |
+
+Con hasta 4 coches a la vez, y sus modelos siendo triangulos y no cuadros, el paso 4 es
+la primera vez en el hito que el conteo de poligonos puede acercarse al del mundo.

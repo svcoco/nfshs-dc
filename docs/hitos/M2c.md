@@ -303,8 +303,9 @@ El HUD no mueve el ritmo: el coste sigue siendo el de grabar los coches (paso 4)
 
 ## 10. Paso 6 (en curso): los efectos (2026-10-25)
 
-Hechas las **sombras**, las **líneas pintadas** y las **marcas de neumático**. Faltan
-destellos y halos de luces, humo, clima y reflejos.
+Hechas las **sombras**, las **líneas pintadas**, las **marcas de neumático**, los
+**destellos** de las farolas, los **halos** de los coches, el **humo** y el **flare del sol**.
+Faltan el clima y los reflejos.
 
 ### Lo sustractivo: resta exacta con tres mezclas del PVR
 
@@ -352,3 +353,40 @@ pared de la salida sin avanzar.
 |---|---|
 | `race_long` (5 000 frames) | 4 769 vistas, 220 002 objetos, 9 494 coches y 1 069 983 marcas idénticos |
 | `derrape` (2 800 frames) | 2 569 vistas, 117 260 objetos, 2 320 coches y 457 416 marcas idénticos |
+
+### Destellos, halos, humo y el flare del sol
+
+Son **2D del propio juego**: rutinas que proyectan un punto del mundo y escriben cuadros de
+pantalla. El host las corre anidadas en el mismo punto y orden que la referencia
+(`host/glows.c`):
+
+| Rutina | Qué | Ancla |
+|---|---|---|
+| `BWorld_BuildGlareEffects` (0x8007E068), por trozo a la vista | farolas | el `coorddef` que reciben `Flare_Halo`/`Flare_Halo2` en a3 |
+| `Souffle_InsertFacet` (0x800B8ABC) | humo y polvo | `Souffle_tISouffle + 12`, en a1 de `Sfx_BuildSouffleFacet` |
+| `Weather_Render` (0x800E493C) | clima | — |
+| `Flare_Sun` (0x800CFF30), con la rotación del horizonte en el GTE | flare del sol | — |
+| `R3DCar_InsertCarFacetII` con la carrocería saltada | halos de faros y frenos | la posición del coche |
+
+Cada destello lleva sus cuadros y el punto del que sale. **La cámara del port es la del
+juego**, así que los cuadros caen donde los puso el original, y solo se les da una
+profundidad (`glow_depth`, en `render/fx.c`, portable) para probarlos contra lo opaco. Hay
+un detalle de fidelidad que no es cosmético: grabar paquetes mueve el modo de dibujo
+vigente (E1), y el HUD se graba después; por eso también se corre y se graba el clima en
+su sitio.
+
+| Oráculo (vista v5) | `race_long` | `derrape` |
+|---|---|---|
+| destellos idénticos | 2 071 (586 halos, 607 bocanadas) | 825 (4 halos, 30 bocanadas) |
+| cuadros del flare del sol | 29 038 | 13 608 |
+| cuadros de clima | 0 | 0 |
+
+Por modo de mezcla, en `race_long`: farolas 10 062 cuadros y halos 12 136, todos sin
+textura y sumando; humo 602 sumando y **5 restando**.
+
+Medido en el arnés de PC con un frame real: el polvo del frame 1853 aclara 542 píxeles,
+**24,1 niveles de media**; el halo del frame 4500 cae sobre los pilotos traseros del coche.
+En Flycast, la farola y el flare del sol se ven en su sitio.
+
+**Sin medir:** el coste en fps de correr esas rutinas cada frame, y el del dibujo, que en
+este paso no se separó.

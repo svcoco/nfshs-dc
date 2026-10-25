@@ -178,6 +178,8 @@ static void *diag_thread(void *arg)
                (unsigned long)host.objects_n);
         printf("        efectos restados: %llu triangulos\n",
                (unsigned long long)render_fx_tris());
+        printf("        destellos: %llu cuadros dibujados en total\n",
+               (unsigned long long)render_glow_quads());
         prev_calls = cpu.calls;
     }
     return NULL;

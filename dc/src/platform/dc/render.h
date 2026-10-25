@@ -15,6 +15,7 @@ void render_frame(struct GameHost *h);
 /* Para el informe. */
 uint64_t render_frames(void);
 uint64_t render_quads(void);
+uint64_t render_glow_quads(void);
 
 uint64_t render_tris(void);
 uint64_t render_tri_frames(void);

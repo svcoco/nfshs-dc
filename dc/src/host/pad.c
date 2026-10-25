@@ -202,6 +202,7 @@ void host_frame_top(GameHost *h, Cpu *c)
     /* Las vistas de carrera tambien son de UN frame: el renderer ya las ha consumido
      * en on_draw. */
     h->views_n = 0;
+    host_glows_reset(h);
     /* fin del guion: parada ordenada, para que el arnes imprima su informe */
     if (h->pad_end != 0u && h->frames >= h->pad_end)
         c->tick_limit = 0;

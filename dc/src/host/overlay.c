@@ -584,6 +584,15 @@ void overlay_race_compose(GameHost *h)
 /* Recorre la lista del frame y le dice a la cache que texturas hacen falta; luego
  * convierte lo que no este vigente. Sin buffer de texeles no hace nada, que es el caso
  * del host de PC cuando solo se quiere grabar. */
+static void necesita(GameHost *h, const OverlayQuad *q, uint32_t n)
+{
+    uint32_t i;
+
+    for (i = 0; i < n; i++)
+        if (q[i].kind == OVL_QUAD && q[i].has_tex)
+            tex_need(&h->texcache, q[i].tex.tpage, q[i].tex.clut, q[i].tex.uv);
+}
+
 void host_build_textures(GameHost *h)
 {
     uint32_t i;
@@ -597,6 +606,10 @@ void host_build_textures(GameHost *h)
         if (q->kind == OVL_QUAD && q->has_tex)
             tex_need(&h->texcache, q->tex.tpage, q->tex.clut, q->tex.uv);
     }
+    /* y las de los destellos, el flare del sol y el clima de la carrera */
+    necesita(h, h->glow_quad, h->glow_quads_n);
+    necesita(h, h->sky_quad, h->sky_quads_n);
+    necesita(h, h->weather_quad, h->weather_quads_n);
     tex_build(&h->texcache, h->vram, h->tex_buf, h->tex_cap);
 }
 
@@ -625,6 +638,29 @@ static void put32o(FILE *f, uint32_t v)
     put16(f, (uint16_t)(v >> 16));
 }
 
+/* Un cuadro en el formato del volcado (56 bytes); lo usa tambien el de la vista. */
+void overlay_dump_quad(FILE *f, const OverlayQuad *q)
+{
+    uint32_t k;
+
+    for (k = 0; k < 4u; k++) {
+        put16(f, (uint16_t)q->pts[k][0]);
+        put16(f, (uint16_t)q->pts[k][1]);
+    }
+    for (k = 0; k < 4u; k++)
+        put32o(f, q->colours[k]);
+    fputc(q->kind, f);
+    fputc(q->has_tex, f);
+    fputc(q->semi, f);
+    fputc(q->abr, f);
+    put16(f, q->has_tex ? q->tex.tpage : 0u);
+    put16(f, q->has_tex ? q->tex.clut : 0u);
+    for (k = 0; k < 4u; k++) {
+        put16(f, q->has_tex ? q->tex.uv[k][0] : 0u);
+        put16(f, q->has_tex ? q->tex.uv[k][1] : 0u);
+    }
+}
+
 int overlay_dump_open(GameHost *h, const char *path)
 {
     FILE *f = fopen(path, "wb");
@@ -640,33 +676,15 @@ int overlay_dump_open(GameHost *h, const char *path)
 void overlay_dump_frame(GameHost *h)
 {
     FILE *f = h->ovl_dump;
-    uint32_t i, k;
+    uint32_t i;
 
     if (f == NULL)
         return;
     put32o(f, (uint32_t)h->frames);
     put32o(f, h->overlay.n);
     put32o(f, 0u);                       /* el port no produce otros comandos todavia */
-    for (i = 0; i < h->overlay.n; i++) {
-        const OverlayQuad *q = &h->overlay.quad[i];
-
-        for (k = 0; k < 4u; k++) {
-            put16(f, (uint16_t)q->pts[k][0]);
-            put16(f, (uint16_t)q->pts[k][1]);
-        }
-        for (k = 0; k < 4u; k++)
-            put32o(f, q->colours[k]);
-        fputc(q->kind, f);
-        fputc(q->has_tex, f);
-        fputc(q->semi, f);
-        fputc(q->abr, f);
-        put16(f, q->has_tex ? q->tex.tpage : 0u);
-        put16(f, q->has_tex ? q->tex.clut : 0u);
-        for (k = 0; k < 4u; k++) {
-            put16(f, q->has_tex ? q->tex.uv[k][0] : 0u);
-            put16(f, q->has_tex ? q->tex.uv[k][1] : 0u);
-        }
-    }
+    for (i = 0; i < h->overlay.n; i++)
+        overlay_dump_quad(f, &h->overlay.quad[i]);
 }
 
 void overlay_dump_close(GameHost *h)

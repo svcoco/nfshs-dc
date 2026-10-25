@@ -13,7 +13,7 @@ int raster_dump(const GameHost *host, const uint16_t *texbuf, const char *path,
 /* Dibuja la PISTA de la vista 0 (M2b paso 3) y la escribe como PPM. Es la unica forma
  * de ver si la transformacion y el recorte estan bien sin encender un Dreamcast.
  * Devuelve 0 si no pudo. */
-int raster_track(const GameHost *host, const Track *track,
+int raster_track(const GameHost *host, const Track *track, const uint16_t *texbuf,
                  const char *path, int ancho, int alto);
 
 #endif /* PC_RASTER_H */

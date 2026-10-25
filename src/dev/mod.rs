@@ -345,7 +345,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     use std::io::Write;
                     let mut f = std::io::BufWriter::new(std::fs::File::create(&path).expect("NFSHS_DIFF_VIEW"));
                     f.write_all(b"NFSV").expect("cabecera");
-                    f.write_all(&4u32.to_le_bytes()).expect("cabecera");
+                    f.write_all(&5u32.to_le_bytes()).expect("cabecera");
                     f
                 });
             let mut diff_steps: Vec<(u32, u16)> = Vec::new();
@@ -486,6 +486,63 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                         rec.extend_from_slice(&(q.tex as u16).to_le_bytes());
                         rec.extend_from_slice(&q.slice.to_le_bytes());
                     }
+                    // the glows (anchor, car, smoke, quads), then the sun's flare and the
+                    // weather, as loose quads; each quad as in NFSHS_DIFF_OVERLAY
+                    fn quads(cmds: &[ps1::host::OverlayCmd]) -> Vec<u8> {
+                        use ps1::host::OverlayCmd;
+                        let mut r = Vec::new();
+                        for q in cmds {
+                            match q {
+                                OverlayCmd::Clip { x, y, w, h } => {
+                                    for v in [*x, *y, *w, *h, 0, 0, 0, 0] {
+                                        r.extend_from_slice(&v.to_le_bytes());
+                                    }
+                                    r.extend_from_slice(&[0u8; 16]);
+                                    r.extend_from_slice(&[1u8, 0, 0, 0]);
+                                    r.extend_from_slice(&[0u8; 20]);
+                                }
+                                OverlayCmd::Quad { pts, colours, tex, semi, abr } => {
+                                    for p in pts {
+                                        r.extend_from_slice(&p[0].to_le_bytes());
+                                        r.extend_from_slice(&p[1].to_le_bytes());
+                                    }
+                                    for c in colours {
+                                        r.extend_from_slice(&c.to_le_bytes());
+                                    }
+                                    r.extend_from_slice(&[0u8, u8::from(tex.is_some()), u8::from(*semi), *abr]);
+                                    let (tpage, clut, uv) = match tex {
+                                        Some(t) => (t.tpage, t.clut, t.uv),
+                                        None => (0, 0, [[0u16; 2]; 4]),
+                                    };
+                                    r.extend_from_slice(&tpage.to_le_bytes());
+                                    r.extend_from_slice(&clut.to_le_bytes());
+                                    for t in uv {
+                                        r.extend_from_slice(&t[0].to_le_bytes());
+                                        r.extend_from_slice(&t[1].to_le_bytes());
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        r
+                    }
+                    fn n_quads(cmds: &[ps1::host::OverlayCmd]) -> usize {
+                        cmds.iter().filter(|c| matches!(c, ps1::host::OverlayCmd::Quad { .. } | ps1::host::OverlayCmd::Clip { .. })).count()
+                    }
+                    rec.extend_from_slice(&(info.glows.len() as u32).to_le_bytes());
+                    for g in &info.glows {
+                        for v in g.anchor {
+                            rec.extend_from_slice(&v.to_le_bytes());
+                        }
+                        rec.extend_from_slice(&g.car.unwrap_or(0).to_le_bytes());
+                        rec.extend_from_slice(&[u8::from(g.smoke), 0]);
+                        rec.extend_from_slice(&(n_quads(&g.cmds) as u16).to_le_bytes());
+                        rec.extend_from_slice(&quads(&g.cmds));
+                    }
+                    rec.extend_from_slice(&(n_quads(&info.sky_overlay) as u32).to_le_bytes());
+                    rec.extend_from_slice(&quads(&info.sky_overlay));
+                    rec.extend_from_slice(&(n_quads(&info.weather) as u32).to_le_bytes());
+                    rec.extend_from_slice(&quads(&info.weather));
                     out.write_all(&rec).expect("NFSHS_DIFF_VIEW");
                 }
                 if let Some(out) = diff_out.as_mut() {

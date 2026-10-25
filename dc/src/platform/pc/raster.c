@@ -305,6 +305,123 @@ static void tri_pista(Pista *P, const TrackVert *a, const TrackVert *b,
     }
 }
 
+/* ---- los destellos (M2c paso 6) ----
+ *
+ * El mismo calculo que en Dreamcast (glow_depth) y las mezclas de PS1 tal cual: el modo 0
+ * (mitad y mitad), 1 (suma), 2 (resta) y 3 (suma un cuarto). Prueba la profundidad como el
+ * PVR, GEQUAL y sin escribirla. */
+typedef struct {
+    float x, y, z;
+    int r, g, b, u, v;
+} GV;
+
+static void tri_destello(Pista *P, const GV *a, const GV *b, const GV *c,
+                         const TexEntry *e, const uint16_t *texbuf, int semi, int abr)
+{
+    float area = (b->x - a->x) * (c->y - a->y) - (b->y - a->y) * (c->x - a->x);
+    int minx, maxx, miny, maxy, x, y;
+
+    if (area == 0.0f)
+        return;
+    if (area < 0.0f) {
+        const GV *s = b;
+
+        b = c;
+        c = s;
+        area = -area;
+    }
+    minx = (int)floorf(fminf(fminf(a->x, b->x), c->x));
+    maxx = (int)ceilf(fmaxf(fmaxf(a->x, b->x), c->x));
+    miny = (int)floorf(fminf(fminf(a->y, b->y), c->y));
+    maxy = (int)ceilf(fmaxf(fmaxf(a->y, b->y), c->y));
+    if (minx < 0) minx = 0;
+    if (miny < 0) miny = 0;
+    if (maxx > P->w - 1) maxx = P->w - 1;
+    if (maxy > P->h - 1) maxy = P->h - 1;
+    for (y = miny; y <= maxy; y++) {
+        for (x = minx; x <= maxx; x++) {
+            float px = (float)x + 0.5f, py = (float)y + 0.5f;
+            float w0 = ((b->x - a->x) * (py - a->y) - (b->y - a->y) * (px - a->x)) / area;
+            float w1 = ((c->x - b->x) * (py - b->y) - (c->y - b->y) * (px - b->x)) / area;
+            float w2 = 1.0f - w0 - w1, iz;
+            size_t o = (size_t)y * P->w + x;
+            int f[3], k;
+            uint8_t *d;
+
+            if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f)
+                continue;
+            /* w1 es el peso de a, w2 el de b y w0 el de c */
+            iz = w1 * a->z + w2 * b->z + w0 * c->z;
+            if (iz < P->z[o])
+                continue;
+            f[0] = (int)(w1 * a->r + w2 * b->r + w0 * c->r);
+            f[1] = (int)(w1 * a->g + w2 * b->g + w0 * c->g);
+            f[2] = (int)(w1 * a->b + w2 * b->b + w0 * c->b);
+            if (e != NULL) {
+                int tu = (int)(w1 * a->u + w2 * b->u + w0 * c->u) - e->u0;
+                int tv = (int)(w1 * a->v + w2 * b->v + w0 * c->v) - e->v0;
+                uint16_t tx;
+
+                if (tu < 0) tu = 0;
+                if (tv < 0) tv = 0;
+                if (tu >= e->w) tu = e->w - 1;
+                if (tv >= e->h) tv = e->h - 1;
+                tx = texbuf[e->offset + (size_t)tv * e->w + tu];
+                if (!(tx & 0x8000u))
+                    continue;
+                /* modulacion de PS1: textura * color, con 0x80 como el 1,0 */
+                f[0] = (((tx >> 10) & 0x1F) << 3) * f[0] / 128;
+                f[1] = (((tx >> 5) & 0x1F) << 3) * f[1] / 128;
+                f[2] = ((tx & 0x1F) << 3) * f[2] / 128;
+            }
+            d = P->rgb + o * 3u;
+            for (k = 0; k < 3; k++) {
+                int fv = CLAMP255(f[k]), bv = d[k], r;
+
+                if (!semi)
+                    r = fv;
+                else if (abr == 1)
+                    r = bv + fv;
+                else if (abr == 2)
+                    r = bv - fv;
+                else if (abr == 3)
+                    r = bv + fv / 4;
+                else
+                    r = (bv + fv) / 2;
+                d[k] = (uint8_t)CLAMP255(r);
+            }
+            P->pintados++;
+        }
+    }
+}
+
+/* Un cuadro de PS1 (TL, TR, BL, BR) con su z por esquina, o la Z de fondo si es NULL. */
+static void cuadro_destello(Pista *P, const GameHost *h, const uint16_t *texbuf,
+                            const OverlayQuad *q, const float *z, float sx, float sy)
+{
+    const TexEntry *e;
+    GV v[4];
+    int k;
+
+    if (q->kind != OVL_QUAD)
+        return;
+    e = q->has_tex ? tex_find(&h->texcache, q->tex.tpage, q->tex.clut) : NULL;
+    if (q->has_tex && e == NULL)
+        return;
+    for (k = 0; k < 4; k++) {
+        v[k].x = (float)q->pts[k][0] * sx;
+        v[k].y = (float)q->pts[k][1] * sy;
+        v[k].z = z != NULL ? z[k] : 0.0001f;
+        v[k].r = (int)(q->colours[k] & 0xFFu);
+        v[k].g = (int)((q->colours[k] >> 8) & 0xFFu);
+        v[k].b = (int)((q->colours[k] >> 16) & 0xFFu);
+        v[k].u = q->has_tex ? q->tex.uv[k][0] : 0;
+        v[k].v = q->has_tex ? q->tex.uv[k][1] : 0;
+    }
+    tri_destello(P, &v[0], &v[1], &v[2], e, texbuf, q->semi, q->abr);
+    tri_destello(P, &v[1], &v[3], &v[2], e, texbuf, q->semi, q->abr);
+}
+
 static void emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
 {
     Pista *P = (Pista *)user;
@@ -315,8 +432,8 @@ static void emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
         tri_pista(P, &v[0], &v[k - 1u], &v[k]);
 }
 
-int raster_track(const GameHost *h, const Track *track, const char *path,
-                 int w, int hh)
+int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
+                 const char *path, int w, int hh)
 {
     static uint8_t rgb[640 * 480 * 3];
     static float zbuf[640 * 480];
@@ -371,6 +488,14 @@ int raster_track(const GameHost *h, const Track *track, const char *path,
     P.cielo = 1;
     sky_draw(track, &h->sky, &vista, (float)w, (float)hh, emite, &P, &sst);
     P.cielo = 0;
+    /* el flare del sol, sobre el cielo y debajo del mundo (Z de fondo) */
+    if (h->display[2] != 0u && h->display[3] != 0u && getenv("PS1_CAMBACK") == NULL) {
+        uint32_t i;
+
+        for (i = 0; i < h->sky_quads_n; i++)
+            cuadro_destello(&P, h, texbuf, &h->sky_quad[i], NULL,
+                            (float)w / (float)h->display[2], (float)hh / (float)h->display[3]);
+    }
     track_draw(track, &vista, h->light_ok ? h->light_table : NULL,
                (float)w, (float)hh, emite, &P, &st);
     objects_draw(track, h->objects, h->objects_n, &vista,
@@ -436,6 +561,36 @@ int raster_track(const GameHost *h, const Track *track, const char *path,
         P.resta = 0;
         P.zmul = 1.0f;
         P.atlas = track->atlas; P.aw = track->atlas_w; P.ah = track->atlas_h;
+    }
+    /* Los destellos, encima de lo restado. Con PS1_CAMBACK no: son 2D de la camara del
+     * juego y no se moverian con la otra. */
+    if (h->display[2] != 0u && h->display[3] != 0u && getenv("PS1_CAMBACK") == NULL &&
+        getenv("PS1_NOFX") == NULL) {
+        static float zg[GLOW_QUADS_MAX * 4u];
+        float sx = (float)w / (float)h->display[2], sy = (float)hh / (float)h->display[3];
+        uint32_t i, k, vistos = 0, antes = P.pintados;
+        int pase;
+
+        /* primero los que mezclan o suman y despues los que restan, como en Dreamcast */
+        for (pase = 0; pase < 2; pase++) {
+            for (i = 0; i < h->glows_n; i++) {
+                const Glow *g = &h->glows[i];
+
+                if (!glow_depth(&h->view[0], g, &h->glow_quad[g->first], &zg[g->first * 4u]))
+                    continue;
+                vistos += (pase == 0);
+                for (k = 0; k < g->n; k++) {
+                    const OverlayQuad *q = &h->glow_quad[g->first + k];
+                    int resta = q->semi && q->abr == 2u;
+
+                    if (resta == pase)
+                        cuadro_destello(&P, h, texbuf, q, &zg[(g->first + k) * 4u], sx, sy);
+                }
+            }
+        }
+        printf("  destellos: %u de %u delante de la camara, %u pixeles; flare del sol %u cuadros\n",
+               (unsigned)vistos, (unsigned)h->glows_n, (unsigned)(P.pintados - antes),
+               (unsigned)h->sky_quads_n);
     }
     printf("  efectos restados: %u triangulos, marcas de neumatico: %u de %u\n",
            (unsigned)efectos_tri, (unsigned)marcas_tri, (unsigned)h->skids_n);

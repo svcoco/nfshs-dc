@@ -1,18 +1,25 @@
 """Compara la vista de carrera y los objetos del escenario del port contra la referencia.
 
 Es el oraculo de la vista (M2b paso 1), los objetos (M2c paso 1) y los coches
-(M2c paso 3). Los coches se comparan **en crudo**, palabra a palabra (99 por coche),
+(M2c paso 3), y de las marcas de neumatico y los destellos (M2c paso 6). Los coches se comparan **en crudo**, palabra a palabra (99 por coche),
 que es mas estricto que comparar campos. El juego
 no construye el mundo en su RAM: deja preparada la camara, dice que trozos de pista se
 ven y **dibuja** los objetos. Si esta captura coincide, el port tiene los datos correctos
 aunque todavia no los dibuje.
 
-Formato en dc/src/host/game.c y src/dev/mod.rs (NFSHS_DIFF_VIEW), version 2.
+Formato en dc/src/host/game.c y src/dev/mod.rs (NFSHS_DIFF_VIEW), version 5.
 
     uso: python -I dc/test/diff/cmpview.py <c.view> <rust.view> [--max N]
 """
 import struct
 import sys
+
+CUADRO = 56   # un cuadro 2D, como en el volcado de la lista de dibujo
+
+
+def cuadros(d, o, n):
+    """n cuadros 2D en crudo (se comparan byte a byte)."""
+    return [d[o + CUADRO * i:o + CUADRO * (i + 1)] for i in range(n)], o + CUADRO * n
 
 
 def leer(path):
@@ -21,8 +28,8 @@ def leer(path):
     if d[:4] != b'NFSV':
         raise SystemExit(f'{path}: no es un volcado de vista de carrera')
     version, = struct.unpack_from('<I', d, 4)
-    if version != 4:
-        raise SystemExit(f'{path}: version {version}, esperaba 4')
+    if version != 5:
+        raise SystemExit(f'{path}: version {version}, esperaba 5')
     o, frames = 8, {}
     while o + 8 <= len(d):
         frame, nv = struct.unpack_from('<II', d, o)
@@ -55,7 +62,19 @@ def leer(path):
         for _ in range(n):
             marcas.append(struct.unpack_from('<12i2IHh', d, o))
             o += 12 * 4 + 2 * 4 + 4
-        frames[frame] = (vistas, objetos, coches, marcas)
+        n, = struct.unpack_from('<I', d, o); o += 4
+        destellos = []
+        for _ in range(n):
+            ancla = struct.unpack_from('<3i', d, o)
+            coche, humo, nq = struct.unpack_from('<IBxH', d, o + 12)
+            o += 20
+            qs, o = cuadros(d, o, nq)
+            destellos.append((ancla, coche, humo, qs))
+        n, = struct.unpack_from('<I', d, o); o += 4
+        sol, o = cuadros(d, o, n)
+        n, = struct.unpack_from('<I', d, o); o += 4
+        clima, o = cuadros(d, o, n)
+        frames[frame] = (vistas, objetos, coches, marcas, destellos, sol, clima)
         if o > len(d):
             raise SystemExit(f'{path}: volcado truncado')
     return frames
@@ -78,13 +97,18 @@ def main(argv):
     objetos = sum(len(a[f][1]) for f in comunes)
     coches = sum(len(a[f][2]) // 99 for f in comunes)
     marcas = sum(len(a[f][3]) for f in comunes)
+    destellos = sum(len(a[f][4]) for f in comunes)
+    humo = sum(sum(g[2] for g in a[f][4]) for f in comunes)
+    halos = sum(sum(g[1] != 0 for g in a[f][4]) for f in comunes)
+    sol = sum(len(a[f][5]) for f in comunes)
+    clima = sum(len(a[f][6]) for f in comunes)
     if vistas == 0 and objetos == 0 and coches == 0 and marcas == 0:
         print('  sin vistas de carrera en el guion: nada que comparar')
         return 0
 
     fallos = 0
     for f in comunes:
-        (va, oa, ca, ma), (vb, ob, cb, mb) = a[f], b[f]
+        (va, oa, ca, ma, ga, sa, wa), (vb, ob, cb, mb, gb, sb, wb) = a[f], b[f]
         if len(va) != len(vb):
             print(f'  frame {f}: {len(va)} vistas contra {len(vb)}')
             fallos += 1
@@ -122,15 +146,32 @@ def main(argv):
                 print(f'    C   {ma[k]}')
                 print(f'    ref {mb[k]}')
             fallos += 1
+        if ga != gb:
+            if len(ga) != len(gb):
+                print(f'  frame {f}: {len(ga)} destellos contra {len(gb)}')
+            else:
+                k = next(i for i in range(len(ga)) if ga[i] != gb[i])
+                x, y = ga[k], gb[k]
+                print(f'  frame {f} destello {k} de {len(ga)}: ancla {x[0]} / {y[0]}, '
+                      f'coche {x[1]:#x} / {y[1]:#x}, humo {x[2]} / {y[2]}, '
+                      f'{len(x[3])} / {len(y[3])} cuadros')
+            fallos += 1
+        for nombre, x, y in (('flare del sol', sa, sb), ('clima', wa, wb)):
+            if x != y:
+                print(f'  frame {f}: {nombre}, {len(x)} cuadros contra {len(y)}'
+                      + ('' if len(x) != len(y) else ' (distintos)'))
+                fallos += 1
         if fallos >= tope:
             print(f'  ... (cortado en {tope} diferencias)')
             break
 
     if fallos:
-        print(f'\nFALLO: {fallos} frames con la vista, los objetos o los coches distintos')
+        print(f'\nFALLO: {fallos} diferencias en la vista, los objetos, los coches, las marcas o los destellos')
         return 1
     print(f'\nOK: {vistas} vistas, {objetos} objetos, {coches} coches y {marcas} marcas identicos '
           f'en {len(comunes)} frames')
+    print(f'OK: {destellos} destellos identicos ({halos} halos de coche, {humo} bocanadas de humo), '
+          f'{sol} cuadros del flare del sol y {clima} de clima')
     return 0
 
 

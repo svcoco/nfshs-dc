@@ -20,7 +20,7 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
-| **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se dibuja entera con HUD, a 30–43 fps**; paso 6 en curso: hechas las sombras, las líneas pintadas y las marcas de neumático |
+| **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se dibuja entera con HUD, a 30–43 fps**; paso 6 en curso: faltan el clima y los reflejos |
 | M3, M4, M5 | Sin empezar |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
@@ -30,8 +30,8 @@ velocidad, marcha, tacómetro con aguja y mapa—, con las texturas y el color d
 original. En carrera da **30–43 fps** en Flycast; el coste no está en dibujar sino en
 **grabar los coches** (código real del juego cada frame), que es trabajo de M3. Del paso 6
 de M2c (los efectos) ya se dibujan las **sombras** de los coches, las **líneas pintadas** de
-la carretera y las **marcas de neumático**; faltan destellos y halos de luces, humo, clima y
-reflejos.
+la carretera, las **marcas de neumático**, los **destellos** de las farolas, los **halos** de
+faros y frenos, el **humo** y el **flare del sol**; faltan el clima y los reflejos.
 
 ---
 
@@ -380,7 +380,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 3 | Grabación de los coches | **Hecho**, validado palabra a palabra |
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
-| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **En curso**: hechas las sombras, las líneas pintadas y las marcas de neumático |
+| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **En curso**: faltan el clima y los reflejos |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -489,7 +489,45 @@ idénticas en 5 000 frames de `race_long`, y 457 416 en 2 800 de `derrape`—. E
 tiene oráculo: se mide. Marcas, con y sin el efecto, en el arnés de PC: **13,3 niveles de
 oscurecimiento de media**, que es lo que resta la PS1 (`26/255 × 0x40/0x80 = 13`).
 
-**Faltan:** destellos y halos de luces, humo, clima y los reflejos.
+**Destellos, halos, humo y el flare del sol: 2D del propio juego.** El original no los
+construye como geometría sino como cuadros de pantalla alrededor de un punto del mundo:
+`BWorld_BuildGlareEffects` (farolas), `DrawC_PrimHalo` (faros y frenos), `Souffle_InsertFacet`
+(humo y polvo) y `Flare_Sun`. El host los corre anidados, como la referencia, y graba lo que
+escriben en el buffer de primitivas junto con el punto del que sale cada uno. **Como la
+cámara del port es la del juego, caen exactamente donde los puso el original**: la
+referencia tiene que moverlos porque su cámara está suavizada, el port no. Lo único que se
+les añade es una profundidad, para que el PVR los pruebe contra lo opaco (`GEQUAL`, sin
+escribir), con la regla de la referencia:
+
+| Qué | Profundidad |
+|---|---|
+| farola | un poco por delante de la luz (el doble de su tamaño más 1 m, como mucho la mitad de la distancia) |
+| halo de coche | por delante del coche entero (el radio de su caja más 0,2 m) |
+| bocanada | 0,5 m por delante, y por debajo del ancla, la de la carretera que tapa |
+| flare del sol | la del plano de fondo (0,0001): pasa sobre el cielo y lo tapa el mundo |
+
+Casi todo **suma** (modo 1): 10 062 cuadros de farola, 12 136 de halo y 602 de humo en
+`race_long`, contra **5** cuadros de humo que restan, que van con su propia caja de
+invertir, sumar e invertir.
+
+**El orden de las llamadas importa.** Grabar paquetes mueve el modo de dibujo vigente, y el
+HUD que se graba después depende de él. Por eso el port corre también `Weather_Render` y
+graba el clima en su sitio, aunque dibujarlo sea otro paso. Con eso el HUD sigue idéntico.
+
+**Con oráculo**, que se amplió (volcado de vista versión 5): **2 071 destellos idénticos**
+en `race_long` (586 halos, 607 bocanadas) y 825 en `derrape`, y **29 038 cuadros del flare
+del sol** idénticos. El clima sale con 0 cuadros en las dos: esta pista no tiene, así que
+**su grabación no tiene oráculo todavía**.
+
+**Visto, no supuesto:** en Flycast la farola brilla con su estrella sobre el farol, y en el
+arnés de PC (que ahora también los dibuja) los halos de freno caen sobre los pilotos del
+coche de delante y el polvo que levanta aclara **24 niveles de media** sin que la carretera
+le corte la base.
+
+De paso se corrigió el **modo 3** de PS1 (`B + F/4`) en el 2D: se dibujaba como `B + F/2`.
+
+**Falta:** el clima (grabado pero sin dibujar, y sin una pista con clima para probarlo) y
+los reflejos.
 
 ### Paso 5: el HUD
 

@@ -137,6 +137,24 @@ typedef struct SkidQuad {
     int16_t  slice;            /* seccion de pista a la que pertenece el segmento */
 } SkidQuad;
 
+/* Los destellos (M2c paso 6): lo que el juego construye como 2D alrededor de un punto
+ * del mundo. Las farolas de la pista (BWorld_BuildGlareEffects), el humo y el polvo de las
+ * ruedas (Souffle_InsertFacet) y los halos de faros y frenos de los coches
+ * (DrawC_PrimHalo). Se graban sus primitivas tal cual, en pantalla de PS1, y el punto del
+ * que salen, que es lo que da su profundidad al dibujarlas. */
+#define GLOWS_MAX       256u
+#define GLOW_QUADS_MAX 1024u
+#define SKY_QUADS_MAX    64u
+#define WEATHER_QUADS_MAX 512u
+
+typedef struct Glow {
+    int32_t  anchor[3];        /* 16.16, ejes de PS1 */
+    uint32_t car;              /* Car_tObj si es un halo de coche; 0 si no */
+    uint8_t  smoke;            /* bocanada de humo o polvo (Sfx_BuildSouffleFacet) */
+    uint16_t first, n;         /* sus cuadros en glow_quad[] */
+    float    radius;           /* halo de coche: el radio de su caja, en metros */
+} Glow;
+
 #define HUD_LISTS_MAX  16u
 #define DRAW_ENVS_MAX  64u
 
@@ -273,6 +291,21 @@ typedef struct GameHost {
     SkidQuad skids[SKIDS_MAX];
     uint32_t skids_n, skids_max;
     uint64_t skids_lost;
+    /* Los destellos del frame (ver Glow), en el orden de la referencia: farolas, humo y
+     * despues los halos de los coches. El flare del sol y el clima son 2D sin ancla. */
+    Glow        glows[GLOWS_MAX];
+    uint32_t    glows_n;
+    OverlayQuad glow_quad[GLOW_QUADS_MAX];
+    uint32_t    glow_quads_n;
+    OverlayQuad sky_quad[SKY_QUADS_MAX];
+    uint32_t    sky_quads_n;
+    OverlayQuad weather_quad[WEATHER_QUADS_MAX];
+    uint32_t    weather_quads_n;
+    uint64_t    glows_lost;   /* cuadros que no cupieron; si no es 0, suben los topes */
+    /* Los tramos del buffer de primitivas con los halos de cada coche: se graban todos al
+     * terminar los coches, como la referencia, porque el orden fija el modo de dibujo. */
+    uint32_t    halo_rng[16][3];         /* inicio, fin, Car_tObj */
+    uint32_t    halo_rng_n;
     uint32_t cars_cap_buf[CAR_CAPTURE_MAX];
     uint32_t cars_cap;        /* palabras escritas */
     uint32_t cars_n;          /* coches anotados */
@@ -368,6 +401,12 @@ void host_record_cars(GameHost *h, Cpu *c);
 
 /* Lee las marcas de neumatico de la RAM del juego. */
 void host_read_skids(GameHost *h, Cpu *c);
+/* glows.c: las farolas, el humo, el clima y el flare del sol de la vista que se graba
+ * (llamar tras los objetos, con la lista de trozos ya hecha), y los halos de los coches
+ * (tras host_record_cars). */
+void host_record_glows(GameHost *h, Cpu *c, uint32_t chunks);
+void host_record_halos(GameHost *h, Cpu *c);
+void host_glows_reset(GameHost *h);
 
 /* El HUD de carrera: grabar una tabla de ordenacion en DrawOTag, y componer las del
  * frame en la frontera. Ver overlay.c. */
@@ -402,6 +441,7 @@ int  pad_load_script(GameHost *h, const char *path);
 int  overlay_dump_open(GameHost *h, const char *path);
 void overlay_dump_frame(GameHost *h);
 void overlay_dump_close(GameHost *h);
+void overlay_dump_quad(FILE *f, const OverlayQuad *q);
 
 /* Volcado de la VISTA DE CARRERA por frame: el oraculo del paso 1 de M2b. La referencia
  * escribe el mismo formato con NFSHS_DIFF_VIEW. */

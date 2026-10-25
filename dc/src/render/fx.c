@@ -117,3 +117,130 @@ void skids_draw(const Track *t, const struct SkidQuad *sk, uint32_t n,
         }
     }
 }
+
+/* ---- la profundidad de los destellos ---- */
+
+static float punto3(const float *a, const float *b)
+{
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+/* Inversa de una 3x3 por cofactores; 0 si es singular. */
+static int inversa3(const float m[3][3], float o[3][3])
+{
+    float det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+                m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    float k;
+
+    if (det > -1e-9f && det < 1e-9f)
+        return 0;
+    k = 1.0f / det;
+    o[0][0] = (m[1][1] * m[2][2] - m[1][2] * m[2][1]) * k;
+    o[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) * k;
+    o[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * k;
+    o[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) * k;
+    o[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * k;
+    o[1][2] = (m[0][2] * m[1][0] - m[0][0] * m[1][2]) * k;
+    o[2][0] = (m[1][0] * m[2][1] - m[1][1] * m[2][0]) * k;
+    o[2][1] = (m[0][1] * m[2][0] - m[0][0] * m[2][1]) * k;
+    o[2][2] = (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * k;
+    return 1;
+}
+
+int glow_depth(const struct RaceView *view, const struct Glow *g, const OverlayQuad *q,
+               float *z)
+{
+    /* Todo en ejes de PS1, que es como vienen el ancla y la camara: aqui no se espeja X,
+     * porque no se toca el mundo horneado. */
+    float pw = view->rect[2] > 0 ? (float)view->rect[2] : 320.0f;
+    float ph = view->rect[3] > 0 ? (float)view->rect[3] : 240.0f;
+    float focal = view->projection != 0u ? (float)view->projection : 190.0f;
+    float cam[3], d[3], r[3][3], adelante, cz, dist;
+    uint32_t i, k, n = (uint32_t)g->n * 4u;
+
+    for (i = 0; i < 3u; i++) {
+        cam[i] = (float)view->camera_pos[i] / 65536.0f;
+        d[i] = (float)g->anchor[i] / 65536.0f - cam[i];
+        for (k = 0; k < 3u; k++)
+            r[i][k] = (float)view->camera_rot[i * 3u + k];
+    }
+    /* como en view_init: "adelante" unitaria, y el aplastamiento de "arriba" se conserva */
+    adelante = sqrtf(punto3(r[2], r[2]));
+    if (adelante < 1e-6f)
+        return 0;
+    for (i = 0; i < 3u; i++)
+        for (k = 0; k < 3u; k++)
+            r[i][k] /= adelante;
+    cz = punto3(r[2], d);
+    dist = sqrtf(punto3(d, d));
+    if (cz < 0.3f || dist < 1e-3f)
+        return 0;
+
+    if (!g->smoke) {
+        float hacia, zf;
+
+        if (g->car != 0u) {
+            hacia = g->radius + 0.2f;
+        } else {
+            /* su tamano en el mundo, a partir del que tiene en pantalla */
+            float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f, medio;
+
+            for (i = 0; i < g->n; i++) {
+                if (q[i].kind != OVL_QUAD)
+                    continue;
+                for (k = 0; k < 4u; k++) {
+                    float x = (float)q[i].pts[k][0], y = (float)q[i].pts[k][1];
+
+                    if (x < x0) x0 = x;
+                    if (x > x1) x1 = x;
+                    if (y < y0) y0 = y;
+                    if (y > y1) y1 = y;
+                }
+            }
+            medio = (x1 >= x0) ? 0.5f * fmaxf(x1 - x0, y1 - y0) : 0.0f;
+            hacia = 2.0f * (medio * dist / focal) + 1.0f;
+            if (hacia > dist * 0.5f)
+                hacia = dist * 0.5f;
+        }
+        if (hacia > dist * 0.9f)
+            hacia = dist * 0.9f;
+        zf = 1.0f / (cz * (1.0f - hacia / dist));
+        for (i = 0; i < n; i++)
+            z[i] = zf;
+        return 1;
+    }
+
+    /* la bocanada */
+    {
+        float zc = cz * (1.0f - 0.5f / dist), m[3][3], plano;
+
+        if (zc < 0.1f)
+            zc = 0.1f;
+        plano = (float)g->anchor[1] / 65536.0f + 0.05f;   /* y crece hacia arriba */
+        if (!inversa3(r, m)) {
+            for (i = 0; i < n; i++)
+                z[i] = 1.0f / zc;
+            return 1;
+        }
+        for (i = 0; i < g->n; i++) {
+            for (k = 0; k < 4u; k++) {
+                /* el rayo de esa esquina: en camara (a, b, 1), en el mundo m * (a, b, 1);
+                 * como adelante * rayo = 1, la t del corte con el suelo es su profundidad */
+                float a = ((float)q[i].pts[k][0] - pw * 0.5f) / focal;
+                float b = -((float)q[i].pts[k][1] - ph * 0.5f) / focal;
+                float ry = m[1][0] * a + m[1][1] * b + m[1][2];
+                float zv = 1.0f / zc;
+
+                if (ry < -1e-4f) {
+                    float t = (plano - cam[1]) / ry;
+
+                    if (t > 0.1f && 1.0f / t > zv)
+                        zv = 1.0f / t;
+                }
+                z[i * 4u + k] = zv;
+            }
+        }
+    }
+    return 1;
+}

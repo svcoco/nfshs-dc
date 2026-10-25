@@ -20,7 +20,9 @@ hechos**: el front end **se dibuja con el PVR en Dreamcast a ~60 fps**, completo
 legible; queda mirarlo en 480i en una tele, que es el criterio de salida del hito.
 **M2b también está hecho en emulador**: la carrera se dibuja —pista, cielo y objetos del
 escenario— a **60 fps**. **M2c va por el paso 5 de 6**: coches, objetos y HUD se dibujan
-en Dreamcast a 30-43 fps, todo validado contra la referencia; faltan los efectos.**
+en Dreamcast a 30-43 fps, todo validado contra la referencia. Del paso 6 (efectos) ya
+están sombras, líneas pintadas, marcas de neumático, destellos de farolas, halos de los
+coches, humo y el flare del sol; faltan el clima y los reflejos.**
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y
@@ -129,7 +131,7 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 | M1b | Cross-compilar a SH-4 (KOS, `-m4-single`) + host mínimo (archivos, pad, timers, VSync, BIOS) | **Hecho en Flycast con BIOS real (2026-10-23).** Arranca desde CDI; front end a 69–78 fps y carrera simulando a **98–113 fps**; `.text` de 3,43 MB con `-Os`, ELF `text 3,8 MB / bss 4,85 MB`; 227/227 unitarias en SH-4. Falta quemarlo y probarlo en una consola |
 | M2a | Grabación en C + modos 480p/480i + 2D en PVR + espejo de VRAM y texturas | Front end navegable y legible en ambos modos |
 | M2b | Pista y cielo en PVR (transformación en SH-4, recorte por plano cercano) | **Hecho en emulador (2026-10-23).** La carrera se dibuja a **60 fps** con ~1 150 triángulos de pista y 104 de cielo. La transformación va en C con `float`, **sin FTRV**: esa optimización queda para M3 y ahora hay con qué medirla (`docs/hitos/M2b.md`) |
-| M2c | Coches, props y efectos | **En curso (pasos 1-5 de 6).** Objetos, coches y HUD grabados y validados contra la referencia y dibujados; la carrera se juega con HUD a 30-43 fps. Faltan los efectos. Carrera completa de un jugador (`docs/hitos/M2c.md`) |
+| M2c | Coches, props y efectos | **En curso (pasos 1-5 de 6).** Objetos, coches y HUD grabados y validados contra la referencia y dibujados; la carrera se juega con HUD a 30-43 fps. Del paso 6 faltan el clima y los reflejos. Carrera completa de un jugador (`docs/hitos/M2c.md`) |
 | M3 | Optimización (codegen, SH-4 a mano en hooks, LOD) + audio SPU→AICA | **30 fps sostenidos** en carrera como mínimo, sin tope por arriba (60 es el objetivo ideal); música, motor y efectos |
 | M4 "Enhancements" | Escalado de texturas horneado en el PC | Texturas de pista, coches y HUD escaladas dentro del presupuesto de VRAM, con respaldo a las originales |
 | M5 | Motor NFSHS preparado: VMU, rumble, FMV, 2P, pulido, build con el disco del usuario, packs de texturas externos | Motor jugable de punta a punta con el disco del usuario y un pack de texturas distribuido aparte |

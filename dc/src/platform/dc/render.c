@@ -40,7 +40,7 @@ static uint16_t  tex_staging[TEX_TEXELS];
 static pvr_ptr_t tex_vram;
 static uint64_t  subidas_vistas = (uint64_t)-1;   /* para saber cuando resubir */
 
-static uint64_t s_frames, s_quads, s_strips;
+static uint64_t s_frames, s_quads, s_strips, s_quads_destellos;
 
 /* ---- la pista (M2b paso 3) ----
  *
@@ -474,6 +474,7 @@ uint16_t *render_texbuf(void)   { return tex_staging; }
 uint32_t  render_texcap(void)   { return TEX_TEXELS; }
 uint64_t  render_frames(void)   { return s_frames; }
 uint64_t  render_quads(void)    { return s_quads; }
+uint64_t  render_glow_quads(void) { return s_quads_destellos; }
 
 int render_init(void)
 {
@@ -607,7 +608,7 @@ static uint32_t color_de(const OverlayQuad *q, int k, int semi)
     if (r > 255u) r = 255u;
     if (g > 255u) g = 255u;
     if (b > 255u) b = 255u;
-    return ((uint32_t)(semi ? 128u : 255u) << 24) | (r << 16) | (g << 8) | b;
+    return ((uint32_t)(!semi ? 255u : q->abr == 3u ? 64u : 128u) << 24) | (r << 16) | (g << 8) | b;
 }
 
 static void modo_mezcla(pvr_poly_cxt_t *cxt, int semi, uint8_t abr)
@@ -634,6 +635,135 @@ static void modo_mezcla(pvr_poly_cxt_t *cxt, int semi, uint8_t abr)
     }
 }
 
+/* ---- los destellos (M2c paso 6) ----
+ *
+ * Farolas, halos de los coches, humo y el flare del sol: 2D que el juego construye
+ * alrededor de un punto del mundo, grabado tal cual (host/glows.c). La camara del port es
+ * la del juego, asi que caen donde los puso el original; lo que se les anade es una
+ * profundidad (glow_depth), con la que el PVR los prueba contra lo opaco sin escribirla.
+ *
+ * `z` es NULL para el flare del sol: va a la profundidad del plano de fondo (la que deja
+ * el cielo, que no escribe Z), asi que pasa donde solo hay cielo y lo tapa el mundo. Con
+ * `sumar`, el cuadro se suma sin mas (ONE / ONE): es el paso del medio de la resta exacta.
+ */
+#define Z_FONDO 0.0001f       /* el plano de fondo de KOS (pvr_state.zclip) */
+
+static void destello_quad(GameHost *h, const OverlayQuad *q, float sx, float sy,
+                          const float *z, int sumar)
+{
+    const TexEntry *e;
+    pvr_poly_cxt_t cxt;
+    pvr_poly_hdr_t hdr;
+    pvr_vertex_t v;
+    int k;
+
+    if (q->kind != OVL_QUAD)
+        return;
+    e = q->has_tex ? tex_find(&h->texcache, q->tex.tpage, q->tex.clut) : NULL;
+    if (q->has_tex && e == NULL)
+        return;
+    if (e != NULL)
+        pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
+                         PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
+                         e->w, e->h, (pvr_ptr_t)((uint8_t *)tex_vram + e->offset * 2u),
+                         PVR_FILTER_NONE);
+    else
+        pvr_poly_cxt_col(&cxt, PVR_LIST_TR_POLY);
+    cxt.depth.comparison = PVR_DEPTHCMP_GEQUAL;
+    cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+    cxt.gen.culling = PVR_CULLING_NONE;
+    if (sumar) {
+        cxt.blend.src = PVR_BLEND_ONE;
+        cxt.blend.dst = PVR_BLEND_ONE;
+    } else {
+        modo_mezcla(&cxt, q->semi, q->abr);
+    }
+    pvr_poly_compile(&hdr, &cxt);
+    pvr_prim(&hdr, sizeof(hdr));
+
+    /* el orden de PS1 (TL, TR, BL, BR) ya es el de una tira */
+    v.flags = PVR_CMD_VERTEX;
+    v.oargb = 0;
+    for (k = 0; k < 4; k++) {
+        if (k == 3)
+            v.flags = PVR_CMD_VERTEX_EOL;
+        v.x = (float)q->pts[k][0] * sx;
+        v.y = (float)q->pts[k][1] * sy;
+        v.z = z != NULL ? z[k] : Z_FONDO;
+        v.u = e != NULL ? ((float)q->tex.uv[k][0] - (float)e->u0) / (float)e->w : 0.0f;
+        v.v = e != NULL ? ((float)q->tex.uv[k][1] - (float)e->v0) / (float)e->h : 0.0f;
+        v.argb = color_de(q, k, q->semi);
+        pvr_prim(&v, sizeof(v));
+    }
+    s_quads_destellos++;
+}
+
+static int resta(const OverlayQuad *q)
+{
+    return q->kind == OVL_QUAD && q->semi && q->abr == 2u;
+}
+
+/* Los destellos de la vista: primero los que mezclan o suman, y despues los que restan (el
+ * humo oscuro), con su propia caja de invertir, sumar e invertir. */
+static void destellos_dibuja(GameHost *h, float sx, float sy)
+{
+    static float z[GLOW_QUADS_MAX * 4u];
+    static uint8_t vale[GLOWS_MAX];
+    float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+    uint32_t i, k, c;
+    int hay_resta = 0;
+
+    if (h->views_n == 0u)
+        return;
+    for (i = 0; i < h->glows_n; i++) {
+        const Glow *g = &h->glows[i];
+
+        vale[i] = (uint8_t)glow_depth(&h->view[0], g, &h->glow_quad[g->first],
+                                      &z[(uint32_t)g->first * 4u]);
+        if (!vale[i])
+            continue;
+        for (k = 0; k < g->n; k++) {
+            const OverlayQuad *q = &h->glow_quad[g->first + k];
+
+            if (!resta(q)) {
+                destello_quad(h, q, sx, sy, &z[(g->first + k) * 4u], 0);
+                continue;
+            }
+            hay_resta = 1;
+            for (c = 0; c < 4u; c++) {
+                float x = (float)q->pts[c][0] * sx, y = (float)q->pts[c][1] * sy;
+
+                if (x < bx0) bx0 = x;
+                if (x > bx1) bx1 = x;
+                if (y < by0) by0 = y;
+                if (y > by1) by1 = y;
+            }
+        }
+    }
+    if (!hay_resta)
+        return;
+    bx0 = floorf(bx0) - 1.0f; by0 = floorf(by0) - 1.0f;
+    bx1 = ceilf(bx1) + 1.0f;  by1 = ceilf(by1) + 1.0f;
+    if (bx0 < 0.0f) bx0 = 0.0f;
+    if (by0 < 0.0f) by0 = 0.0f;
+    if (bx1 > 640.0f) bx1 = 640.0f;
+    if (by1 > 480.0f) by1 = 480.0f;
+    if (bx1 <= bx0 || by1 <= by0)
+        return;
+    inversion(bx0, by0, bx1, by1);
+    for (i = 0; i < h->glows_n; i++) {
+        const Glow *g = &h->glows[i];
+
+        if (!vale[i])
+            continue;
+        for (k = 0; k < g->n; k++)
+            if (resta(&h->glow_quad[g->first + k]))
+                destello_quad(h, &h->glow_quad[g->first + k], sx, sy,
+                              &z[(g->first + k) * 4u], 1);
+    }
+    inversion(bx0, by0, bx1, by1);
+}
+
 void render_frame(GameHost *h)
 {
     float sx, sy, z = 1.0f;
@@ -658,8 +788,14 @@ void render_frame(GameHost *h)
     /* Primero el mundo, opaco y con Z; despues el overlay 2D encima. */
     pista_dibuja(h);
     pvr_list_begin(PVR_LIST_TR_POLY);
+    /* el flare del sol: sobre el cielo y debajo del mundo */
+    if (h->views_n != 0u)
+        for (i = 0; i < h->sky_quads_n; i++)
+            destello_quad(h, &h->sky_quad[i], sx, sy, NULL, 0);
     /* lo que se resta, antes del 2D para que este quede encima */
     efectos_dibuja(h);
+    /* los destellos, encima de lo restado y debajo del HUD, como en la referencia */
+    destellos_dibuja(h, sx, sy);
 
     for (i = h->overlay.n; i > 0u; i--) {
         const OverlayQuad *q = &h->overlay.quad[i - 1u];

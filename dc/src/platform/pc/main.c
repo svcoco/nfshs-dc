@@ -39,7 +39,7 @@ static void pc_on_frame(GameHost *h)
     if (track_file != NULL && h->frames == track_frame) {
         if (track.raw == NULL && !track_load(&track, track_trk))
             fprintf(stderr, "no pude cargar la pista horneada %s\n", track_trk);
-        else if (raster_track(h, &track, track_file, 640, 480))
+        else if (host_build_textures(h), raster_track(h, &track, texbuf, track_file, 640, 480))
             printf("frame %llu: pista dibujada en %s\n",
                    (unsigned long long)h->frames, track_file);
     }

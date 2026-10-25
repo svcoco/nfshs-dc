@@ -23,6 +23,51 @@ Por eso el plan las separa en el tiempo:
 El coste de este orden es que se tarda más en ver algo en pantalla. El beneficio quedó
 demostrado en M1a, y está documentado abajo.
 
+## Objetivo de arquitectura: todo lo gráfico pasa por el middleware del PVR
+
+**Objetivo (decisión de Jorge, 2026-10-25):** todo lo gráfico lo maneja el middleware de
+renderizado del PVR. La única salvedad admisible es que **por problemas de rendimiento no
+sea posible**: entonces se mide, se documenta como excepción en «Abierto» de la bitácora y
+decide Jorge. No se hace por cuenta propia.
+
+**Por qué, dos razones:**
+
+1. **Poder cambiar texturas y modelos.** En una fase posterior, todavía sin definir en
+   detalle ni incluida en el plan, el port deberá admitir texturas y modelos sustituidos.
+   Eso solo es posible si **todo** lo que se ve sale del mismo camino y de los mismos
+   formatos. Si un trozo se dibujara por otra vía, aunque fuera pequeño, un pack de texturas
+   o un modelo nuevo tendría que tocarse también ahí, y se rompería la promesa. Hoy no se
+   construye esa fase; lo que se exige es **no cerrarle la puerta**.
+2. **Un marco reutilizable para otros proyectos de recompilación estática de juegos de
+   PS1.** La separación que ya tiene el port es la que permite reutilizarlo: el juego decide
+   qué se dibuja → el host lo **graba como datos** (la vista, los objetos, los coches, la
+   lista 2D) → un renderer lo dibuja con el PVR desde assets horneados. Cambiar de juego
+   cambia las grabaciones y los formatos de assets; el camino hasta el PVR es el mismo.
+   **Esto es un objetivo, no un hecho:** hoy es el port de un solo juego, y lo reutilizable
+   no está separado ni extraído todavía.
+
+**Qué significa en la práctica**
+
+- **Lo que el PVR no hace se resuelve con técnicas conocidas del propio PVR**, no con
+  renderizado por software. Ejemplo ya hecho: la resta `B − F` de PS1 (que el PVR no tiene)
+  se logra invirtiendo, sumando F e invirtiendo otra vez, tres mezclas del PVR; es exacta.
+- **Hay una frontera que conviene tener clara.** El SH-4 **transforma y recorta geometría**
+  (el PVR no tiene unidad de geometría, así que es lo normal en Dreamcast), pero **no
+  rasteriza ni compone píxeles**. Eso último es lo que no se hace.
+- **Los assets se cargan por nombre o código desde formatos horneados propios** (`.TRK`,
+  `.CAR`, atlas), con las partes indexadas como las indexa el juego. Sustituir uno es
+  sustituir un archivo, no tocar el renderer.
+- **La interfaz entre la grabación y el renderer se mantiene estable** (CLAUDE.md §5), para
+  poder comparar contra la referencia y para que el renderer sea intercambiable.
+
+**Estado a 2026-10-25:** el front end, la pista, el cielo, los objetos, los coches, el HUD,
+las sombras, las líneas pintadas y las marcas de neumático van por el PVR. **No hay ninguna
+excepción.** Faltan destellos y halos, humo, clima y reflejos, que siguen el mismo camino.
+
+**Una cautela honesta.** Todas las cifras de rendimiento son de Flycast: no hay Dreamcast
+disponible. Si alguna técnica resultara demasiado cara en consola real, esa sería la
+excepción por rendimiento de la que habla el objetivo, y se decidiría con una medida real.
+
 ## Lo que se aprendió en M0 (cerrado 2026-10-18)
 
 Dos cifras cambiaron decisiones, y una pregunta estaba mal planteada:

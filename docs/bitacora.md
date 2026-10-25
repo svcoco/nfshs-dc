@@ -20,7 +20,7 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
-| **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se dibuja entera con HUD, a 30–43 fps**; faltan los efectos |
+| **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se dibuja entera con HUD, a 30–43 fps**; paso 6 en curso: hechas las sombras, las líneas pintadas y las marcas de neumático |
 | M3, M4, M5 | Sin empezar |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
@@ -28,8 +28,10 @@ datos del disco y dibuja con el PVR tanto el **front end** (~60 fps, completo y 
 como la **carrera**: pista, cielo, objetos del escenario, **coches** y **HUD** —cronómetro,
 velocidad, marcha, tacómetro con aguja y mapa—, con las texturas y el color de vértice del
 original. En carrera da **30–43 fps** en Flycast; el coste no está en dibujar sino en
-**grabar los coches** (código real del juego cada frame), que es trabajo de M3. Faltan los
-**efectos** (paso 6 de M2c): sombras, destellos, humo, marcas, clima y líneas pintadas.
+**grabar los coches** (código real del juego cada frame), que es trabajo de M3. Del paso 6
+de M2c (los efectos) ya se dibujan las **sombras** de los coches, las **líneas pintadas** de
+la carretera y las **marcas de neumático**; faltan destellos y halos de luces, humo, clima y
+reflejos.
 
 ---
 
@@ -521,6 +523,10 @@ Las de `CLAUDE.md` §3 siguen en pie. Lo que ha cambiado o se ha precisado:
   software. **Aclaración:** que
   ahora no haya Dreamcast solo impide hacer profiling en hardware real para decidir estos
   efectos; no es una regla general contra medir en consola cuando se tenga.
+- **Objetivo de arquitectura: todo lo gráfico pasa por el middleware del PVR (Jorge,
+  2026-10-25).** Salvo que por rendimiento no sea posible. La razón y lo que implica en la
+  práctica están en `docs/estrategia.md`, sección «Objetivo de arquitectura». Hasta hoy no
+  hay ninguna excepción.
 - **`Render_RenderPlayerView`:** se porta su parte de **lógica** (cámara, trozos de
   pista, HUD) y no su grabación de geometría, que es M2b y M2c.
 

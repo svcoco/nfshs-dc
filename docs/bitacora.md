@@ -494,10 +494,11 @@ Las de `CLAUDE.md` §3 siguen en pie. Lo que ha cambiado o se ha precisado:
 - **Toolchain del AICA:** no se instala. KOS usa su driver precompilado.
 - **Lo que el PVR no hace, se resuelve con técnicas conocidas del PVR (decisión de
   Jorge, 2026-10-25).** Nada de renderizado por software en el SH-4, ni una parte pequeña,
-  porque rompe la arquitectura; y no se escribe nada que dependa de pruebas en hardware
-  real. Por eso lo sustractivo (modo 2 de PS1, `B − F`) se hace con la mezcla del PVR
-  `ZERO` / `INVERSE-OTHER-COLOUR` = `B·(1 − F)`. Descartados: renderizar a textura y restar
-  con el SH-4 (es software, y su coste dependería de medir en consola).
+  porque rompe la arquitectura. Por eso lo sustractivo (modo 2 de PS1, `B − F`) se hace con
+  la mezcla del PVR `ZERO` / `INVERSE-OTHER-COLOUR` = `B·(1 − F)`. Descartado: renderizar a
+  textura y restar con el SH-4, porque es renderizado por software. **Aclaración:** que
+  ahora no haya Dreamcast solo impide hacer profiling en hardware real para decidir estos
+  efectos; no es una regla general contra medir en consola cuando se tenga.
 - **`Render_RenderPlayerView`:** se porta su parte de **lógica** (cámara, trozos de
   pista, HUD) y no su grabación de geometría, que es M2b y M2c.
 

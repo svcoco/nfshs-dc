@@ -155,7 +155,9 @@ Dos cosas que M2c ensenaron y que valen para M3:
 
 **Decision de Jorge (2026-10-25):** lo que el PVR no puede se resuelve con tecnicas
 conocidas del propio PVR, sin renderizado por software en el SH-4 —ni una parte pequena,
-porque rompe la arquitectura— y sin escribir nada que dependa de hardware real. Lo
+porque rompe la arquitectura—. No hay Dreamcast disponible por ahora, asi que no se hace
+profiling en hardware real para decidir estos efectos (aclaracion de Jorge: no es una
+regla general contra medir en consola cuando se tenga). Lo
 sustractivo (`B - F`) se hace con la mezcla `ZERO` / `INVERSE-OTHER-COLOUR`, que da
 `B * (1 - F)`; se verifico dibujando una cuadricula gris del 50 %, no se dio por supuesto.
 Ver `docs/bitacora.md`.

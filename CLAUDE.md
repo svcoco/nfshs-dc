@@ -79,9 +79,11 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
   **Decisión de Jorge (2026-10-25): todo lo que el PVR no hace se resuelve con técnicas
   conocidas del propio PVR; no se escribe renderizado por software en el SH-4, ni siquiera
   una parte pequeña, porque rompe la arquitectura (todo el middleware de render está en el
-  PVR). Tampoco se escribe nada que dependa de pruebas en hardware real.** Lo sustractivo
-  (`B − F`) se hace con factor de origen `ZERO` y de destino `INVERSE-OTHER-COLOUR`, que da
-  `B·(1 − F)`, en la lista translúcida.
+  PVR).** Lo sustractivo (`B − F`) se hace con factor de origen `ZERO` y de destino
+  `INVERSE-OTHER-COLOUR`, que da `B·(1 − F)`, en la lista translúcida. **Aclaración de
+  Jorge: no hay Dreamcast disponible por ahora, así que no se hace profiling en hardware
+  real para decidir estos efectos; se eligen técnicas conocidas.** Esto no prohíbe medir en
+  consola cuando la haya.
 - **Assets:** se hornean en el PC con una herramienta de build que reutiliza `src/formats`
   (Rust) de nfshs-rs. Las texturas quedan twiddled y paletizadas cuando conviene (el PVR
   tiene 1024 entradas de paleta), y las mallas quedan listas para dibujar.

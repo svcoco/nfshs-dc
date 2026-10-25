@@ -134,12 +134,27 @@ Detalle y cifras en `docs/hitos/M2a.md`.
 y todavia **sin FTRV** (la transformacion va en C con `float`), asi que esa optimizacion
 sigue entera disponible para M3.
 
-**M2c va por el paso 3 de 6.** Su patron es el mismo que ya funciono en M2a y M2b, y
+**M2c va por el paso 5 de 6** (objetos, coches y HUD, todo validado). Su patron es el mismo que ya funciono en M2a y M2b, y
 merece quedar escrito porque es la forma de trabajar del proyecto: **lo que tiene oraculo
 va primero**. El juego no deja los objetos ni los coches escritos en su RAM —los dibuja—,
 asi que el port corre su rutina anidada con un hook interno que la sustituye y anota la
 decision. Esa anotacion **se compara contra la referencia** campo a campo (o en crudo,
 palabra a palabra, para los coches) dentro de `make diff`, sin encender un Dreamcast.
 Solo despues se dibuja, que es la parte que hay que mirar con los ojos.
+
+Dos cosas que M2c ensenaron y que valen para M3:
+
+- **El coste de la carrera esta en grabar, no en dibujar.** Con el dibujo de coches
+  apagado el ritmo es el mismo (media 28,6 contra 28,0 fps): la caida de ~60 a 30-40 fps
+  la produce correr codigo real del juego cada frame (`R3DCar_InsertAllListFacet` y, por
+  coche, una segunda pasada entera para los halos, cuyo resultado hoy se tira).
+- **Un oraculo hay que desconfiar tambien de el.** La referencia buscaba el entorno de
+  dibujo en un `HashMap` de semilla aleatoria y daba listas distintas en cada ejecucion;
+  y un comparador que se para a las N diferencias escondio 669 frames de carrera detras de
+  una deuda vieja de los menus. Se arreglaron los dos.
+
+**Pendiente de decision de Jorge:** como resolver lo que el PVR no puede (reflejos y
+sombras sustractivos), y si se mide en consola real el coste de restar con el SH-4 antes
+de elegir. Ver `docs/bitacora.md`, seccion «Abierto».
 
 Detalle y cifras en `docs/hitos/M2b.md` y `docs/hitos/M2c.md`.

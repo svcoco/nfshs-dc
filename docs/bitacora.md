@@ -7,7 +7,7 @@ descartaron no se guardan aquí.
 Se actualiza al cerrar cada paso. El detalle largo vive en `docs/hitos/`; esto es el
 resumen que permite retomar el proyecto sin releerlo todo.
 
-**Última entrada: 2026-10-23.**
+**Última entrada: 2026-10-25.**
 
 ---
 
@@ -20,17 +20,16 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
-| **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se juega con HUD** |
-| M2b, M2c, M3, M4, M5 | Sin empezar |
+| **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se dibuja entera con HUD, a 30–43 fps**; faltan los efectos |
+| M3, M4, M5 | Sin empezar |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
-datos del disco y **dibuja el front end con el PVR a ~60 fps**, legible y completo: el
-menú *game setup*, sus opciones, la foto del coche y el texto de ayuda. La carrera
-**dibuja ya la carrera** a 60 fps: la pista con sus edificios, asfalto, barandillas y
-arbolado, el cielo completo —cúpula y banda de horizonte— y los objetos del escenario
-(cipreses, farolas, arbolado), con las texturas y el color de vértice del original. Lo
-que el juego decide de cada coche ya se graba y está validado; falta **dibujarlos**, el
-HUD y los efectos.
+datos del disco y dibuja con el PVR tanto el **front end** (~60 fps, completo y legible)
+como la **carrera**: pista, cielo, objetos del escenario, **coches** y **HUD** —cronómetro,
+velocidad, marcha, tacómetro con aguja y mapa—, con las texturas y el color de vértice del
+original. En carrera da **30–43 fps** en Flycast; el coste no está en dibujar sino en
+**grabar los coches** (código real del juego cada frame), que es trabajo de M3. Faltan los
+**efectos** (paso 6 de M2c): sombras, destellos, humo, marcas, clima y líneas pintadas.
 
 ---
 
@@ -250,7 +249,7 @@ correr y los **cuenta**, así que el primer guion que los toque lo dirá en el i
 
 ---
 
-## M2b — La pista y el cielo en el PVR (en curso)
+## M2b — La pista y el cielo en el PVR (cerrado en emulador 2026-10-23)
 
 El hito que convierte el negro de la carrera en algo mirable.
 
@@ -562,3 +561,18 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **Alcance:** si la primera versión incluye 2P y FMV.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.
 - **Autor de nfshs-rs:** contacto sobre licencia y posible colaboración.
+- **Reflejos y sombras sustractivos (decisión de Jorge pendiente).** El PVR suma siempre
+  sus dos factores de mezcla: no existe `B − F`, que es el modo 2 de la semitransparencia
+  de PS1. Lo usan los reflejos de los coches y la sombra de los pasos de rueda; hoy esas
+  piezas **no se dibujan**. Alternativas: oscurecer con alfa sobre negro (proporcional,
+  no exacto), volúmenes modificadores (solo sombras), no dibujarlos, o **renderizar a
+  textura y restar con el SH-4** (el más exacto).
+- **Medir el coste de leer VRAM desde el SH-4 en consola real.** Decide si la resta por
+  SH-4 es viable. Era una estimación mía («es caro») y no está medida; Flycast no modela
+  ese coste. KOS ofrece `pvr_scene_begin_rtt()` y los contadores de `perfctr.h`. Se haría
+  con un programa de prueba que lea 640×480 de VRAM y cronometre el ciclo de render a
+  textura, y necesita el CDI quemado.
+- **Modelos y texturas sustituibles** (p. ej. un coche de mayor resolución): **fuera del
+  plan** por decisión de Jorge. El formato `.CAR` ya se carga por código de coche, pero
+  habría que resolver los 57 huecos de partes, los faros y abolladuras por triángulo, el
+  presupuesto de triángulos en el SH-4 y el de VRAM.

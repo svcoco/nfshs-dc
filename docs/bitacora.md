@@ -378,7 +378,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 3 | Grabación de los coches | **Hecho**, validado palabra a palabra |
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
-| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **En curso**: hechas las sombras restadas (coches y pasos de rueda) |
+| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **En curso**: hechas las sombras, las líneas pintadas y las marcas de neumático |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -442,31 +442,52 @@ que corre código real del juego cada frame. Es trabajo de M3.
 ### Paso 6: los efectos (en curso)
 
 **Lo sustractivo, con la mezcla del PVR.** La PS1 tiene un modo que resta (`B − F`); el PVR
-suma siempre sus dos factores. La técnica conocida para oscurecer sin shaders es
-multiplicativa: origen `ZERO` y destino `INVERSE-OTHER-COLOUR`, o sea `B·(1 − F)`. Lo hace
-el PVR entero. KOS lo llama `PVR_BLEND_INVDESTCOLOR`, pero en el factor de **destino**
-actúa sobre el color de **origen**.
+suma siempre sus dos factores. La técnica conocida sale de una identidad,
+`B − F = 1 − ((1 − B) + F)`: **invertir, sumar F e invertir otra vez**. Las tres cosas son
+mezclas del PVR en la lista translúcida:
 
-**Verificado dibujando, no supuesto:** un rectángulo gris del 50 % sobre media pantalla
-dejó esa mitad a **0,50 / 0,48 / 0,49** de la otra en la carretera y 0,52–0,54 en el cielo
-(que tiene degradado), sin invertir el contraste. Es `B·(1 − 0,5)`.
+| Paso | Mezcla | Resultado |
+|---|---|---|
+| invertir | origen blanco, factor de origen `INVERSE-DEST-COLOUR`, de destino `ZERO` | `1 − B` |
+| sumar | `ONE` / `ONE` | `(1 − B) + F`, saturado a 1 |
+| invertir | igual que la primera | `B − F`, saturado a 0 |
 
-Va a la lista **translúcida**, antes del overlay 2D, con la profundidad probada contra lo
-opaco (`GEQUAL`, sin escribir) y los cuadros acercados un 0,3 % a la cámara para que no se
-hundan en lo que cubren.
+Es el modo 2 de PS1 tal cual, no una aproximación. KOS llama a los factores
+`PVR_BLEND_DESTCOLOR` / `INVDESTCOLOR`; en el factor de **origen** actúan sobre lo que ya
+hay en pantalla y en el de **destino** sobre el color del polígono. Las inversiones solo se
+hacen sobre la **caja que ocupan los efectos** (se calcula antes con un recorrido sin
+dibujar), no sobre la pantalla entera: invertir dos veces deja cada píxel como estaba.
 
-**Hechas:** la sombra de cada coche en el suelo (`SHAD` de `ZSFX.PSH`, sobre el cuadro de
-`Newton_CalcRealShadowCoordinates`, elevada sobre la carretera como hace la referencia) y
-la sombra de los **pasos de rueda** (las partes marcadas `subtract` del modelo). Las
-formas de `ZSFX.PSH` —`SHAD`, `SKD0`, `SKD1` y `LIN0..LIN9`— ya van en el atlas del `.TRK`
-(versión 4), que servirá también para las marcas y las líneas.
+**Verificado dibujando, no supuesto:** un gris de 26/255 sobre media pantalla en Flycast
+dejó esa mitad **26 / 24 / 23** niveles por debajo de la otra en la carretera y 28 / 23 / 23
+más abajo, con un cociente que varía de 0,55 a 0,78 según la zona: resta **absoluta**, no
+un porcentaje.
 
-Medido en el arnés de PC con un frame real: la sombra oscurece 83 píxeles, 11,6 de media
-(máximo 24), en una franja de 3 filas en la base del coche. En Flycast el pase corre
-(2 340 triángulos restados acumulados). Sin oráculo para la imagen: se mide, no se compara.
+Va **antes del overlay 2D**, con la profundidad probada contra lo opaco (`GEQUAL`, sin
+escribir) y los cuadros acercados un 0,3 % a la cámara para que no se hundan en lo que
+cubren.
 
-**Faltan:** marcas de neumático, líneas pintadas, destellos y halos de luces, humo, clima
-y los reflejos.
+**Hechas**
+- **Sombra de cada coche en el suelo** (`SHAD` de `ZSFX.PSH`, sobre el cuadro de
+  `Newton_CalcRealShadowCoordinates`, elevada sobre la carretera como hace la referencia) y
+  **sombra de los pasos de rueda** (las partes `subtract` del modelo).
+- **Líneas pintadas** de la carretera: cuadros del GRP texturados con `LIN0..LIN9`, que se
+  hornean enteros —incluido el vector derecho de la sección de carretera más cercana— y se
+  dibujan solo cuando el juego pone el indicador 4 en el trozo. ~28 cuadros por bloque;
+  3 786 en la pista de prueba.
+- **Marcas de neumático**: el host las lee de la RAM del juego cada frame (hasta 64
+  segmentos de 23 entradas), y se dibujan con `SKD0`/`SKD1` restando, solo las de las
+  secciones a la vista y a menos de 50 m.
+
+Las formas de `ZSFX.PSH` (`SHAD`, `SKD0`, `SKD1`, `LIN0..LIN9`) van en el atlas del `.TRK`
+(versión 5).
+
+**Con oráculo:** la lectura de las marcas coincide con la referencia —1 069 983 marcas
+idénticas en 5 000 frames de `race_long`, y 457 416 en 2 800 de `derrape`—. El dibujo no
+tiene oráculo: se mide. Marcas, con y sin el efecto, en el arnés de PC: **13,3 niveles de
+oscurecimiento de media**, que es lo que resta la PS1 (`26/255 × 0x40/0x80 = 13`).
+
+**Faltan:** destellos y halos de luces, humo, clima y los reflejos.
 
 ### Paso 5: el HUD
 
@@ -495,8 +516,9 @@ Las de `CLAUDE.md` §3 siguen en pie. Lo que ha cambiado o se ha precisado:
 - **Lo que el PVR no hace, se resuelve con técnicas conocidas del PVR (decisión de
   Jorge, 2026-10-25).** Nada de renderizado por software en el SH-4, ni una parte pequeña,
   porque rompe la arquitectura. Por eso lo sustractivo (modo 2 de PS1, `B − F`) se hace con
-  la mezcla del PVR `ZERO` / `INVERSE-OTHER-COLOUR` = `B·(1 − F)`. Descartado: renderizar a
-  textura y restar con el SH-4, porque es renderizado por software. **Aclaración:** que
+  invertir, sumar F e invertir otra vez (`B − F = 1 − ((1 − B) + F)`), tres mezclas del PVR.
+  Descartado: renderizar a textura y restar con el SH-4, porque es renderizado por
+  software. **Aclaración:** que
   ahora no haya Dreamcast solo impide hacer profiling en hardware real para decidir estos
   efectos; no es una regla general contra medir en consola cuando se tenga.
 - **`Render_RenderPlayerView`:** se porta su parte de **lógica** (cámara, trozos de
@@ -554,6 +576,14 @@ incompleta— los encontró el oráculo, no la lectura del código.
   con su patrón de puntos.
 - **En la lista opaca del PVR, un texel con color clave se pinta NEGRO.** No hay prueba
   de alfa. Lo que lleve color clave va a *punch-through*.
+- **El juego arranca la carrera en vista de capó y las marcas de neumático no se ven en
+  ella.** La cámara queda a ~1 m de las marcas y a su altura, y las ruedas las dejan debajo
+  y detrás. Ni `race_long.txt` (recta) ni un derrape las ponen a la vista: `SELECT` no
+  cambia de cámara en el guion. Para verlas, el arnés de PC tiene `PS1_CAMBACK=<m>,<alto>`,
+  que retrasa y sube la cámara; **no es del juego**.
+- **Un oscurecimiento proporcional (`B·(1 − F)`) no sirve para marcas de neumático.** Su F
+  es ~0,05 y sobre carretera oscura deja ~2,5 niveles contra los ~13 de la resta absoluta
+  de PS1: no se ven. Por eso la resta es exacta (invertir, sumar, invertir).
 - **El `0x80` de PS1 es el 1,0 en todas partes**, también en el color de vértice del
   mundo: hay que doblar y saturar, o la escena sale a media luz.
 - **El renderer calcula en espacio de PS1 y espeja la X al final.** A un giro no se le
@@ -600,6 +630,10 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **Reflejos de los coches.** Son lo único sustractivo que queda sin dibujar. Necesitan
   las normales por vértice y los mapas de reflejo de la pista; se harán con la misma
   mezcla del PVR que las sombras (ver «Decisiones vigentes»).
+- **Coste de las inversiones del PVR sin medir en consola.** Cada frame con efectos añade
+  dos rectángulos translúcidos sobre la caja de los efectos. En pantalla completa serían
+  ~0,6 M de píxeles por frame; la caja es mucho menor, pero el coste real en un Dreamcast
+  está sin medir (no hay consola).
 - **Modelos y texturas sustituibles** (p. ej. un coche de mayor resolución): **fuera del
   plan** por decisión de Jorge. El formato `.CAR` ya se carga por código de coche, pero
   habría que resolver los 57 huecos de partes, los faros y abolladuras por triángulo, el

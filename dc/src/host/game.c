@@ -158,6 +158,7 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
     /* Los coches van DESPUES del HUD, en el mismo orden que la referencia: el original
      * los dibuja ahi y ese orden decide que ve cada rutina. */
     host_record_cars(h, c);
+    host_read_skids(h, c);
 }
 
 int host_game_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
@@ -249,7 +250,7 @@ int view_dump_open(GameHost *h, const char *path)
     if (f == NULL)
         return 0;
     fwrite("NFSV", 1, 4, f);
-    putv32(f, 3u);   /* version 3: anade la captura de los coches */
+    putv32(f, 4u);   /* version 4: anade las marcas de neumatico */
     h->view_dump = f;
     return 1;
 }
@@ -299,6 +300,19 @@ void view_dump_frame(GameHost *h)
     putv32(f, h->cars_cap);
     for (i = 0; i < h->cars_cap; i++)
         putv32(f, h->cars_cap_buf[i]);
+    /* Las marcas de neumatico: por cuadro, 12 enteros de esquinas, 2 colores, la textura y
+     * la seccion. */
+    putv32(f, h->skids_n);
+    for (i = 0; i < h->skids_n; i++) {
+        const SkidQuad *q = &h->skids[i];
+
+        for (k = 0; k < 12u; k++)
+            putv32(f, (uint32_t)q->corners[k / 3u][k % 3u]);
+        putv32(f, q->colour[0]);
+        putv32(f, q->colour[1]);
+        putv16(f, q->tex);
+        putv16(f, (uint16_t)q->slice);
+    }
 }
 
 void view_dump_close(GameHost *h)

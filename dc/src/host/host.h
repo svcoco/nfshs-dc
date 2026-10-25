@@ -126,6 +126,17 @@ typedef struct CarDraw {
 #define CAR_WORDS        99u
 #define CAR_CAPTURE_MAX (CAR_WORDS * 16u)
 
+/* Un cuadro de marca de neumatico (M2c paso 6): este punto de borde y el de la entrada
+ * anterior, y el color de cada una. 64 segmentos de hasta 23 entradas es el maximo del juego. */
+#define SKIDS_MAX (64u * 23u)
+
+typedef struct SkidQuad {
+    int32_t  corners[4][3];    /* 16.16: p0 y p1 de esta entrada, y p0 y p1 de la anterior */
+    uint32_t colour[2];        /* 0xBBGGRR de esta entrada y de la anterior */
+    uint8_t  tex;              /* 0 = SKD0, 1 = SKD1 */
+    int16_t  slice;            /* seccion de pista a la que pertenece el segmento */
+} SkidQuad;
+
 #define HUD_LISTS_MAX  16u
 #define DRAW_ENVS_MAX  64u
 
@@ -259,6 +270,9 @@ typedef struct GameHost {
      * coche; ver cars.c para el orden). Se guarda en crudo para poder compararla palabra
      * a palabra con la referencia. */
     CarDraw  car_draw[CARS_MAX];
+    SkidQuad skids[SKIDS_MAX];
+    uint32_t skids_n, skids_max;
+    uint64_t skids_lost;
     uint32_t cars_cap_buf[CAR_CAPTURE_MAX];
     uint32_t cars_cap;        /* palabras escritas */
     uint32_t cars_n;          /* coches anotados */
@@ -351,6 +365,9 @@ void host_record_objects(GameHost *h, Cpu *c);
 
 /* Graba lo que el juego decide dibujar de cada coche. */
 void host_record_cars(GameHost *h, Cpu *c);
+
+/* Lee las marcas de neumatico de la RAM del juego. */
+void host_read_skids(GameHost *h, Cpu *c);
 
 /* El HUD de carrera: grabar una tabla de ordenacion en DrawOTag, y componer las del
  * frame en la frontera. Ver overlay.c. */

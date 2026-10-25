@@ -79,8 +79,9 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
   **Decisión de Jorge (2026-10-25): todo lo que el PVR no hace se resuelve con técnicas
   conocidas del propio PVR; no se escribe renderizado por software en el SH-4, ni siquiera
   una parte pequeña, porque rompe la arquitectura (todo el middleware de render está en el
-  PVR).** Lo sustractivo (`B − F`) se hace con factor de origen `ZERO` y de destino
-  `INVERSE-OTHER-COLOUR`, que da `B·(1 − F)`, en la lista translúcida. **Aclaración de
+  PVR).** Lo sustractivo (`B − F`) se hace **invirtiendo, sumando F e invirtiendo otra
+  vez** (`B − F = 1 − ((1 − B) + F)`), tres mezclas del PVR en la lista translúcida: es el
+  modo 2 de PS1 exacto, no una aproximación. **Aclaración de
   Jorge: no hay Dreamcast disponible por ahora, así que no se hace profiling en hardware
   real para decidir estos efectos; se eligen técnicas conocidas.** Esto no prohíbe medir en
   consola cuando la haya.

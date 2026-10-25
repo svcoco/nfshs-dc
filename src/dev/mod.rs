@@ -345,7 +345,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     use std::io::Write;
                     let mut f = std::io::BufWriter::new(std::fs::File::create(&path).expect("NFSHS_DIFF_VIEW"));
                     f.write_all(b"NFSV").expect("cabecera");
-                    f.write_all(&3u32.to_le_bytes()).expect("cabecera");
+                    f.write_all(&4u32.to_le_bytes()).expect("cabecera");
                     f
                 });
             let mut diff_steps: Vec<(u32, u16)> = Vec::new();
@@ -470,6 +470,21 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     rec.extend_from_slice(&(cap.len() as u32).to_le_bytes());
                     for w in cap {
                         rec.extend_from_slice(&w.to_le_bytes());
+                    }
+                    // the tyre marks, read from the game's RAM as the reference reads them
+                    let skids = ps1::race::read_skids(&mut |a| c.m.r32(a));
+                    rec.extend_from_slice(&(skids.len() as u32).to_le_bytes());
+                    for q in &skids {
+                        for corner in q.corners {
+                            for v in corner {
+                                rec.extend_from_slice(&v.to_le_bytes());
+                            }
+                        }
+                        for col in q.colour {
+                            rec.extend_from_slice(&col.to_le_bytes());
+                        }
+                        rec.extend_from_slice(&(q.tex as u16).to_le_bytes());
+                        rec.extend_from_slice(&q.slice.to_le_bytes());
                     }
                     out.write_all(&rec).expect("NFSHS_DIFF_VIEW");
                 }

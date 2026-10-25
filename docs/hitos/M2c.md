@@ -300,3 +300,55 @@ interpolando UV y color (hasta 8 vertices), y se mandan como tira en zigzag.
 | fps en carrera con HUD, coches, objetos, pista y cielo | **30-43** |
 
 El HUD no mueve el ritmo: el coste sigue siendo el de grabar los coches (paso 4).
+
+## 10. Paso 6 (en curso): los efectos (2026-10-25)
+
+Hechas las **sombras**, las **líneas pintadas** y las **marcas de neumático**. Faltan
+destellos y halos de luces, humo, clima y reflejos.
+
+### Lo sustractivo: resta exacta con tres mezclas del PVR
+
+El PVR suma siempre sus dos factores de mezcla, y el modo 2 de PS1 resta. La identidad
+`B − F = 1 − ((1 − B) + F)` lo resuelve sin tocar un píxel desde el SH-4: **invertir, sumar
+F e invertir otra vez**, las tres en la lista translúcida y antes del 2D. Las inversiones
+solo cubren la caja de los efectos (se calcula con un recorrido previo sin dibujar).
+
+**Primera versión, y por qué se cambió.** Empecé con `ZERO` / `INVERSE-OTHER-COLOUR`, que da
+`B·(1 − F)`. La verifiqué dibujando un gris del 50 % sobre media pantalla (cociente 0,50:
+la técnica estaba bien implementada). Pero oscurece en **proporción**, y las marcas de
+neumático tienen un F de ~0,05: sobre carretera oscura dejaban **2,5 niveles** contra los
+**13** que resta la PS1, y no se veían. Esa medida la dio un frame real, no el rectángulo.
+
+La versión exacta se verificó con un gris de 26/255 sobre media pantalla en Flycast:
+diferencia **absoluta de 26 / 24 / 23** niveles con un cociente que varía de 0,55 a 0,78,
+que es lo que distingue una resta de un porcentaje. Sobre marcas reales: **13,3 niveles**.
+
+### Las líneas pintadas
+
+Cada bloque del GRP trae registros `(vértice, sección, tipo, cuadro)`; cada par consecutivo
+forma un cuadro texturado con `LIN<tipo>`, ensanchado a ambos lados por el vector derecho
+de la sección de carretera **más cercana** (sus bytes 6..8, con signo, `>> 3`). Todo cae en
+unidades de 1/64 m, así que se calcula entero en el horneado. Se añaden como **diez
+materiales más**, tras los de la pista, para que sus cuadros usen el mismo formato que los
+demás. Formato del `.TRK`: **versión 5**, bloques de 56 bytes con siete tramos.
+
+### Las marcas de neumático
+
+El host las lee de la RAM del juego (segmentos de 688 bytes, hasta 64, con hasta 23
+entradas) y se dibujan con `SKD0`/`SKD1`, solo las de las secciones a la vista y a menos de
+50 m. **Con oráculo**: la lectura coincide con la referencia en 1 069 983 marcas
+(`race_long`, 5 000 frames) y 457 416 (`derrape`, 2 800 frames).
+
+### Un guion nuevo, y por qué hizo falta
+
+Ningún guion existente ponía las marcas a la vista: `race_long.txt` va en recta, y la cámara
+por omisión es la de **capó**, con las marcas a ~1 m, debajo y detrás. Se añadió
+`dc/test/diff/scripts/derrape.txt` (acelerar en recta y luego derrapar) como segundo
+escenario del oráculo, y el arnés de PC una opción `PS1_CAMBACK=<m>,<alto>` para ver desde
+fuera. **No es del juego.** Un primer derrape, lanzado desde el frame 900, acabó contra la
+pared de la salida sin avanzar.
+
+| Escenario del oráculo | Resultado |
+|---|---|
+| `race_long` (5 000 frames) | 4 769 vistas, 220 002 objetos, 9 494 coches y 1 069 983 marcas idénticos |
+| `derrape` (2 800 frames) | 2 569 vistas, 117 260 objetos, 2 320 coches y 457 416 marcas idénticos |

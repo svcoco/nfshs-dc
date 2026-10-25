@@ -50,14 +50,14 @@ typedef struct {
     uint8_t  pad[3];
 } TrackMat;
 
-/* OJO: en el archivo un bloque son 44 bytes con pares (u32 offset, u16 cuenta) de SEIS
+/* OJO: en el archivo un bloque son 56 bytes con pares (u32 offset, u16 cuenta) de SEIS
  * bytes. En C el compilador los rellenaria a ocho, asi que esta estructura **no se
  * superpone al archivo**: track_load la decodifica byte a byte. Eso ademas evita lecturas
  * desalineadas, que en SH-4 son una excepcion y no una lentitud. */
 typedef struct {
     int32_t  origin[3];       /* 1/64 m */
-    uint32_t off[5];
-    uint16_t n[5];
+    uint32_t off[7];
+    uint16_t n[7];
 } TrackBlock;
 
 /* Los cinco tramos de un bloque, en el orden en que los hornea bake.rs. */
@@ -66,6 +66,8 @@ typedef struct {
 #define TB_GROUND_FAR   2
 #define TB_DETAIL_VERTS 3
 #define TB_DETAIL_QUADS 4
+#define TB_LINE_VERTS   5   /* lineas pintadas (M2c paso 6) */
+#define TB_LINE_QUADS   6
 
 /* El rectangulo de una forma HZ01..HZ12 en el atlas; w = 0 si la pista no la trae. */
 typedef struct { uint16_t x, y, w, h; } TrackSkyRect;

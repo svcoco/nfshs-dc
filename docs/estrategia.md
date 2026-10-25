@@ -158,8 +158,17 @@ conocidas del propio PVR, sin renderizado por software en el SH-4 —ni una part
 porque rompe la arquitectura—. No hay Dreamcast disponible por ahora, asi que no se hace
 profiling en hardware real para decidir estos efectos (aclaracion de Jorge: no es una
 regla general contra medir en consola cuando se tenga). Lo
-sustractivo (`B - F`) se hace con la mezcla `ZERO` / `INVERSE-OTHER-COLOUR`, que da
-`B * (1 - F)`; se verifico dibujando una cuadricula gris del 50 %, no se dio por supuesto.
+sustractivo (`B - F`) se hace invirtiendo, sumando F e invirtiendo otra vez
+(`B - F = 1 - ((1 - B) + F)`), tres mezclas del PVR: es el modo 2 de PS1 exacto.
+
+**Una leccion de ese paso: verificar la tecnica no basta, hay que verificar el RESULTADO.**
+La primera version usaba `B * (1 - F)`, que se comprobo dibujando un gris del 50 % y dio
+exactamente lo esperado (cociente 0,50). La tecnica estaba bien implementada y aun asi era
+la equivocada: oscurece en proporcion, y las marcas de neumatico, con F ~0,05, dejaban ~2,5
+niveles contra los ~13 que resta la PS1. Solo se vio al medir el efecto real sobre un
+frame real. La version exacta se verifico igual y dio una diferencia ABSOLUTA de 26 niveles
+con un cociente que variaba de 0,55 a 0,78, que es justo lo que distingue una resta de un
+porcentaje.
 Ver `docs/bitacora.md`.
 
 Detalle y cifras en `docs/hitos/M2b.md` y `docs/hitos/M2c.md`.

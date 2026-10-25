@@ -1,0 +1,40 @@
+# Derrape: la misma navegacion que race_long.txt, pero en carrera acelera, gira y tira
+# del freno de mano para dejar marcas de neumatico A LA VISTA. race_long.txt nunca las
+# deja delante de la camara (el coche va en recta), asi que no sirve para verlas.
+# Es el escenario del oraculo de las marcas de neumatico y de su dibujo.
+0   -
+20  UP
+26  -
+36  UP
+42  -
+60  CROSS
+66  -
+110 CROSS
+116 -
+170 CROSS
+176 -
+230 CROSS
+236 -
+290 CROSS
+296 -
+350 CROSS
+356 -
+# ya en carrera: acelerar en recta hasta ir lanzado (race_long.txt llega a ~100 km/h hacia
+# el frame 2000) y entonces derrapar a izquierda y derecha con el freno de mano. Un
+# primer intento derrapaba desde el frame 900 y el coche acabo contra la pared de la
+# salida, sin avanzar: las marcas quedaban pegadas a la camara.
+420 CROSS
+# SELECT cambia de camara: la de por omision es la de capo, con la que las marcas quedan
+# debajo y detras de la camara y casi nunca se ven. Se pasa a una camara exterior.
+1500 CROSS+SELECT
+1506 CROSS
+1620 CROSS+SELECT
+1626 CROSS
+2000 CROSS+LEFT
+2040 CROSS+LEFT+SQUARE
+2120 CROSS
+2200 CROSS+RIGHT
+2240 CROSS+RIGHT+SQUARE
+2320 CROSS
+
+#end 2800

@@ -54,7 +54,7 @@ int track_load(Track *t, const char *path)
     fclose(f);
     t->size = (uint32_t)size;
 
-    if (memcmp(t->raw, "NFST", 4) != 0 || rd32(t->raw + 4) != 4u) {
+    if (memcmp(t->raw, "NFST", 4) != 0 || rd32(t->raw + 4) != 5u) {
         track_free(t);
         return 0;
     }
@@ -72,7 +72,7 @@ int track_load(Track *t, const char *path)
     /* El horneado ya se verifico a si mismo en el PC (bake.rs); aqui solo se comprueba
      * que los tramos caben, porque un archivo truncado por el disco si es posible. */
     off_blk = 40u;
-    off_mat = off_blk + (uint32_t)t->blocks * 44u;
+    off_mat = off_blk + (uint32_t)t->blocks * 56u;
     off_sky = off_mat + (uint32_t)t->mats * 16u;
     off_sfx = off_sky + 12u * 8u;
     off_mdl = off_sfx + 13u * 8u;
@@ -93,12 +93,12 @@ int track_load(Track *t, const char *path)
         return 0;
     }
     for (i = 0; i < t->blocks; i++) {
-        const uint8_t *p = t->raw + off_blk + (size_t)i * 44u;
+        const uint8_t *p = t->raw + off_blk + (size_t)i * 56u;
         uint32_t k;
 
         for (k = 0; k < 3u; k++)
             t->block[i].origin[k] = (int32_t)rd32(p + k * 4u);
-        for (k = 0; k < 5u; k++) {
+        for (k = 0; k < 7u; k++) {
             t->block[i].off[k] = rd32(p + 12u + k * 6u);
             t->block[i].n[k] = rd16(p + 16u + k * 6u);
         }
@@ -425,8 +425,8 @@ void track_draw(const Track *t, const struct RaceView *view, const uint32_t *lig
 
         if (id < 0 || (uint32_t)id >= t->blocks)
             continue;                    /* hueco en la lista */
-        if ((flags & CHUNK_GROUND) == 0u)
-            continue;                    /* este frame no pide su suelo */
+        if ((flags & (CHUNK_GROUND | CHUNK_LINES)) == 0u)
+            continue;                    /* este frame no pide nada de este trozo */
         b = &t->block[id];
         if (st != NULL)
             st->blocks_drawn++;
@@ -436,18 +436,28 @@ void track_draw(const Track *t, const struct RaceView *view, const uint32_t *lig
         og[0] = (float)b->origin[0] / 64.0f;
         og[1] = (float)b->origin[1] / 64.0f;
         og[2] = (float)b->origin[2] / 64.0f;
-        malla(t, &vw, light, og, NULL,
-              t->vert + (size_t)b->off[TB_GROUND_VERTS] * 4u,
-              b->n[TB_GROUND_VERTS],
-              t->quad + (size_t)b->off[suelo] * 5u, b->n[suelo],
-              emit, user, st);
-        /* las superficies de detalle van siempre con el suelo */
-        malla(t, &vw, light, og, NULL,
-              t->vert + (size_t)b->off[TB_DETAIL_VERTS] * 4u,
-              b->n[TB_DETAIL_VERTS],
-              t->quad + (size_t)b->off[TB_DETAIL_QUADS] * 5u,
-              b->n[TB_DETAIL_QUADS],
-              emit, user, st);
+        if ((flags & CHUNK_GROUND) != 0u) {
+            malla(t, &vw, light, og, NULL,
+                  t->vert + (size_t)b->off[TB_GROUND_VERTS] * 4u,
+                  b->n[TB_GROUND_VERTS],
+                  t->quad + (size_t)b->off[suelo] * 5u, b->n[suelo],
+                  emit, user, st);
+            /* las superficies de detalle van siempre con el suelo */
+            malla(t, &vw, light, og, NULL,
+                  t->vert + (size_t)b->off[TB_DETAIL_VERTS] * 4u,
+                  b->n[TB_DETAIL_VERTS],
+                  t->quad + (size_t)b->off[TB_DETAIL_QUADS] * 5u,
+                  b->n[TB_DETAIL_QUADS],
+                  emit, user, st);
+        }
+        /* las lineas pintadas, solo si el juego las pide para este trozo (indicador 4) */
+        if ((flags & CHUNK_LINES) != 0u)
+            malla(t, &vw, light, og, NULL,
+                  t->vert + (size_t)b->off[TB_LINE_VERTS] * 4u,
+                  b->n[TB_LINE_VERTS],
+                  t->quad + (size_t)b->off[TB_LINE_QUADS] * 5u,
+                  b->n[TB_LINE_QUADS],
+                  emit, user, st);
     }
 }
 

@@ -27,9 +27,9 @@
 //!          u16 flags, u16 pad. Sus vertices y cuadros van en sus propios tramos, en el
 //!          mismo formato que los de los bloques, y estan en 1/64 m alrededor del punto
 //!          donde se coloca el objeto.
-//! blocks   blocks * 44 bytes: i32 origin[3] (1/64 m), then five (u32 offset, u16 count)
+//! blocks   blocks * 56 bytes: i32 origin[3] (1/64 m), then seven (u32 offset, u16 count)
 //!          pairs - ground verts, ground quads, ground far quads, detail verts,
-//!          detail quads - and u16 of padding
+//!          detail quads, road-line verts, road-line quads - and u16 of padding
 //! sky      12 * 8 bytes: u16 atlas x, y, w, h de HZ01..HZ12 (ceros si la pista no la
 //!          trae). Van despues de los materiales.
 //! sfx      13 * 8 bytes, igual, de ZSFX.PSH: SHAD, SKD0, SKD1, LIN0..LIN9. Van
@@ -276,6 +276,23 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
         mats.extend_from_slice(&[0, 0, 0]);
     }
 
+    // Las lineas pintadas (M2c paso 6) son cuadros texturados con LIN<tipo> de ZSFX.PSH.
+    // Se anaden como diez materiales mas, tras los de la pista: asi sus cuadros usan el
+    // mismo formato que todos los demas. Las esquinas van en el orden en que la referencia
+    // las manda: (p0-d, arriba-izq), (p0+d, abajo-izq), (p1+d, abajo-der), (p1-d, arriba-der).
+    let n_track_mats = track.textures.len();
+    for k in 0..10usize {
+        let r = sfx_id[3 + k].and_then(|s| rects.get(&s));
+        let (x, y, w, h) = r.map_or((0, 0, 1, 1), |r| (r.x, r.y, r.w, r.h));
+        put16(&mut mats, x as u16);
+        put16(&mut mats, y as u16);
+        put16(&mut mats, w as u16);
+        put16(&mut mats, h as u16);
+        mats.extend_from_slice(&[0, 2, 3, 1]);
+        mats.push(0);
+        mats.extend_from_slice(&[0, 0, 0]);
+    }
+
     // ---- blocks, vertex pools and quads ----
     let (mut blocks, mut verts, mut quads) = (Vec::new(), Vec::new(), Vec::new());
     let (mut models, mut mverts, mut mquads) = (Vec::new(), Vec::new(), Vec::new());
@@ -312,14 +329,52 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
         let (gf, gfn) = faces(&b.ground.far, &mut quads, &mut n_quads);
         let (dv, dvn) = pool(&b.detail, &mut verts, &mut n_verts);
         let (dq, dqn) = faces(&b.detail.quads, &mut quads, &mut n_quads);
+        // Lineas pintadas (DrawW_BuildChunkCenterLineFacets / DrawW_OnyxLinePrim): cada
+        // registro es un punto de la linea, ensanchado a izquierda y derecha por el vector
+        // derecho de la seccion de carretera MAS CERCANA (sus bytes 6..8, con signo, >> 3),
+        // y cada par de puntos consecutivos forma un cuadro. 0xFF es un hueco. Todo cae en
+        // unidades de 1/64 m, asi que se calcula aqui entero y exacto.
+        let mut lmesh = grp::Mesh::default();
+        let punto = |r: &[u8; 4]| -> Option<([i32; 3], [i32; 3], i16)> {
+            let v = b.ground.verts.get(r[0] as usize)?;
+            let p = b.origin + glam::Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) / 64.0;
+            let s = track.vroad.iter().min_by(|a, c| {
+                a.pos.distance_squared(p).total_cmp(&c.pos.distance_squared(p))
+            })?;
+            let d = [(s.raw[6] as i8 >> 3) as i32, (s.raw[7] as i8 >> 3) as i32, (s.raw[8] as i8 >> 3) as i32];
+            Some(([v[0] as i32, v[1] as i32, v[2] as i32], d, v[3]))
+        };
+        for w in b.lines.windows(2) {
+            let (r0, r1) = (&w[0], &w[1]);
+            if r0[2] == 0xFF || r0[2] >= 10 {
+                continue;
+            }
+            let (Some((p0, d0, s0)), Some((p1, d1, s1))) = (punto(r0), punto(r1)) else { continue };
+            // la referencia las sube 2 cm; en 1/64 m, una unidad son 1,6 cm
+            let esq = |p: [i32; 3], d: [i32; 3], sg: i32, s: i16| -> [i16; 4] {
+                [(p[0] + sg * d[0]) as i16, (p[1] + sg * d[1] + 1) as i16, (p[2] + sg * d[2]) as i16, s]
+            };
+            let base = lmesh.verts.len() as u16;
+            lmesh.verts.push(esq(p0, d0, -1, s0));
+            lmesh.verts.push(esq(p0, d0, 1, s0));
+            lmesh.verts.push(esq(p1, d1, 1, s1));
+            lmesh.verts.push(esq(p1, d1, -1, s1));
+            lmesh.quads.push(grp::Quad {
+                tex: (n_track_mats + r0[2] as usize) as u16,
+                v: [base, base + 1, base + 2, base + 3],
+                strip: false,
+            });
+        }
+        let (lv, lvn) = pool(&lmesh, &mut verts, &mut n_verts);
+        let (lq, lqn) = faces(&lmesh.quads, &mut quads, &mut n_quads);
         for k in 0..3 {
             put32(&mut blocks, ((b.origin[k] * 64.0).round() as i32) as u32);
         }
-        for (off, n) in [(gv, gvn), (gq, gqn), (gf, gfn), (dv, dvn), (dq, dqn)] {
+        for (off, n) in [(gv, gvn), (gq, gqn), (gf, gfn), (dv, dvn), (dq, dqn), (lv, lvn), (lq, lqn)] {
             put32(&mut blocks, off);
             put16(&mut blocks, n);
         }
-        put16(&mut blocks, 0); // relleno, para que el registro mida 44
+        put16(&mut blocks, 0); // relleno, para que el registro mida 56
     }
 
     let area: u32 = rects.values().map(|r| (r.w + PAD) * (r.h + PAD)).sum();
@@ -363,9 +418,9 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
     let (aw, ah, texels) = atlas.finish();
     let mut out_buf = Vec::new();
     out_buf.extend_from_slice(b"NFST");
-    put32(&mut out_buf, 4);   /* version 4: anade la tabla de efectos (ZSFX) */
+    put32(&mut out_buf, 5);   /* version 5: anade las lineas pintadas */
     put16(&mut out_buf, track.blocks.len() as u16);
-    put16(&mut out_buf, track.textures.len() as u16);
+    put16(&mut out_buf, (track.textures.len() + 10) as u16);
     put16(&mut out_buf, aw as u16);
     put16(&mut out_buf, ah as u16);
     put32(&mut out_buf, n_verts);
@@ -439,7 +494,7 @@ fn verifica(d: &[u8]) -> Result<()> {
     let u16a = |o: usize| u16::from_le_bytes([d[o], d[o + 1]]) as usize;
     let u32a = |o: usize| u32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]]) as usize;
 
-    if &d[..4] != b"NFST" || u32a(4) != 4 {
+    if &d[..4] != b"NFST" || u32a(4) != 5 {
         bail!("cabecera equivocada");
     }
     let (nb, nm) = (u16a(8), u16a(10));
@@ -448,7 +503,7 @@ fn verifica(d: &[u8]) -> Result<()> {
     let (nmv, nmq, atlas_off) = (u32a(28), u32a(32), u32a(36));
     let (aw, ah) = (u16a(12), u16a(14));
     let blk = 40;
-    let mat = blk + nb * 44;
+    let mat = blk + nb * 56;
     let mdl = mat + nm * 16 + 12 * 8 + 13 * 8;   /* materiales + cielo + efectos */
     let mvt = mdl + nmod * 16;
     let mqd = mvt + nmv * 8;
@@ -481,17 +536,18 @@ fn verifica(d: &[u8]) -> Result<()> {
         }
     }
     for b in 0..nb {
-        let o = blk + b * 44;
+        let o = blk + b * 56;
         // los cinco pares (offset, cuenta): vertices y cuadros de suelo, lejanos y detalle
         let par = |k: usize| (u32a(o + 12 + k * 6), u16a(o + 16 + k * 6));
         let (gv, gvn) = par(0);
         let (dv, dvn) = par(3);
-        for (vo, vn) in [(gv, gvn), (dv, dvn)] {
+        let (lv, lvn) = par(5);
+        for (vo, vn) in [(gv, gvn), (dv, dvn), (lv, lvn)] {
             if vo + vn > nv {
                 bail!("bloque {b}: charco de vertices fuera de rango");
             }
         }
-        for (k, (vo, vn)) in [(1, (gv, gvn)), (2, (gv, gvn)), (4, (dv, dvn))] {
+        for (k, (vo, vn)) in [(1, (gv, gvn)), (2, (gv, gvn)), (4, (dv, dvn)), (6, (lv, lvn))] {
             let (qo, qn) = par(k);
             if qo + qn > nq {
                 bail!("bloque {b}: cuadros fuera de rango");

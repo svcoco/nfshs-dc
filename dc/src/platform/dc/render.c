@@ -23,11 +23,13 @@
  */
 #include <kos.h>
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "host.h"
 #include "car.h"
+#include "fx.h"
 #include "render.h"
 
 /* Staging en RAM principal: la cache convierte aqui y de aqui se sube al PVR. Medido:
@@ -259,21 +261,129 @@ static void coches_dibuja(GameHost *h)
 /* ---- los efectos que el original dibuja RESTANDO (M2c paso 6) ----
  *
  * La PS1 tiene un modo de semitransparencia que resta (B - F). El PVR no: sus dos factores
- * de mezcla se SUMAN. La tecnica conocida para oscurecer sin shaders es multiplicativa:
- * factor de origen ZERO y de destino INVERSE-OTHER-COLOUR, que da  B * (1 - F).  Es la
- * misma operacion que el modo 2 cuando F es un gris o un color poco intenso, y es lo que
- * son una sombra o un hollin: oscurece en proporcion a lo que ya hay. Lo hace el PVR
- * entero, sin tocar un pixel desde el SH-4.
+ * de mezcla se SUMAN. La tecnica conocida para restar con el PVR, sin shaders ni trabajo
+ * del SH-4, sale de una identidad:
  *
- * KOS llama a esos factores PVR_BLEND_DESTCOLOR / INVDESTCOLOR, pero en el factor de
- * DESTINO actuan sobre el color de ORIGEN: el del propio poligono.
+ *        B - F  =  1 - ((1 - B) + F)
+ *
+ * Es decir: invertir lo que hay, SUMARLE F y volver a invertir. Las tres cosas son mezclas
+ * del PVR:
+ *
+ *   invertir   color de origen BLANCO, factor de origen INVERSE-DEST-COLOUR (1 - B) y
+ *              factor de destino ZERO              ->  1 - B
+ *   sumar      factores ONE / ONE                  ->  (1 - B) + F, saturado a 1
+ *   invertir   otra vez                            ->  B - F, saturado a 0
+ *
+ * Eso es el modo 2 de la PS1 tal cual, recortado a cero, no una aproximacion. (Una primera
+ * version usaba ZERO / INVERSE-OTHER-COLOUR, o sea B*(1-F): oscurece en PROPORCION. Con las
+ * marcas de neumatico, cuyo F es ~0,05, dejaba ~2,5 niveles de oscurecimiento sobre
+ * carretera oscura contra los ~13 que resta la PS1, y no se veian.)
+ *
+ * Las inversiones solo se hacen sobre la CAJA que ocupan los efectos, que se calcula antes
+ * con un recorrido sin dibujar, para no pagar la pantalla entera: invertir dos veces fuera
+ * de los poligonos deja cada pixel exactamente como estaba.
  *
  * Va a la lista TRANSLUCIDA, porque en la opaca y en la punch-through no hay mezcla, y
- * ANTES del overlay 2D, que tiene que quedar encima. La profundidad se prueba contra lo
- * opaco (GEQUAL, sin escribir), y los cuadros se acercan un poco a la camara para que no
- * se hundan en la superficie sobre la que estan, ya que no hay un buffer de profundidad
- * que los desempate como en el original.
+ * ANTES del overlay 2D, que tiene que quedar encima. La profundidad de los efectos se prueba
+ * contra lo opaco (GEQUAL, sin escribir), y los cuadros se acercan un poco a la camara para
+ * que no se hundan en la superficie que cubren, ya que no hay un buffer de profundidad que
+ * los desempate como en el original.
+ *
+ * KOS llama a los factores PVR_BLEND_DESTCOLOR / INVDESTCOLOR; en el factor de ORIGEN actuan
+ * sobre el color del destino (lo que ya hay), y en el de DESTINO sobre el del origen.
  */
+static void efecto_ctx(pvr_ptr_t atlas, uint32_t w, uint32_t hh);
+static float s_bx0, s_by0, s_bx1, s_by1;     /* la caja de los efectos, en pantalla */
+
+/* Sumidero que solo acumula la caja: no emite nada al PVR. */
+static void caja_emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
+{
+    uint32_t k;
+
+    (void)user;
+    (void)m;
+    for (k = 0; k < n; k++) {
+        if (v[k].x < s_bx0) s_bx0 = v[k].x;
+        if (v[k].x > s_bx1) s_bx1 = v[k].x;
+        if (v[k].y < s_by0) s_by0 = v[k].y;
+        if (v[k].y > s_by1) s_by1 = v[k].y;
+    }
+}
+
+/* Recorre los efectos con el sumidero que se le de. Con `dibuja` a 0 es el recorrido de la
+ * caja y no toca el PVR; con 1 pone el contexto de cada atlas antes de cada pieza. */
+static void efectos_recorre(GameHost *h, TrackEmit emit, int dibuja)
+{
+    uint32_t ci;
+    TrackStats kst;
+
+    if (dibuja)
+        efecto_ctx(s_atlas, s_track.atlas_w, s_track.atlas_h);
+    /* las marcas de neumatico: en el suelo, asi que van antes que las sombras */
+    skids_draw(&s_track, h->skids, h->skids_n, &h->view[0], 640.0f, 480.0f, emit, NULL, &kst);
+    if (dibuja)
+        s_tri_efectos += kst.quads_out;
+
+    for (ci = 0; ci < h->cars_n && ci < CARS_MAX; ci++) {
+        const CarDraw *d = &h->car_draw[ci];
+        TrackStats est;
+        uint32_t k;
+
+        if (d->code[0] == 0)
+            continue;
+        /* la sombra del suelo usa SHAD, que vive en el atlas de la pista */
+        if (dibuja)
+            efecto_ctx(s_atlas, s_track.atlas_w, s_track.atlas_h);
+        car_shadow(&s_track, d, &h->view[0], 640.0f, 480.0f, emit, NULL, &est);
+        if (dibuja)
+            s_tri_efectos += est.quads_out;
+
+        /* y la de los pasos de rueda, que son partes del propio coche y su atlas */
+        k = coche_modelo(d->code);
+        if (k != 0xFFFFFFFFu && s_coches[k].modelo.raw != NULL && s_coches[k].atlas != NULL) {
+            if (dibuja)
+                efecto_ctx(s_coches[k].atlas, s_coches[k].modelo.atlas_w,
+                           s_coches[k].modelo.atlas_h);
+            car_draw(&s_coches[k].modelo, d, &h->view[0], 1, 640.0f, 480.0f, emit, NULL, &est);
+            if (dibuja)
+                s_tri_efectos += est.quads_out;
+        }
+    }
+}
+
+/* Invierte el color de un rectangulo de pantalla: 1 - B. */
+static void inversion(float x0, float y0, float x1, float y1)
+{
+    pvr_poly_cxt_t cxt;
+    pvr_poly_hdr_t hdr;
+    pvr_vertex_t pv;
+    static const int qx[4] = { 0, 1, 0, 1 };
+    static const int qy[4] = { 0, 0, 1, 1 };
+    int k;
+
+    pvr_poly_cxt_col(&cxt, PVR_LIST_TR_POLY);
+    cxt.blend.src = PVR_BLEND_INVDESTCOLOR;
+    cxt.blend.dst = PVR_BLEND_ZERO;
+    cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
+    cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+    cxt.gen.culling = PVR_CULLING_NONE;
+    pvr_poly_compile(&hdr, &cxt);
+    pvr_prim(&hdr, sizeof(hdr));
+    pv.flags = PVR_CMD_VERTEX;
+    pv.z = 1.0f;
+    pv.oargb = 0;
+    pv.u = 0.0f;
+    pv.v = 0.0f;
+    pv.argb = 0xFFFFFFFFu;
+    for (k = 0; k < 4; k++) {
+        if (k == 3)
+            pv.flags = PVR_CMD_VERTEX_EOL;
+        pv.x = qx[k] ? x1 : x0;
+        pv.y = qy[k] ? y1 : y0;
+        pvr_prim(&pv, sizeof(pv));
+    }
+}
+
 static void efecto_ctx(pvr_ptr_t atlas, uint32_t w, uint32_t hh)
 {
     pvr_poly_cxt_t cxt;
@@ -282,8 +392,9 @@ static void efecto_ctx(pvr_ptr_t atlas, uint32_t w, uint32_t hh)
     pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
                      PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
                      w, hh, atlas, PVR_FILTER_NONE);
-    cxt.blend.src = PVR_BLEND_ZERO;
-    cxt.blend.dst = PVR_BLEND_INVDESTCOLOR;
+    /* sumar F al color invertido */
+    cxt.blend.src = PVR_BLEND_ONE;
+    cxt.blend.dst = PVR_BLEND_ONE;
     cxt.depth.comparison = PVR_DEPTHCMP_GEQUAL;
     cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
     cxt.gen.culling = PVR_CULLING_NONE;
@@ -293,32 +404,27 @@ static void efecto_ctx(pvr_ptr_t atlas, uint32_t w, uint32_t hh)
 
 static void efectos_dibuja(GameHost *h)
 {
-    uint32_t ci;
-
     if (s_track.raw == NULL || s_atlas == NULL || h->views_n == 0u)
         return;
     s_fase = FASE_RESTO;         /* el sumidero no cambia de contexto por su cuenta */
     s_zmul = 1.003f;
-    for (ci = 0; ci < h->cars_n && ci < CARS_MAX; ci++) {
-        const CarDraw *d = &h->car_draw[ci];
-        TrackStats est;
-        uint32_t k;
 
-        if (d->code[0] == 0)
-            continue;
-        /* la sombra del suelo usa SHAD, que vive en el atlas de la pista */
-        efecto_ctx(s_atlas, s_track.atlas_w, s_track.atlas_h);
-        car_shadow(&s_track, d, &h->view[0], 640.0f, 480.0f, pista_emite, NULL, &est);
-        s_tri_efectos += est.quads_out;
+    /* 1. la caja que ocupan los efectos, sin dibujar nada */
+    s_bx0 = 1e9f; s_by0 = 1e9f; s_bx1 = -1e9f; s_by1 = -1e9f;
+    efectos_recorre(h, caja_emite, 0);
+    if (s_bx1 >= s_bx0 && s_by1 >= s_by0) {
+        float x0 = floorf(s_bx0) - 1.0f, y0 = floorf(s_by0) - 1.0f;
+        float x1 = ceilf(s_bx1) + 1.0f, y1 = ceilf(s_by1) + 1.0f;
 
-        /* y la de los pasos de rueda, que son partes del propio coche y su atlas */
-        k = coche_modelo(d->code);
-        if (k != 0xFFFFFFFFu && s_coches[k].modelo.raw != NULL && s_coches[k].atlas != NULL) {
-            efecto_ctx(s_coches[k].atlas, s_coches[k].modelo.atlas_w,
-                       s_coches[k].modelo.atlas_h);
-            car_draw(&s_coches[k].modelo, d, &h->view[0], 1, 640.0f, 480.0f,
-                     pista_emite, NULL, &est);
-            s_tri_efectos += est.quads_out;
+        if (x0 < 0.0f) x0 = 0.0f;
+        if (y0 < 0.0f) y0 = 0.0f;
+        if (x1 > 640.0f) x1 = 640.0f;
+        if (y1 > 480.0f) y1 = 480.0f;
+        if (x1 > x0 && y1 > y0) {
+            /* 2. invertir, 3. sumar los efectos, 4. invertir otra vez: B - F */
+            inversion(x0, y0, x1, y1);
+            efectos_recorre(h, pista_emite, 1);
+            inversion(x0, y0, x1, y1);
         }
     }
     s_zmul = 1.0f;

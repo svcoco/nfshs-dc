@@ -21,8 +21,8 @@ def leer(path):
     if d[:4] != b'NFSV':
         raise SystemExit(f'{path}: no es un volcado de vista de carrera')
     version, = struct.unpack_from('<I', d, 4)
-    if version != 3:
-        raise SystemExit(f'{path}: version {version}, esperaba 3')
+    if version != 4:
+        raise SystemExit(f'{path}: version {version}, esperaba 4')
     o, frames = 8, {}
     while o + 8 <= len(d):
         frame, nv = struct.unpack_from('<II', d, o)
@@ -50,7 +50,12 @@ def leer(path):
         n, = struct.unpack_from('<I', d, o); o += 4
         coches = struct.unpack_from('<%dI' % n, d, o) if n else ()
         o += 4 * n
-        frames[frame] = (vistas, objetos, coches)
+        n, = struct.unpack_from('<I', d, o); o += 4
+        marcas = []
+        for _ in range(n):
+            marcas.append(struct.unpack_from('<12i2IHh', d, o))
+            o += 12 * 4 + 2 * 4 + 4
+        frames[frame] = (vistas, objetos, coches, marcas)
         if o > len(d):
             raise SystemExit(f'{path}: volcado truncado')
     return frames
@@ -72,13 +77,14 @@ def main(argv):
     vistas = sum(len(a[f][0]) for f in comunes)
     objetos = sum(len(a[f][1]) for f in comunes)
     coches = sum(len(a[f][2]) // 99 for f in comunes)
-    if vistas == 0 and objetos == 0 and coches == 0:
+    marcas = sum(len(a[f][3]) for f in comunes)
+    if vistas == 0 and objetos == 0 and coches == 0 and marcas == 0:
         print('  sin vistas de carrera en el guion: nada que comparar')
         return 0
 
     fallos = 0
     for f in comunes:
-        (va, oa, ca), (vb, ob, cb) = a[f], b[f]
+        (va, oa, ca, ma), (vb, ob, cb, mb) = a[f], b[f]
         if len(va) != len(vb):
             print(f'  frame {f}: {len(va)} vistas contra {len(vb)}')
             fallos += 1
@@ -107,6 +113,15 @@ def main(argv):
                 print(f'  frame {f} coche {k // 99}, palabra {k % 99}: '
                       f'C {ca[k]:#x} contra {cb[k]:#x}')
             fallos += 1
+        if ma != mb:
+            if len(ma) != len(mb):
+                print(f'  frame {f}: {len(ma)} marcas contra {len(mb)}')
+            else:
+                k = next(i for i in range(len(ma)) if ma[i] != mb[i])
+                print(f'  frame {f} marca {k} de {len(ma)}:')
+                print(f'    C   {ma[k]}')
+                print(f'    ref {mb[k]}')
+            fallos += 1
         if fallos >= tope:
             print(f'  ... (cortado en {tope} diferencias)')
             break
@@ -114,7 +129,7 @@ def main(argv):
     if fallos:
         print(f'\nFALLO: {fallos} frames con la vista, los objetos o los coches distintos')
         return 1
-    print(f'\nOK: {vistas} vistas, {objetos} objetos y {coches} coches identicos '
+    print(f'\nOK: {vistas} vistas, {objetos} objetos, {coches} coches y {marcas} marcas identicos '
           f'en {len(comunes)} frames')
     return 0
 

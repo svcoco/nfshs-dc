@@ -32,6 +32,8 @@
 //!          detail quads - and u16 of padding
 //! sky      12 * 8 bytes: u16 atlas x, y, w, h de HZ01..HZ12 (ceros si la pista no la
 //!          trae). Van despues de los materiales.
+//! sfx      13 * 8 bytes, igual, de ZSFX.PSH: SHAD, SKD0, SKD1, LIN0..LIN9. Van
+//!          despues del cielo.
 //! materials materials * 16 bytes: u16 atlas x, y, w, h, u8 corner[4] (which rect
 //!          corner each of the four vertices takes), u8 flags (1 doble cara,
 //!          2 semitransparente, 4 suma en vez de mitad, 8 textura que se desplaza),
@@ -195,20 +197,47 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
             used.insert(i as u16);
         }
     }
-    let items: Vec<(u16, u32, u32)> = used
+    // Los efectos (M2c paso 6) usan formas de ZSFX.PSH, que es OTRO archivo: la sombra de
+    // los coches (SHAD), las marcas de neumatico (SKD0, SKD1) y las lineas pintadas
+    // (LIN0..LIN9). Van al atlas con ids por encima de 0x8000, para no chocar con los
+    // indices de formas de la pista.
+    const SFX: [&str; 13] = ["SHAD", "SKD0", "SKD1", "LIN0", "LIN1", "LIN2", "LIN3", "LIN4",
+                             "LIN5", "LIN6", "LIN7", "LIN8", "LIN9"];
+    let zsfx_path = std::path::Path::new(grp_path).parent()
+        .map(|d| d.join("ZSFX.PSH")).unwrap_or_else(|| "ZSFX.PSH".into());
+    let zsfx = std::fs::read(&zsfx_path).ok().and_then(|d| Psh::parse(&d).ok());
+    let mut sfx_id: [Option<u16>; 13] = [None; 13];
+    if let Some(z) = &zsfx {
+        for (k, n) in SFX.iter().enumerate() {
+            if z.shapes.iter().any(|s| s.name == *n) {
+                sfx_id[k] = Some(0x8000 + k as u16);
+            }
+        }
+    }
+    let sfx_shape = |id: u16| -> Option<&crate::formats::psh::Shape> {
+        let z = zsfx.as_ref()?;
+        z.shapes.iter().find(|s| s.name == SFX[(id - 0x8000) as usize])
+    };
+    let mut items: Vec<(u16, u32, u32)> = used
         .iter()
         .filter_map(|&s| {
             let sh = shapes.shapes.get(s as usize)?;
             Some((s, sh.width.max(1) as u32, sh.height.max(1) as u32))
         })
         .collect();
+    for id in sfx_id.iter().flatten() {
+        if let Some(sh) = sfx_shape(*id) {
+            items.push((*id, sh.width.max(1) as u32, sh.height.max(1) as u32));
+        }
+    }
     let mut atlas = Atlas::new(ATLAS_MAX);
     let Some(puestas) = atlas.pack(&items) else {
         bail!("las formas no caben en un atlas de {ATLAS_MAX}x{ATLAS_MAX}");
     };
     let mut rects: std::collections::HashMap<u16, Rect> = std::collections::HashMap::new();
     for (s, r) in puestas {
-        if let Some(sh) = shapes.shapes.get(s as usize) {
+        let forma = if s >= 0x8000 { sfx_shape(s) } else { shapes.shapes.get(s as usize) };
+        if let Some(sh) = forma {
             atlas.blit(&r, &sh.rgba);
         }
         rects.insert(s, r);
@@ -320,10 +349,21 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
         put16(&mut sky, h as u16);
     }
 
+    // la tabla de efectos: 13 rectangulos de 8 bytes (SHAD, SKD0, SKD1, LIN0..LIN9)
+    let mut sfx = Vec::new();
+    for k in 0..13usize {
+        let r = sfx_id[k].and_then(|s| rects.get(&s));
+        let (x, y, w, h) = r.map_or((0, 0, 0, 0), |r| (r.x, r.y, r.w, r.h));
+        put16(&mut sfx, x as u16);
+        put16(&mut sfx, y as u16);
+        put16(&mut sfx, w as u16);
+        put16(&mut sfx, h as u16);
+    }
+
     let (aw, ah, texels) = atlas.finish();
     let mut out_buf = Vec::new();
     out_buf.extend_from_slice(b"NFST");
-    put32(&mut out_buf, 3);   /* version 3: anade los modelos de objeto */
+    put32(&mut out_buf, 4);   /* version 4: anade la tabla de efectos (ZSFX) */
     put16(&mut out_buf, track.blocks.len() as u16);
     put16(&mut out_buf, track.textures.len() as u16);
     put16(&mut out_buf, aw as u16);
@@ -335,12 +375,13 @@ pub fn bake(grp_path: &str, psh_path: &str, out: &std::path::Path) -> Result<()>
     put32(&mut out_buf, n_mverts);
     put32(&mut out_buf, n_mquads);
     let atlas_off = out_buf.len() as u32 + 4 + blocks.len() as u32 + mats.len() as u32
-        + sky.len() as u32 + models.len() as u32 + mverts.len() as u32
+        + sky.len() as u32 + sfx.len() as u32 + models.len() as u32 + mverts.len() as u32
         + mquads.len() as u32 + verts.len() as u32 + quads.len() as u32;
     put32(&mut out_buf, atlas_off);
     out_buf.extend_from_slice(&blocks);
     out_buf.extend_from_slice(&mats);
     out_buf.extend_from_slice(&sky);
+    out_buf.extend_from_slice(&sfx);
     out_buf.extend_from_slice(&models);
     out_buf.extend_from_slice(&mverts);
     out_buf.extend_from_slice(&mquads);
@@ -398,7 +439,7 @@ fn verifica(d: &[u8]) -> Result<()> {
     let u16a = |o: usize| u16::from_le_bytes([d[o], d[o + 1]]) as usize;
     let u32a = |o: usize| u32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]]) as usize;
 
-    if &d[..4] != b"NFST" || u32a(4) != 3 {
+    if &d[..4] != b"NFST" || u32a(4) != 4 {
         bail!("cabecera equivocada");
     }
     let (nb, nm) = (u16a(8), u16a(10));
@@ -408,7 +449,7 @@ fn verifica(d: &[u8]) -> Result<()> {
     let (aw, ah) = (u16a(12), u16a(14));
     let blk = 40;
     let mat = blk + nb * 44;
-    let mdl = mat + nm * 16 + 12 * 8;   /* materiales + la tabla del cielo */
+    let mdl = mat + nm * 16 + 12 * 8 + 13 * 8;   /* materiales + cielo + efectos */
     let mvt = mdl + nmod * 16;
     let mqd = mvt + nmv * 8;
     let vtx = mqd + nmq * 10;

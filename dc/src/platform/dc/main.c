@@ -176,6 +176,8 @@ static void *diag_thread(void *arg)
         printf("        coches: %lu vistos, %llu triangulos   objetos %lu\n",
                (unsigned long)host.cars_n, (unsigned long long)render_car_tris(),
                (unsigned long)host.objects_n);
+        printf("        efectos restados: %llu triangulos\n",
+               (unsigned long long)render_fx_tris());
         prev_calls = cpu.calls;
     }
     return NULL;

@@ -13,6 +13,7 @@
 #include "car.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -200,6 +201,8 @@ typedef struct {
     uint32_t pintados;
     int      cielo;           /* dibujando el cielo: no escribe profundidad */
     int      plano;           /* el cuadro en curso no lleva textura */
+    int      resta;           /* mezcla B*(1-F): lo que el PVR hace con sus factores */
+    float    zmul;            /* acerca lo dibujado a la camara (z de 1/w) */
 } Pista;
 
 static void tri_pista(Pista *P, const TrackVert *a, const TrackVert *b,
@@ -246,7 +249,9 @@ static void tri_pista(Pista *P, const TrackVert *a, const TrackVert *b,
             la = w1; lb = w2; lc = w0;
             iz = la * a->z + lb * b->z + lc * c->z;
             o = (size_t)y * P->w + x;
-            if (iz <= P->z[o])
+            iz *= P->zmul;
+            /* el efecto va con GEQUAL y sin escribir: tiene que poder empatar con lo opaco */
+            if (P->resta ? iz < P->z[o] : iz <= P->z[o])
                 continue;                /* hay algo mas cerca */
             if (P->plano) {
                 /* sin textura: PS1 pinta el color del vertice tal cual */
@@ -277,6 +282,15 @@ static void tri_pista(Pista *P, const TrackVert *a, const TrackVert *b,
             r = (int)(((t >> 10) & 0x1F) << 3) * (int)((a->argb >> 16) & 0xFF) / 255;
             g = (int)(((t >> 5) & 0x1F) << 3) * (int)((a->argb >> 8) & 0xFF) / 255;
             bb = (int)((t & 0x1F) << 3) * (int)(a->argb & 0xFF) / 255;
+            if (P->resta) {
+                /* B - F, aproximado como el PVR lo hace: B * (1 - F). Factor de origen
+                 * ZERO y de destino INVERSE-OTHER-COLOUR. */
+                P->rgb[o * 3u + 0u] = (uint8_t)(P->rgb[o * 3u + 0u] * (255 - CLAMP255(r)) / 255);
+                P->rgb[o * 3u + 1u] = (uint8_t)(P->rgb[o * 3u + 1u] * (255 - CLAMP255(g)) / 255);
+                P->rgb[o * 3u + 2u] = (uint8_t)(P->rgb[o * 3u + 2u] * (255 - CLAMP255(bb)) / 255);
+                P->pintados++;
+                continue;
+            }
             if (!P->cielo)
                 P->z[o] = iz;
             P->rgb[o * 3u + 0u] = (uint8_t)CLAMP255(r);
@@ -304,7 +318,7 @@ int raster_track(const GameHost *h, const Track *track, const char *path,
     static float zbuf[640 * 480];
     Pista P;
     TrackStats st, sst, ost;
-    uint32_t coches_tri = 0;
+    uint32_t coches_tri = 0, efectos_tri = 0;
     FILE *f;
 
     if (w <= 0 || hh <= 0 || (size_t)w * hh * 3u > sizeof rgb || h->views_n == 0u)
@@ -325,6 +339,8 @@ int raster_track(const GameHost *h, const Track *track, const char *path,
     P.pintados = 0;
     P.cielo = 0;
     P.plano = 0;
+    P.resta = 0;
+    P.zmul = 1.0f;
 
     /* El cielo primero: va detras de todo y no escribe profundidad. */
     P.cielo = 1;
@@ -358,11 +374,35 @@ int raster_track(const GameHost *h, const Track *track, const char *path,
                 strncpy(modelo.code, d->code, sizeof modelo.code - 1u);
             }
             P.atlas = modelo.atlas; P.aw = modelo.atlas_w; P.ah = modelo.atlas_h;
-            car_draw(&modelo, d, &h->view[0], (float)w, (float)hh, emite, &P, &cst);
+            car_draw(&modelo, d, &h->view[0], 0, (float)w, (float)hh, emite, &P, &cst);
             coches_tri += cst.quads_out;
         }
         P.atlas = track->atlas; P.aw = track->atlas_w; P.ah = track->atlas_h;
+
+        /* Los efectos que el original dibuja RESTANDO: la sombra de cada coche en el
+         * suelo y la de sus pasos de rueda. Van despues de todo lo opaco. */
+        P.resta = 1;
+        P.zmul = 1.003f;
+        for (ci = 0; ci < h->cars_n && ci < CARS_MAX && getenv("PS1_NOFX") == NULL; ci++) {
+            const CarDraw *d = &h->car_draw[ci];
+            TrackStats est;
+
+            if (d->code[0] == 0)
+                continue;
+            P.atlas = track->atlas; P.aw = track->atlas_w; P.ah = track->atlas_h;
+            car_shadow(track, d, &h->view[0], (float)w, (float)hh, emite, &P, &est);
+            efectos_tri += est.quads_out;
+            if (strncmp(modelo.code, d->code, sizeof modelo.code) == 0 && modelo.raw != NULL) {
+                P.atlas = modelo.atlas; P.aw = modelo.atlas_w; P.ah = modelo.atlas_h;
+                car_draw(&modelo, d, &h->view[0], 1, (float)w, (float)hh, emite, &P, &est);
+                efectos_tri += est.quads_out;
+            }
+        }
+        P.resta = 0;
+        P.zmul = 1.0f;
+        P.atlas = track->atlas; P.aw = track->atlas_w; P.ah = track->atlas_h;
     }
+    printf("  efectos restados: %u triangulos\n", (unsigned)efectos_tri);
     printf("  coches: %u dibujados -> %u triangulos\n",
            (unsigned)h->cars_n, (unsigned)coches_tri);
     printf("  objetos: %u dibujados -> %u triangulos\n",

@@ -153,8 +153,11 @@ Dos cosas que M2c ensenaron y que valen para M3:
   y un comparador que se para a las N diferencias escondio 669 frames de carrera detras de
   una deuda vieja de los menus. Se arreglaron los dos.
 
-**Pendiente de decision de Jorge:** como resolver lo que el PVR no puede (reflejos y
-sombras sustractivos), y si se mide en consola real el coste de restar con el SH-4 antes
-de elegir. Ver `docs/bitacora.md`, seccion «Abierto».
+**Decision de Jorge (2026-10-25):** lo que el PVR no puede se resuelve con tecnicas
+conocidas del propio PVR, sin renderizado por software en el SH-4 —ni una parte pequena,
+porque rompe la arquitectura— y sin escribir nada que dependa de hardware real. Lo
+sustractivo (`B - F`) se hace con la mezcla `ZERO` / `INVERSE-OTHER-COLOUR`, que da
+`B * (1 - F)`; se verifico dibujando una cuadricula gris del 50 %, no se dio por supuesto.
+Ver `docs/bitacora.md`.
 
 Detalle y cifras en `docs/hitos/M2b.md` y `docs/hitos/M2c.md`.

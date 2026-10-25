@@ -378,7 +378,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 3 | Grabación de los coches | **Hecho**, validado palabra a palabra |
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
-| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | Siguiente |
+| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **En curso**: hechas las sombras restadas (coches y pasos de rueda) |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -439,6 +439,35 @@ de VRAM por coche).
 apagado el ritmo es el mismo, así que la caída de ~60 a 30–40 fps la produce el paso 3,
 que corre código real del juego cada frame. Es trabajo de M3.
 
+### Paso 6: los efectos (en curso)
+
+**Lo sustractivo, con la mezcla del PVR.** La PS1 tiene un modo que resta (`B − F`); el PVR
+suma siempre sus dos factores. La técnica conocida para oscurecer sin shaders es
+multiplicativa: origen `ZERO` y destino `INVERSE-OTHER-COLOUR`, o sea `B·(1 − F)`. Lo hace
+el PVR entero. KOS lo llama `PVR_BLEND_INVDESTCOLOR`, pero en el factor de **destino**
+actúa sobre el color de **origen**.
+
+**Verificado dibujando, no supuesto:** un rectángulo gris del 50 % sobre media pantalla
+dejó esa mitad a **0,50 / 0,48 / 0,49** de la otra en la carretera y 0,52–0,54 en el cielo
+(que tiene degradado), sin invertir el contraste. Es `B·(1 − 0,5)`.
+
+Va a la lista **translúcida**, antes del overlay 2D, con la profundidad probada contra lo
+opaco (`GEQUAL`, sin escribir) y los cuadros acercados un 0,3 % a la cámara para que no se
+hundan en lo que cubren.
+
+**Hechas:** la sombra de cada coche en el suelo (`SHAD` de `ZSFX.PSH`, sobre el cuadro de
+`Newton_CalcRealShadowCoordinates`, elevada sobre la carretera como hace la referencia) y
+la sombra de los **pasos de rueda** (las partes marcadas `subtract` del modelo). Las
+formas de `ZSFX.PSH` —`SHAD`, `SKD0`, `SKD1` y `LIN0..LIN9`— ya van en el atlas del `.TRK`
+(versión 4), que servirá también para las marcas y las líneas.
+
+Medido en el arnés de PC con un frame real: la sombra oscurece 83 píxeles, 11,6 de media
+(máximo 24), en una franja de 3 filas en la base del coche. En Flycast el pase corre
+(2 340 triángulos restados acumulados). Sin oráculo para la imagen: se mide, no se compara.
+
+**Faltan:** marcas de neumático, líneas pintadas, destellos y halos de luces, humo, clima
+y los reflejos.
+
 ### Paso 5: el HUD
 
 En carrera **no se sustituyen los ayudantes**: corre el código original y el host graba
@@ -463,6 +492,12 @@ Las de `CLAUDE.md` §3 siguen en pie. Lo que ha cambiado o se ha precisado:
   dibuja a **512×240** (no a 320×240), así que el factor vertical es ×2 y el horizontal
   ×1,25.
 - **Toolchain del AICA:** no se instala. KOS usa su driver precompilado.
+- **Lo que el PVR no hace, se resuelve con técnicas conocidas del PVR (decisión de
+  Jorge, 2026-10-25).** Nada de renderizado por software en el SH-4, ni una parte pequeña,
+  porque rompe la arquitectura; y no se escribe nada que dependa de pruebas en hardware
+  real. Por eso lo sustractivo (modo 2 de PS1, `B − F`) se hace con la mezcla del PVR
+  `ZERO` / `INVERSE-OTHER-COLOUR` = `B·(1 − F)`. Descartados: renderizar a textura y restar
+  con el SH-4 (es software, y su coste dependería de medir en consola).
 - **`Render_RenderPlayerView`:** se porta su parte de **lógica** (cámara, trozos de
   pista, HUD) y no su grabación de geometría, que es M2b y M2c.
 
@@ -561,17 +596,9 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **Alcance:** si la primera versión incluye 2P y FMV.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.
 - **Autor de nfshs-rs:** contacto sobre licencia y posible colaboración.
-- **Reflejos y sombras sustractivos (decisión de Jorge pendiente).** El PVR suma siempre
-  sus dos factores de mezcla: no existe `B − F`, que es el modo 2 de la semitransparencia
-  de PS1. Lo usan los reflejos de los coches y la sombra de los pasos de rueda; hoy esas
-  piezas **no se dibujan**. Alternativas: oscurecer con alfa sobre negro (proporcional,
-  no exacto), volúmenes modificadores (solo sombras), no dibujarlos, o **renderizar a
-  textura y restar con el SH-4** (el más exacto).
-- **Medir el coste de leer VRAM desde el SH-4 en consola real.** Decide si la resta por
-  SH-4 es viable. Era una estimación mía («es caro») y no está medida; Flycast no modela
-  ese coste. KOS ofrece `pvr_scene_begin_rtt()` y los contadores de `perfctr.h`. Se haría
-  con un programa de prueba que lea 640×480 de VRAM y cronometre el ciclo de render a
-  textura, y necesita el CDI quemado.
+- **Reflejos de los coches.** Son lo único sustractivo que queda sin dibujar. Necesitan
+  las normales por vértice y los mapas de reflejo de la pista; se harán con la misma
+  mezcla del PVR que las sombras (ver «Decisiones vigentes»).
 - **Modelos y texturas sustituibles** (p. ej. un coche de mayor resolución): **fuera del
   plan** por decisión de Jorge. El formato `.CAR` ya se carga por código de coche, pero
   habría que resolver los 57 huecos de partes, los faros y abolladuras por triángulo, el

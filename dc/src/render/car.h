@@ -48,8 +48,18 @@ typedef struct {
 int  car_load(CarModel *m, const char *path);
 void car_free(CarModel *m);
 
-/* Dibuja un coche. `m` es su modelo y `d` lo que el juego decidio de el este frame. */
+/* Dibuja un coche. `m` es su modelo y `d` lo que el juego decidio de el este frame.
+ *
+ * `solo_resta` elige QUE partes: 0 dibuja el coche (sin las marcadas `subtract`), 1 dibuja
+ * SOLO esas, que son la sombra de los pasos de rueda y el original dibuja restando. Va en
+ * su propia pasada porque la mezcla es distinta y tiene que ir despues de todo lo opaco. */
 void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView *view,
-              float sw, float sh, TrackEmit emit, void *user, TrackStats *st);
+              int solo_resta, float sw, float sh, TrackEmit emit, void *user, TrackStats *st);
+
+/* La sombra de un coche en el suelo (DrawC_ShadowPrim): la forma SHAD del atlas de la pista
+ * sobre el cuadro que calculo Newton_CalcRealShadowCoordinates, con el color de la luz.
+ * Se dibuja restando. No hace nada si el juego no la pide para ese coche. */
+void car_shadow(const Track *t, const struct CarDraw *d, const struct RaceView *view,
+                float sw, float sh, TrackEmit emit, void *user, TrackStats *st);
 
 #endif /* PS1_RENDER_CAR_H */

@@ -113,6 +113,13 @@ typedef struct CarDraw {
     uint16_t wheel_rot[2];     /* giro de las ruedas delanteras y traseras */
     int32_t  wheel_steer;
     uint8_t  parts[57];        /* R3DCar_ObjectVisible: 1..16 se dibuja, >=17 es halo */
+    /* La sombra en el suelo (DrawC_ShadowPrim): las esquinas que calculo
+     * Newton_CalcRealShadowCoordinates, relativas a la posicion del coche en x y z (la y
+     * es la altura de mundo), y su color. Solo se dibuja con `shadow_on`, con el coche
+     * visible (`env_ok`) y sin aparcar, que es lo que exige la referencia. */
+    uint8_t  shadow_on, env_ok, parked, pad_s;
+    int32_t  shadow[4][3];
+    uint8_t  shadow_rgb[3];
 } CarDraw;
 
 /* 99 palabras por coche; hasta 8 coches mas holgura. */

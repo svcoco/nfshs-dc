@@ -70,6 +70,12 @@ typedef struct {
 /* El rectangulo de una forma HZ01..HZ12 en el atlas; w = 0 si la pista no la trae. */
 typedef struct { uint16_t x, y, w, h; } TrackSkyRect;
 
+/* Indices de la tabla de efectos (`Track.sfx`). */
+#define SFX_SHAD 0u
+#define SFX_SKD0 1u
+#define SFX_SKD1 2u
+#define SFX_LIN0 3u   /* LIN0..LIN9 */
+
 /* Un modelo de objeto del escenario (M2c). Sus vertices van en 1/64 m alrededor del
  * punto donde el juego lo coloca. Como los bloques, se decodifica: en el archivo son 16
  * bytes con pares que C rellenaria. */
@@ -87,6 +93,7 @@ typedef struct {
     const uint16_t   *quad;   /* 5 uint16 por cuadro: v[4] y el material */
     const uint16_t   *atlas;  /* ARGB1555 */
     TrackSkyRect      sky[12];   /* HZ01..HZ12, para el cielo */
+    TrackSkyRect      sfx[13];   /* de ZSFX.PSH: SHAD, SKD0, SKD1, LIN0..LIN9 */
     TrackModel       *model;     /* decodificado */
     const int16_t    *mvert;     /* charcos de los modelos */
     const uint16_t   *mquad;

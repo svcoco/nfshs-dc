@@ -157,6 +157,18 @@ static int car_hook(Cpu *c, uint32_t addr)
         for (i = 0; i < 9u; i++)
             d->orient[i] = (int32_t)ps1_r32(c, car + 0xF0u + 4u * i);
         d->light = light;
+        d->shadow_on = (uint8_t)(ps1_r32(c, ADDR_SHADOW_ON) != 0u);
+        d->env_ok = (uint8_t)ok;
+        d->parked = (uint8_t)((ps1_r32(c, car + 0x570u) & 4u) != 0u);
+        for (i = 0; i < 12u; i++)
+            d->shadow[i / 3u][i % 3u] = (int32_t)(ps1_r32(c, car + 488u + 4u * i) - pos[i % 3u]);
+        {
+            uint32_t sc = ps1_r32(c, ADDR_SHADOW_COLOUR);
+
+            d->shadow_rgb[0] = (uint8_t)sc;
+            d->shadow_rgb[1] = (uint8_t)(sc >> 8);
+            d->shadow_rgb[2] = (uint8_t)(sc >> 16);
+        }
         d->wheel_rot[0] = (uint16_t)ps1_r32(c, car + 0xD0u);
         d->wheel_rot[1] = (uint16_t)ps1_r32(c, car + 0xD4u);
         /* El giro de las ruedas delanteras: el original escala la direccion con la

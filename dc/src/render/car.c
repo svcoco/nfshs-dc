@@ -129,7 +129,7 @@ static void norm3(float v[3])
 }
 
 void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView *view,
-              float sw, float sh, TrackEmit emit, void *user, TrackStats *st)
+              int solo_resta, float sw, float sh, TrackEmit emit, void *user, TrackStats *st)
 {
     View vw;
     TrackMat mat;
@@ -193,6 +193,10 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
         if (tono > 255u)
             tono = 255u;
     }
+    /* las partes que se restan llevan su color tal cual, sin el tono de la luz: asi las
+     * dibuja la referencia (car_arch_shadows) */
+    if (solo_resta)
+        tono = 128u;
 
     for (pi = 0; pi < m->parts && pi < 57u; pi++) {
         const CarPart *p = &m->part[pi];
@@ -202,7 +206,10 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
         uint32_t t;
 
         /* 1..16 se dibuja; 0 no esta y 17 en adelante son halos de luz, que son 2D */
-        if (on == 0u || on >= 17u || p->subtract || p->vert_n == 0u)
+        if (on == 0u || on >= 17u || p->vert_n == 0u)
+            continue;
+        /* cada pasada dibuja un tipo de partes: las normales, o solo las que se restan */
+        if ((p->subtract != 0u) != (solo_resta != 0))
             continue;
 
         if (es_rueda) {
@@ -261,5 +268,92 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
             }
             triangulo(&vw, tri, &mat, emit, user, st);
         }
+    }
+}
+
+/* ---- la sombra en el suelo ---- */
+
+void car_shadow(const Track *t, const struct CarDraw *d, const struct RaceView *view,
+                float sw, float sh, TrackEmit emit, void *user, TrackStats *st)
+{
+    static const int per[4] = { 0, 1, 3, 2 };   /* perimetro del cuadro */
+    const TrackSkyRect *r = &t->sfx[SFX_SHAD];
+    View vw;
+    TrackMat mat;
+    Cv q[4];
+    float cx, cz, suelo;
+    uint32_t luz, cb[3], k, argb;
+    int todo_cero = 1;
+
+    if (st != NULL)
+        memset(st, 0, sizeof(*st));
+    if (!d->shadow_on || !d->env_ok || d->parked || t->raw == NULL || r->w == 0u)
+        return;
+    for (k = 0; k < 12u; k++)
+        if (d->shadow[k / 3u][k % 3u] != 0)
+            todo_cero = 0;
+    if (todo_cero)
+        return;
+
+    view_init(&vw, view, sw, sh);
+    memset(&mat, 0, sizeof mat);
+
+    /* el tono: la media de los canales de la luz, con el minimo de 24 de car_light */
+    luz = ((d->light & 0xFFu) + ((d->light >> 8) & 0xFFu) + ((d->light >> 16) & 0xFFu)) / 3u;
+    if (luz < 24u)
+        luz = 24u;
+    for (k = 0; k < 3u; k++) {
+        cb[k] = (luz * (uint32_t)d->shadow_rgb[k]) >> 8;
+        cb[k] = cb[k] * 2u > 255u ? 255u : cb[k] * 2u;   /* el 0x80 de PS1 es el 1,0 */
+    }
+    argb = 0xFF000000u | (cb[0] << 16) | (cb[1] << 8) | cb[2];
+
+    cx = -(float)d->pos[0] / 65536.0f;
+    cz = (float)d->pos[2] / 65536.0f;
+    suelo = ((float)d->pos[1] - (float)d->dimension[1]) / 65536.0f;
+
+    for (k = 0; k < 4u; k++) {
+        int c = per[k];
+        float p[3], to[3], dist, empuje, dd[3];
+        /* la forma SHAD, con medio texel de margen como la referencia */
+        float u = (c & 1) ? (float)r->w - 0.5f : 0.5f;
+        float v = (c & 2) ? (float)r->h - 0.5f : 0.5f;
+        uint32_t j;
+
+        p[0] = cx - (float)d->shadow[c][0] / 65536.0f;
+        p[1] = (float)d->shadow[c][1] / 65536.0f;
+        p[2] = cz + (float)d->shadow[c][2] / 65536.0f;
+        if (p[1] < suelo)
+            p[1] = suelo;
+        p[1] += 0.03f;
+        /* El original no tiene buffer de profundidad: aqui el cuadro se acerca a la
+         * camara (over_road de la referencia) para que no se hunda bajo la carretera. */
+        for (j = 0; j < 3u; j++)
+            to[j] = vw.cam[j] - p[j];
+        dist = sqrtf(to[0] * to[0] + to[1] * to[1] + to[2] * to[2]);
+        empuje = 0.25f + dist * 0.06f;
+        if (empuje > 1.2f)
+            empuje = 1.2f;
+        if (empuje > dist * 0.5f)
+            empuje = dist * 0.5f;
+        for (j = 0; j < 3u; j++)
+            p[j] += to[j] / (dist > 1e-3f ? dist : 1e-3f) * empuje;
+
+        for (j = 0; j < 3u; j++)
+            dd[j] = p[j] - vw.cam[j];
+        q[k].x = vw.row[0][0] * dd[0] + vw.row[0][1] * dd[1] + vw.row[0][2] * dd[2];
+        q[k].y = vw.row[1][0] * dd[0] + vw.row[1][1] * dd[1] + vw.row[1][2] * dd[2];
+        q[k].z = vw.row[2][0] * dd[0] + vw.row[2][1] * dd[1] + vw.row[2][2] * dd[2];
+        q[k].u = ((float)r->x + u) / (float)t->atlas_w;
+        q[k].v = ((float)r->y + v) / (float)t->atlas_h;
+        q[k].argb = argb;
+    }
+    {
+        Cv tri[3];
+
+        tri[0] = q[0]; tri[1] = q[1]; tri[2] = q[2];
+        triangulo(&vw, tri, &mat, emit, user, st);
+        tri[0] = q[0]; tri[1] = q[2]; tri[2] = q[3];
+        triangulo(&vw, tri, &mat, emit, user, st);
     }
 }

@@ -28,7 +28,7 @@ int track_load(Track *t, const char *path)
 {
     FILE *f;
     long size;
-    uint32_t off_blk, off_mat, off_sky, off_mdl, off_mvt, off_mqd, off_vtx, off_qd;
+    uint32_t off_blk, off_mat, off_sky, off_sfx, off_mdl, off_mvt, off_mqd, off_vtx, off_qd;
     uint32_t atlas_off, i;
 
     memset(t, 0, sizeof(*t));
@@ -54,7 +54,7 @@ int track_load(Track *t, const char *path)
     fclose(f);
     t->size = (uint32_t)size;
 
-    if (memcmp(t->raw, "NFST", 4) != 0 || rd32(t->raw + 4) != 3u) {
+    if (memcmp(t->raw, "NFST", 4) != 0 || rd32(t->raw + 4) != 4u) {
         track_free(t);
         return 0;
     }
@@ -74,7 +74,8 @@ int track_load(Track *t, const char *path)
     off_blk = 40u;
     off_mat = off_blk + (uint32_t)t->blocks * 44u;
     off_sky = off_mat + (uint32_t)t->mats * 16u;
-    off_mdl = off_sky + 12u * 8u;
+    off_sfx = off_sky + 12u * 8u;
+    off_mdl = off_sfx + 13u * 8u;
     off_mvt = off_mdl + (uint32_t)t->models * 16u;
     off_mqd = off_mvt + t->mverts * 8u;
     off_vtx = off_mqd + t->mquads * 10u;
@@ -110,6 +111,14 @@ int track_load(Track *t, const char *path)
         t->sky[i].y = rd16(p + 2u);
         t->sky[i].w = rd16(p + 4u);
         t->sky[i].h = rd16(p + 6u);
+    }
+    for (i = 0; i < 13u; i++) {
+        const uint8_t *p = t->raw + off_sfx + (size_t)i * 8u;
+
+        t->sfx[i].x = rd16(p);
+        t->sfx[i].y = rd16(p + 2u);
+        t->sfx[i].w = rd16(p + 4u);
+        t->sfx[i].h = rd16(p + 6u);
     }
     t->vert = (const int16_t *)(const void *)(t->raw + off_vtx);
     t->quad = (const uint16_t *)(const void *)(t->raw + off_qd);

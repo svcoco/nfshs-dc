@@ -108,6 +108,7 @@ static void pista_carga(const char *nombre)
 #define MODO_PISTA       2
 
 static int s_modo;
+static float s_zmul = 1.0f;   /* acerca lo dibujado a la camara; ver los efectos */
 /* Fase del dibujo del mundo. Solo el cielo cambia de contexto sobre la marcha (sus
  * cuadros son unos planos y otros con textura); la pista y los coches lo fijan antes y
  * el sumidero no lo toca. */
@@ -157,7 +158,7 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
             pv.flags = PVR_CMD_VERTEX_EOL;
         pv.x = v[i].x;
         pv.y = v[i].y;
-        pv.z = v[i].z;
+        pv.z = v[i].z * s_zmul;
         pv.u = v[i].u;
         pv.v = v[i].v;
         pv.argb = v[i].argb;
@@ -182,6 +183,8 @@ static uint32_t s_coches_n;
 static uint64_t s_tri_coches;
 
 uint64_t render_car_tris(void) { return s_tri_coches; }
+static uint64_t s_tri_efectos;
+uint64_t render_fx_tris(void)  { return s_tri_efectos; }
 
 /* Devuelve el indice en la cache, o 0xFFFFFFFF si no se pudo. */
 static uint32_t coche_modelo(const char *code)
@@ -247,10 +250,78 @@ static void coches_dibuja(GameHost *h)
         cxt.gen.culling = PVR_CULLING_NONE;
         pvr_poly_compile(&hdr, &cxt);
         pvr_prim(&hdr, sizeof(hdr));
-        car_draw(&s_coches[k].modelo, d, &h->view[0], 640.0f, 480.0f,
+        car_draw(&s_coches[k].modelo, d, &h->view[0], 0, 640.0f, 480.0f,
                  pista_emite, NULL, &cst);
         s_tri_coches += cst.quads_out;
     }
+}
+
+/* ---- los efectos que el original dibuja RESTANDO (M2c paso 6) ----
+ *
+ * La PS1 tiene un modo de semitransparencia que resta (B - F). El PVR no: sus dos factores
+ * de mezcla se SUMAN. La tecnica conocida para oscurecer sin shaders es multiplicativa:
+ * factor de origen ZERO y de destino INVERSE-OTHER-COLOUR, que da  B * (1 - F).  Es la
+ * misma operacion que el modo 2 cuando F es un gris o un color poco intenso, y es lo que
+ * son una sombra o un hollin: oscurece en proporcion a lo que ya hay. Lo hace el PVR
+ * entero, sin tocar un pixel desde el SH-4.
+ *
+ * KOS llama a esos factores PVR_BLEND_DESTCOLOR / INVDESTCOLOR, pero en el factor de
+ * DESTINO actuan sobre el color de ORIGEN: el del propio poligono.
+ *
+ * Va a la lista TRANSLUCIDA, porque en la opaca y en la punch-through no hay mezcla, y
+ * ANTES del overlay 2D, que tiene que quedar encima. La profundidad se prueba contra lo
+ * opaco (GEQUAL, sin escribir), y los cuadros se acercan un poco a la camara para que no
+ * se hundan en la superficie sobre la que estan, ya que no hay un buffer de profundidad
+ * que los desempate como en el original.
+ */
+static void efecto_ctx(pvr_ptr_t atlas, uint32_t w, uint32_t hh)
+{
+    pvr_poly_cxt_t cxt;
+    pvr_poly_hdr_t hdr;
+
+    pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
+                     PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
+                     w, hh, atlas, PVR_FILTER_NONE);
+    cxt.blend.src = PVR_BLEND_ZERO;
+    cxt.blend.dst = PVR_BLEND_INVDESTCOLOR;
+    cxt.depth.comparison = PVR_DEPTHCMP_GEQUAL;
+    cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+    cxt.gen.culling = PVR_CULLING_NONE;
+    pvr_poly_compile(&hdr, &cxt);
+    pvr_prim(&hdr, sizeof(hdr));
+}
+
+static void efectos_dibuja(GameHost *h)
+{
+    uint32_t ci;
+
+    if (s_track.raw == NULL || s_atlas == NULL || h->views_n == 0u)
+        return;
+    s_fase = FASE_RESTO;         /* el sumidero no cambia de contexto por su cuenta */
+    s_zmul = 1.003f;
+    for (ci = 0; ci < h->cars_n && ci < CARS_MAX; ci++) {
+        const CarDraw *d = &h->car_draw[ci];
+        TrackStats est;
+        uint32_t k;
+
+        if (d->code[0] == 0)
+            continue;
+        /* la sombra del suelo usa SHAD, que vive en el atlas de la pista */
+        efecto_ctx(s_atlas, s_track.atlas_w, s_track.atlas_h);
+        car_shadow(&s_track, d, &h->view[0], 640.0f, 480.0f, pista_emite, NULL, &est);
+        s_tri_efectos += est.quads_out;
+
+        /* y la de los pasos de rueda, que son partes del propio coche y su atlas */
+        k = coche_modelo(d->code);
+        if (k != 0xFFFFFFFFu && s_coches[k].modelo.raw != NULL && s_coches[k].atlas != NULL) {
+            efecto_ctx(s_coches[k].atlas, s_coches[k].modelo.atlas_w,
+                       s_coches[k].modelo.atlas_h);
+            car_draw(&s_coches[k].modelo, d, &h->view[0], 1, 640.0f, 480.0f,
+                     pista_emite, NULL, &est);
+            s_tri_efectos += est.quads_out;
+        }
+    }
+    s_zmul = 1.0f;
 }
 
 static void pista_dibuja(GameHost *h)
@@ -481,6 +552,8 @@ void render_frame(GameHost *h)
     /* Primero el mundo, opaco y con Z; despues el overlay 2D encima. */
     pista_dibuja(h);
     pvr_list_begin(PVR_LIST_TR_POLY);
+    /* lo que se resta, antes del 2D para que este quede encima */
+    efectos_dibuja(h);
 
     for (i = h->overlay.n; i > 0u; i--) {
         const OverlayQuad *q = &h->overlay.quad[i - 1u];

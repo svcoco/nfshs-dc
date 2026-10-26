@@ -94,8 +94,14 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 - **Assets:** se hornean en el PC con una herramienta de build que reutiliza `src/formats`
   (Rust) de nfshs-rs. Las texturas quedan twiddled y paletizadas cuando conviene (el PVR
   tiene 1024 entradas de paleta), y las mallas quedan listas para dibujar.
-- **Audio:** se convierte antes de compilar (ADPCM de PS1 a formato AICA), en **M4**. En
-  M1 y M2 el SPU es un stub que acepta escrituras y mantiene el volumen de voz.
+- **Audio (decisión de Jorge, 2026-10-26, M4):** **el middleware de audio atrapa las
+  peticiones de audio del juego en la API del driver de EA** (tocar un efecto, arrancar un
+  stream, cargar un banco, volumen y tono) **y las procesa con el AICA**, con los bancos y
+  streams del disco. El SPU no se programa ni se emula: es el mismo principio que el render
+  (el juego decide qué suena; el middleware lo hace sonar con el hardware). Medido antes de
+  decidir (`docs/hitos/M4.md`): un SPU de PS1 fiel por software cuesta el 196 % de la CPU del
+  SH-4. Para el test diferencial, esas funciones se sustituyen en los dos lados, como hasta
+  ahora el SPU. (Sustituye a «se convierte antes de compilar».)
 - **Vídeo (en M2a):** 480p a 31 kHz (VGA) y 480i a 15 kHz. Se renderiza a 640×480 en
   ambos y el modo se elige con `vid_check_cable` (se puede forzar con `/cd/VIDEO.TXT`).
   **Hecho el 2026-10-23** (`dc/src/platform/dc/video.c`), comprobado con los dos cables.

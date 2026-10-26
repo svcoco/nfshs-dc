@@ -149,6 +149,39 @@ pub struct Spu {
     pub out: Vec<i16>,
     /// Keyed-on voices since the last [`Spu::take_keyons`] (diagnostics).
     pub keyons: u32,
+    /// M3/M4 (port a Dreamcast): estadisticas por segundo con NFSHS_SPUSTATS.
+    stats: SpuStats,
+    /// M4: NFSHS_SPUTRACE=archivo graba las escrituras y las muestras producidas, para
+    /// reproducirlas contra el SPU en C (dc/test/diff/spureplay.c).
+    trace: Option<std::io::BufWriter<std::fs::File>>,
+}
+
+/// Registros del rastro (little-endian): `W` a:u32 v:u32 n:u8 (escritura de la CPU);
+/// `D` madr:u32 len:u32 bytes (lo que el DMA 4 va a leer de la RAM principal, justo antes de
+/// la escritura de CHCR que lo arranca); `R` n:u32 y n muestras estereo (2n i16).
+fn trace_open() -> Option<std::io::BufWriter<std::fs::File>> {
+    let path = std::env::var_os("NFSHS_SPUTRACE")?;
+    std::fs::File::create(path).ok().map(std::io::BufWriter::new)
+}
+
+/// Lo que el juego usa del SPU, por segundo de tiempo virtual (NFSHS_SPUSTATS): voces que
+/// suenan, key-ons, bytes de DMA, reverb, ruido y modulacion de tono. Para dimensionar el
+/// audio del port a Dreamcast (docs/hitos/M4.md).
+#[derive(Default)]
+struct SpuStats {
+    samples: u32,
+    active_sum: u64,
+    active_max: u32,
+    /// las que suenan: nivel de envolvente y volumen distintos de 0
+    audible_sum: u64,
+    audible_max: u32,
+    keyon_events: u32,
+    dma_bytes: u64,
+    reverb: u32,
+    noise_voices: u32,
+    pmod_voices: u32,
+    pitch_max: u32,
+    seconds: u32,
 }
 
 impl Default for Spu {
@@ -175,6 +208,8 @@ impl Default for Spu {
             irqs: 0,
             out: Vec::new(),
             keyons: 0,
+            stats: SpuStats::default(),
+            trace: trace_open(),
         }
     }
 }
@@ -222,6 +257,7 @@ impl Spu {
         voice.phase = Phase::Attack;
         self.endx &= !(1 << v);
         self.keyons |= 1 << v;
+        self.stats.keyon_events += 1;
     }
 
     fn key_off(&mut self, v: usize) {
@@ -339,6 +375,7 @@ impl Spu {
             self.transfer_addr = (self.transfer_addr + 1) & (RAM_SIZE as u32 - 1);
         }
         self.check_irq(start, (words * 4) as u32);
+        self.stats.dma_bytes += (words * 4) as u64;
         if std::env::var_os("PS1_DMALOG").is_some() {
             eprintln!("dma4 {:#x} -> spu {start:#x}: {} bytes ({})", madr, words * 4, if chcr & 1 != 0 { "write" } else { "read" });
         }
@@ -566,6 +603,19 @@ impl Spu {
 
     /// Produce `n` stereo samples into `out`.
     pub fn run(&mut self, n: usize) {
+        let first = self.out.len();
+        self.run_inner(n);
+        if let Some(t) = &mut self.trace {
+            use std::io::Write;
+            let _ = t.write_all(b"R");
+            let _ = t.write_all(&(n as u32).to_le_bytes());
+            for s in &self.out[first..] {
+                let _ = t.write_all(&s.to_le_bytes());
+            }
+        }
+    }
+
+    fn run_inner(&mut self, n: usize) {
         self.out.reserve(n * 2);
         for _ in 0..n {
             self.noise_step();
@@ -611,6 +661,51 @@ impl Spu {
             }
             self.out.push(ol.clamp(-32768, 32767) as i16);
             self.out.push(or.clamp(-32768, 32767) as i16);
+            self.stat_sample();
+        }
+    }
+
+    fn stat_sample(&mut self) {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*ON.get_or_init(|| std::env::var_os("NFSHS_SPUSTATS").is_some()) {
+            return;
+        }
+        let mut active = 0u32;
+        let mut audible = 0u32;
+        for v in 0..24 {
+            if self.voices[v].phase != Phase::Off {
+                active += 1;
+                let vc = &self.voices[v];
+                if vc.level != 0 && (vc.vol[0] != 0 || vc.vol[1] != 0) {
+                    audible += 1;
+                }
+                let p = (self.reg((v as u32) << 4 | 4) as u32).min(0x4000);
+                self.stats.pitch_max = self.stats.pitch_max.max(p);
+            }
+        }
+        let s = &mut self.stats;
+        s.samples += 1;
+        s.active_sum += active as u64;
+        s.active_max = s.active_max.max(active);
+        s.audible_sum += audible as u64;
+        s.audible_max = s.audible_max.max(audible);
+        if self.regs[0x1AA >> 1] & 0x80 != 0 {
+            s.reverb += 1;
+        }
+        let non = self.regs[0x194 >> 1] as u32 | (self.regs[0x196 >> 1] as u32) << 16;
+        let pmon = self.regs[0x190 >> 1] as u32 | (self.regs[0x192 >> 1] as u32) << 16;
+        s.noise_voices = s.noise_voices.max(non.count_ones());
+        s.pmod_voices = s.pmod_voices.max((pmon & !1).count_ones());
+        if s.samples as u64 == RATE {
+            s.seconds += 1;
+            eprintln!(
+                "spustats s{:4}: voces media {:5.2} max {:2}  audibles media {:5.2} max {:2}  key-ons {:4}  dma {:7} B  reverb {:3}%  ruido {}  pmod {}  pitch max {:#06x}",
+                s.seconds, s.active_sum as f64 / s.samples as f64, s.active_max,
+                s.audible_sum as f64 / s.samples as f64, s.audible_max, s.keyon_events, s.dma_bytes,
+                s.reverb as u64 * 100 / RATE, s.noise_voices, s.pmod_voices, s.pitch_max
+            );
+            let sec = s.seconds;
+            *s = SpuStats { seconds: sec, ..Default::default() };
         }
     }
 }
@@ -637,6 +732,31 @@ impl IoBus for Spu {
     }
 
     fn write(&mut self, a: u32, v: u32, n: u32, ram: &mut [u8]) {
+        if let Some(t) = &mut self.trace {
+            use std::io::Write;
+            if a == DMA4_CHCR && v & 0x0100_0000 != 0 && v & 1 != 0 {
+                // lo que el DMA va a leer: los mismos calculos que dma4()
+                let bcr = self.dma4[1];
+                let words = match v >> 9 & 3 {
+                    0 => match bcr & 0xFFFF {
+                        0 => 0x1_0000,
+                        n => n,
+                    },
+                    _ => (bcr & 0xFFFF) * (bcr >> 16),
+                } as usize;
+                let src = self.dma4[0] as usize & 0x1F_FFFC;
+                let _ = t.write_all(b"D");
+                let _ = t.write_all(&(src as u32).to_le_bytes());
+                let _ = t.write_all(&((words * 4) as u32).to_le_bytes());
+                for k in 0..words * 4 {
+                    let _ = t.write_all(&[ram[(src + k) & (ram.len() - 1)]]);
+                }
+            }
+            let _ = t.write_all(b"W");
+            let _ = t.write_all(&a.to_le_bytes());
+            let _ = t.write_all(&v.to_le_bytes());
+            let _ = t.write_all(&[n as u8]);
+        }
         match a {
             DMA4_MADR => self.dma4[0] = v & 0xFF_FFFF,
             DMA4_BCR => self.dma4[1] = v,

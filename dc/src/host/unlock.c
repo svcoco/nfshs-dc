@@ -48,26 +48,3 @@ void host_unlock_everything(GameHost *h, Cpu *c)
     }
     h->unlocks++;
 }
-
-/* --clima: las condiciones de la carrera, escritas en GameSetup_tData (0x801144A4) en cada
- * frame del front end, en el mismo punto que lo desbloqueado. Es una herramienta de
- * prueba, no del juego: en "test drive" el front end no ofrece clima, y sin una carrera
- * con lluvia o nieve el clima no tiene ni oraculo ni imagen. La referencia hace lo mismo
- * con NFSHS_WEATHER, para que los dos lados sigan comparables. Valores como los de la
- * referencia (RaceSetup::game_setup): W mojado (clima 1, dia), S nieve (1, noche) y N
- * noche (0, 1). */
-#define GAMESETUP 0x801144A4u
-
-void host_force_weather(GameHost *h, Cpu *c)
-{
-    uint32_t clima, hora;
-
-    switch (h->clima) {
-    case 'W': clima = 1u; hora = 0u; break;
-    case 'S': clima = 1u; hora = 1u; break;
-    case 'N': clima = 0u; hora = 1u; break;
-    default: return;
-    }
-    ps1_w32(c, GAMESETUP + 0x48u, clima);
-    ps1_w32(c, GAMESETUP + 0x54u, hora);
-}

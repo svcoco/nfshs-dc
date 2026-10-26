@@ -231,24 +231,6 @@ fn unlock_everything(c: &mut Cpu) {
     }
 }
 
-/// NFSHS_WEATHER=W|S|N (test tool, as the C port's --clima): the race's conditions written
-/// into GameSetup_tData (0x801144A4: weather +0x48, time +0x54) on each front-end frame and
-/// when the race's main loop starts, before its track loads. The test drive offers no
-/// weather, and without a wet or snowy race the weather has neither oracle nor picture.
-pub(super) fn force_weather(c: &mut Cpu) {
-    static WEATHER: std::sync::OnceLock<Option<(u32, u32)>> = std::sync::OnceLock::new();
-    let w = *WEATHER.get_or_init(|| match std::env::var("NFSHS_WEATHER").as_deref() {
-        Ok("W") => Some((1, 0)),
-        Ok("S") => Some((1, 1)),
-        Ok("N") => Some((0, 1)),
-        _ => None,
-    });
-    if let Some((weather, time)) = w {
-        c.m.w32(0x8011_44A4 + 0x48, weather);
-        c.m.w32(0x8011_44A4 + 0x54, time);
-    }
-}
-
 pub const MAIN_LOOP_EXIT_FLAG: u32 = 0x8011_F380;
 /// `DRender_tView` the game renders the player view with (id, player, DRender_tCalcView).
 pub const RENDER_VIEW: u32 = 0x8011_8234;

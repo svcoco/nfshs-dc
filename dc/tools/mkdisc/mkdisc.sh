@@ -12,7 +12,6 @@
 #   mkdisc.sh ... --minimal       solo lo que la ejecucion medida toca (~90 MB)
 #   mkdisc.sh ... --script dc/test/diff/scripts/into_race.txt   entrada guionizada
 #   mkdisc.sh ... --video ntsc   fuerza el modo en vez de detectar el cable
-#   mkdisc.sh ... --clima W      fuerza mojado (W), nieve (S) o noche (N): prueba
 #
 # ---- las dos disposiciones, y por que CDI por omision ----
 #
@@ -29,7 +28,7 @@
 # ISO9660 son absolutos y KOS los lee tal cual (ver docs/hitos/M1b.md).
 set -eu
 
-ELF=""; DATA="gamedata"; OUT=""; MINIMAL=0; SCRIPT=""; FORMAT="cdi"; VIDEO=""; CLIMA=""
+ELF=""; DATA="gamedata"; OUT=""; MINIMAL=0; SCRIPT=""; FORMAT="cdi"; VIDEO=""
 BAKED="dc/build/baked"
 KOS_BASE="${KOS_BASE:-/opt/toolchains/dc/kos}"
 AQUI=$(dirname "$0")
@@ -43,7 +42,6 @@ while [ $# -gt 0 ]; do
         --script)  SCRIPT=$2; shift 2 ;;
         --format)  FORMAT=$2; shift 2 ;;
         --video)   VIDEO=$2; shift 2 ;;
-        --clima)   CLIMA=$2; shift 2 ;;
         --minimal) MINIMAL=1; shift ;;
         *) echo "opcion desconocida: $1" >&2; exit 2 ;;
     esac
@@ -95,11 +93,6 @@ set -- -as mkisofs -C "0,$LBA" -G "$TMP/IP.BIN" -R -l \
 if [ -n "$VIDEO" ]; then
     echo "$VIDEO" > "$TMP/VIDEO.TXT"
     set -- "$@" "/VIDEO.TXT=$TMP/VIDEO.TXT"
-fi
-# --clima W|S|N: herramienta de prueba, como --clima del arnes (ver dc/src/host/unlock.c)
-if [ -n "$CLIMA" ]; then
-    echo "$CLIMA" > "$TMP/CLIMA.TXT"
-    set -- "$@" "/CLIMA.TXT=$TMP/CLIMA.TXT"
 fi
 # Las pistas horneadas (make -C dc bake), si estan: el port carga /BAKED/<pista>.TRK
 # segun el .GRP que el juego abra.

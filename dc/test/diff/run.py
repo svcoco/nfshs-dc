@@ -72,10 +72,6 @@ def main(argv):
         ticks = argv[argv.index('--ticks') + 1]
     if '--solo' in argv:
         solo = argv[argv.index('--solo') + 1]
-    # CLIMA=W|S|N: fuerza mojado, nieve o noche en los DOS lados (--clima en el port,
-    # NFSHS_WEATHER en la referencia; ver dc/src/host/unlock.c). Sin el, la carrera de
-    # prueba no tiene clima y su grabacion no se compara.
-    clima = os.environ.get('CLIMA', '')
 
     os.makedirs(OUT, exist_ok=True)
     c_dump = os.path.join(OUT, 'c.d1')
@@ -99,7 +95,7 @@ def main(argv):
         # port la bandera esta apagada por defecto (ver dc/src/host/unlock.c).
         run([C_EXE, '--script', script, '--ticks', ticks, '--unlock', '--dump', c_dump,
              '--overlaydump', c_ovl, '--viewdump', c_view,
-             '--carcone', '2'] + (['--clima', clima] if clima else []),
+             '--carcone', '2'],
             {}, os.path.join(OUT, 'c.log'), 'C')
         n = fresh(c_dump, t0, 'C')
         print(f'  {n} frames')
@@ -112,8 +108,7 @@ def main(argv):
              'NFSHS_DIFF_OVERLAY': rust_ovl,
              'NFSHS_DIFF_VIEW': rust_view,
              'NFSHS_FRAMESRC': '1',
-             'TICKS': ticks,
-             'NFSHS_WEATHER': clima},
+             'TICKS': ticks},
             os.path.join(OUT, 'rust.log'), 'Rust')
         n = fresh(rust_dump, t0, 'Rust')
         print(f'  {n} frames')

@@ -317,20 +317,6 @@ int main(int argc, char **argv)
     /* Como la referencia por omision: marca pistas y coches como disponibles. Sin esto
      * no hay acceso a carreras (ver docs/hitos/M1a.md). */
     host.unlock = 1;
-    /* /cd/CLIMA.TXT (mkdisc --clima): fuerza mojado, nieve o noche. Es una herramienta de
-     * prueba, no del juego (ver dc/src/host/unlock.c). */
-    {
-        FILE *cf = fopen(GAMEDATA "/CLIMA.TXT", "r");
-
-        if (cf != NULL) {
-            int ch = fgetc(cf);
-
-            if (ch == 'W' || ch == 'S' || ch == 'N')
-                host.clima = (char)ch;
-            fclose(cf);
-            printf("clima forzado: %c\n", host.clima);
-        }
-    }
     /* El cono de visibilidad de los coches: 1 es el del original (4:3 de PS1). La
      * referencia usa 2, pero eso es una mejora suya y en el port va apagada
      * (docs/hitos/M1a.md). */

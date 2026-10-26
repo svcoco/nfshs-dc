@@ -52,7 +52,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | 3 | **Grabacion de los coches** | **Hecho (2026-10-24)**: 9 494 coches identicos a la referencia en 5 000 frames |
 | 4 | **Horneado y dibujo de los coches** | **Hecho (2026-10-24)**: los coches se ven; 30-40 fps, y el coste **no es dibujarlos** |
 | 5 | **El HUD** | **Hecho (2026-10-24)**: 4 769 frames de carrera con la lista 2D identica a la referencia, HUD incluido |
-| 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | **Hecho en emulador (2026-10-25)**: todos los efectos con oraculo, salvo la imagen; dos dudas del clima abiertas |
+| 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | **Hecho en emulador (2026-10-25)**: todos los efectos con oraculo, salvo la imagen; la lluvia, comparada con el original en DuckStation |
 
 Los pasos 1 y 3 van primero **porque tienen oraculo**, igual que la lista 2D de M2a y la
 vista de M2b: la referencia graba exactamente lo mismo, asi que se comparan campo a campo
@@ -417,17 +417,27 @@ miran a la cámara se dibujan otra vez con un mapa de reflejo de la pista.
 
 ### El clima
 
-| Escenario (`race_long`, 5 000 frames) | Cuadros de clima idénticos |
-|---|---|
-| seco | 0 |
-| lluvia (`CLIMA=W`) | 151 932 |
-| nieve (`CLIMA=S`) | 234 963 |
+El guion `dc/test/diff/scripts/lluvia.txt` llega a una carrera con lluvia **por los menús**:
+«single race», «weather» en ON en las opciones de pista y la compra del Mercedes SLK 230 (una
+carrera normal exige tener coche). El juego carga entonces `zTr06W.grp`, la variante mojada,
+que se hornea a `ZTR06W.TRK` como cualquier otra.
 
-Se fuerza con `--clima` / `NFSHS_WEATHER` / `mkdisc --clima` (herramienta de prueba, no del
-juego). El oráculo destapó que la conversión de líneas a cuadros del port solo coincidía con
-la referencia en pantalla: con una punta en x = 8 205 la normal en `f32` redondea distinto.
+| Oráculo (`lluvia.txt`, 6 000 frames) | Resultado |
+|---|---|
+| RAM y registros | idénticos en los 6 000 |
+| cuadros de clima | **694 736 idénticos** |
+| trazos fuera de los 11 bits de la GPU | 0 de 665 175 |
+| lista 2D | idéntica en carrera; los menús 296–1 160, con la deuda conocida de dos cuadros |
+
+El oráculo destapó que la conversión de líneas a cuadros del port solo coincidía con la
+referencia en pantalla: con una punta en x = 8 205 la normal en `f32` redondea distinto.
 Ahora se reproduce la aritmética `f32` exacta.
 
-**Abierto, sin una PS1 de referencia:** los trazos de lluvia con una punta fuera de los 11
-bits de la GPU (21 %) salen como líneas que cruzan la pantalla, y las gotas en la lente como
-cuadros oscuros. En los dos casos el port hace lo mismo que la referencia.
+**Referencia visual: el juego original en DuckStation** (renderer por software, BIOS
+SCPH-1001, el mismo camino de menús). Pista mojada, cielo de tormenta, trazos cortos y gotas
+como anillos pequeños; el port lo dibuja igual en el arnés y en Flycast.
+
+Un primer intento forzaba el clima escribiendo `GameSetup_tData`. El juego activaba la
+lluvia sobre la pista **seca** y sin sus texturas, y salían trazos que cruzaban la pantalla y
+gotas como cuadros oscuros, que parecían dudas sobre la GPU de PS1. Eran artefactos del
+forzado, que se retiró.

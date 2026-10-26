@@ -1,0 +1,82 @@
+# Una carrera CON LLUVIA, llegando por los menus como un jugador (M2c paso 6).
+#
+# En "test drive" el front end no ofrece clima. En "single race" si: en la pantalla de
+# pista, cuadrado abre las opciones y "weather" se pone en ON. Pero una carrera normal exige
+# TENER un coche, asi que antes se compra el Mercedes SLK 230 con los 20 000 de una partida
+# nueva. Con eso el juego carga la variante MOJADA de la pista (zTr06W.grp: cielo de
+# tormenta, asfalto mojado) y construye su lluvia. El mismo camino se recorrio en DuckStation
+# con el juego original, que es la referencia visual.
+#
+# Las pantallas se comprobaron con --textlog y dc/test/diff/screens.py. Ojo con el dialogo
+# de compra: tarda en abrirse, y una pulsacion que llegue antes se pierde.
+#
+#   [game setup]   UP x2 -> one player
+#   [race type]    DOWN -> single race
+#   [race setup]   solo
+#   [track select] cuadrado: opciones; DOWN x4 -> weather; RIGHT: on; cuadrado: cerrar;
+#                  continue
+#   [car garage]   DOWN x2 -> car dealer
+#   [car dealer]   buy a car; DOWN x2 -> buy car; "are you sure": LEFT (yes), aceptar;
+#                  triangulo x2 de vuelta al garaje
+#   [car garage]   UP x2 -> race
+0   -
+20  UP
+26  -
+36  UP
+42  -
+60  CROSS
+66  -
+100 DOWN
+106 -
+130 CROSS
+136 -
+280 CROSS
+286 -
+330 SQUARE
+336 -
+360 DOWN
+366 -
+380 DOWN
+386 -
+400 DOWN
+406 -
+420 DOWN
+426 -
+440 RIGHT
+446 -
+470 SQUARE
+476 -
+500 CROSS
+506 -
+560 DOWN
+566 -
+580 DOWN
+586 -
+600 CROSS
+606 -
+660 CROSS
+666 -
+720 DOWN
+726 -
+740 DOWN
+746 -
+760 CROSS
+766 -
+860 LEFT
+866 -
+900 CROSS
+906 -
+980 TRIANGLE
+986 -
+1060 TRIANGLE
+1066 -
+1120 UP
+1126 -
+1140 UP
+1146 -
+1160 CROSS
+1166 -
+# ya en carrera: acelerar y mantener
+1300 CROSS
+
+#end 6000

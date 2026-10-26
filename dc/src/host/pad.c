@@ -153,10 +153,8 @@ void host_frame_top(GameHost *h, Cpu *c)
         overlay_race_compose(h);
     /* en el mismo punto que la referencia (frame.rs, antes de su volcado): cargar una
      * partida vuelve a fijar las banderas, asi que se ponen en cada frame */
-    if (h->mode == HOST_FRONTEND) {
+    if (h->mode == HOST_FRONTEND)
         host_unlock_everything(h, c);
-        host_force_weather(h, c);
-    }
     if (h->idlelog && h->frames <= 5u)
         fprintf(stderr, "frame_top %llu: ticks=%llu llamadas=%llu interp=%llu reloj=%llu idles=%llu campo=%llu\n",
                 (unsigned long long)h->frames, (unsigned long long)c->ticks,

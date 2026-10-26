@@ -104,7 +104,6 @@ static void usage(const char *argv0)
             "  --idlelog        donde gira el juego al detectar espera activa\n"
             "  --textlog        el texto en pantalla por frame (que pantalla es)\n"
             "  --unlock         pistas y coches disponibles, como la referencia\n"
-            "  --clima W|S|N    fuerza mojado, nieve o noche (prueba; ver unlock.c)\n"
             "  --script FILE    entrada guionizada (ver dc/test/diff/scripts/)\n"
             "  --dump FILE      volcado del estado por frame (test diferencial)\n",
             argv0, (unsigned)ADDR_MAIN);
@@ -130,7 +129,6 @@ int main(int argc, char **argv)
     volatile uint32_t entry = ADDR_MAIN;
     int survey = 0, trace = 0, idlelog = 0, filelog = 0, spulog = 0, i;
     int textlog = 0, unlock = 0;
-    char clima = 0;
     char path[1024];
     uint8_t *exe;
     size_t exe_len;
@@ -155,8 +153,6 @@ int main(int argc, char **argv)
             cone = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "--unlock"))
             unlock = 1;
-        else if (!strcmp(argv[i], "--clima") && i + 1 < argc)
-            clima = argv[++i][0];
         else if (!strcmp(argv[i], "--filelog"))
             filelog = 1;
         else if (!strcmp(argv[i], "--spulog"))
@@ -241,7 +237,6 @@ int main(int argc, char **argv)
     host.idlelog = idlelog;
     host.textlog = textlog;
     host.unlock = unlock;
-    host.clima = clima;
     host.car_cone_width = cone != 0u ? cone : 1u;
     host.files.log = filelog;
     host.tex_buf = texbuf;

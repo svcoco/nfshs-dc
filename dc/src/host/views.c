@@ -117,8 +117,6 @@ int host_views_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
         return 0;                        /* el original corre */
     case SIM_MAINGAMELOOP:
         h->mode = HOST_RACE;
-        /* --clima: aqui todavia no se ha cargado la pista (ver unlock.c) */
-        host_force_weather(h, c);
         return 0;
     default:
         break;

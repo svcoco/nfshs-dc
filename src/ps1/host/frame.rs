@@ -192,7 +192,6 @@ impl GameHost {
         }
         if self.mode == Mode::FrontEnd {
             unlock_everything(c);
-            force_weather(c);
         }
         // top of the original main loop: game frames are locked to 60 Hz fields
         if !self.clock.is_multiple_of(FIELD) || self.clock == self.frame.last_top {

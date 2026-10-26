@@ -31,7 +31,7 @@ original. En carrera da **30–43 fps** en Flycast; el coste no está en dibujar
 **grabar los coches** (código real del juego cada frame), que es trabajo de M3. Del paso 6
 de M2c (los efectos) ya se dibujan las **sombras** de los coches, las **líneas pintadas** de
 la carretera, las **marcas de neumático**, los **destellos** de las farolas, los **halos** de
-faros y frenos, el **humo**, el **flare del sol**, el **clima** (lluvia y nieve) y los
+faros y frenos, el **humo**, el **flare del sol**, el **clima** (la lluvia; la nieve, sin probar) y los
 **reflejos** de los coches.
 
 ---
@@ -381,7 +381,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 3 | Grabación de los coches | **Hecho**, validado palabra a palabra |
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
-| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **Hecho en emulador** (2026-10-25), con dos dudas abiertas del clima |
+| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **Hecho en emulador** (2026-10-25); la lluvia, comparada con el original en DuckStation |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -544,30 +544,33 @@ tráfico se queda sin reflejo, igual que en la referencia. Los datos de reflejo 
 (mapas, desplazamiento, color, guiñada) ya estaban en la captura de 99 palabras que compara
 el oráculo.
 
-**El clima.** En «test drive» el front end no ofrece clima, así que hace falta forzarlo: una
-herramienta de prueba, `--clima W|S|N` en el port (`/CLIMA.TXT` en el disco, `mkdisc
---clima`) y `NFSHS_WEATHER` en la referencia, que escriben el clima y la hora en
-`GameSetup_tData` en cada frame del front end y al entrar en el bucle de carrera. **No es
-del juego.** Con lluvia el juego construye su clima en 3 796 de 5 000 frames: trazos de
-lluvia (líneas que suman) y gotas en la lente (con textura, a medias). Se dibuja encima del
-3D y de los destellos y debajo del HUD, en orden del pintor.
+**El clima, por el camino del jugador.** En «test drive» el front end no ofrece clima. En
+«single race» sí (cuadrado en la pantalla de pista, «weather» en ON), pero exige tener un
+coche, así que el guion `lluvia.txt` compra antes el Mercedes SLK 230 con los 20 000 de una
+partida nueva. Con eso el juego carga la **variante mojada** de la pista (`zTr06W.grp`:
+cielo de tormenta, asfalto mojado) y construye su lluvia: trazos que suman y gotas en la
+lente con textura, a medias. Se dibuja encima del 3D y de los destellos y debajo del HUD, en
+orden del pintor.
 
-**El oráculo encontró un fallo de verdad.** Con lluvia, 209 frames tenían el clima distinto
-con el mismo número de cuadros. La causa: el port convertía las líneas en cuadros con una
+**El oráculo encontró un fallo de verdad.** El port convertía las líneas en cuadros con una
 regla de enteros que daba lo mismo que la referencia **solo en pantalla**; con una punta en
 x = 8 205, en `f32` el `dy²` se pierde, la normal sale justo −0,5 y redondea a −1. Ahora se
 reproduce cada operación `f32` (en `double`, redondeando a `float` tras cada paso, para no
-depender de que el compilador fusione operaciones). Con eso: **151 932 cuadros de lluvia y
-234 963 de nieve idénticos** en 5 000 frames, con la RAM idéntica en todos.
+depender de que el compilador fusione operaciones). En la carrera con lluvia: **694 736
+cuadros de clima idénticos** en 6 000 frames, con la RAM idéntica en todos.
 
-**Dos dudas del clima que no puedo cerrar sin una PS1 o un emulador de PS1** (ver
-«Abierto»): uno de cada cinco trazos de lluvia tiene una punta fuera de los 11 bits de la
-GPU, y salen como líneas que cruzan la pantalla; y las gotas en la lente se ven como
-cuadros oscuros. En las dos el port hace lo mismo que la referencia.
+**Comparado con el juego original en DuckStation** (renderer por software, el mismo camino
+de menús, con el disco de Jorge y la BIOS SCPH-1001): la misma pista mojada, el cielo de
+tormenta, trazos cortos y gotas como anillos pequeños. En el port, en el arnés y en Flycast,
+se ve lo mismo.
 
-Una hipótesis que se descartó midiendo: que las gotas leyeran el propio framebuffer. Los
-dos búferes de dibujo están en (0, 256) y (320, 256), y las gotas leen la página 0, que no
-es ninguno de los dos.
+**Una lección: forzar el clima engañaba.** Antes de tener ese camino probé a forzarlo
+escribiendo el clima en `GameSetup_tData`. El juego activaba la lluvia pero **cargaba la
+pista seca**, sin las texturas de la lluvia, y salían dos rarezas que parecían preguntas
+sobre la GPU de PS1: trazos fuera de los 11 bits que cruzaban la pantalla y gotas como
+cuadros oscuros. Con el camino real hay **0** trazos fuera de rango (de 665 175) y las
+gotas leen su textura (página 0x21). El forzado se retiró. Que el oráculo coincidiera en
+los dos casos no decía nada de esto: los dos lados forzaban igual.
 
 ### Paso 5: el HUD
 
@@ -660,6 +663,10 @@ incompleta— los encontró el oráculo, no la lectura del código.
   con su patrón de puntos.
 - **En la lista opaca del PVR, un texel con color clave se pinta NEGRO.** No hay prueba
   de alfa. Lo que lleve color clave va a *punch-through*.
+- **Forzar el clima no es elegirlo.** Escribir el clima en `GameSetup_tData` activa la
+  lluvia pero deja la pista seca y sin sus texturas. Para probar algo del juego, mejor
+  llegar por los menús como un jugador; DuckStation con el disco original sirve de
+  referencia visual cuando el oráculo no basta.
 - **El juego arranca la carrera en vista de capó y las marcas de neumático no se ven en
   ella.** La cámara queda a ~1 m de las marcas y a su altura, y las ruedas las dejan debajo
   y detrás. Ni `race_long.txt` (recta) ni un derrape las ponen a la vista: `SELECT` no
@@ -705,16 +712,10 @@ incompleta— los encontró el oráculo, no la lectura del código.
   las primitivas semitransparentes; ARGB1555 tiene **un solo bit** de alfa. Hoy se
   resuelve por modo de mezcla del cuadro entero, no por texel.
 - **Leer el front end en 480i.** Está probado el modo, no la legibilidad en una tele.
-- **Trazos de lluvia fuera de rango.** 28 162 de 131 293 tienen una punta con x fuera de
-  los 11 bits de la GPU (hasta 8 205). El port y la referencia los dibujan tal cual y salen
-  como líneas largas que cruzan la pantalla. Si la GPU de PS1 truncara a 11 bits, como creo
-  que dice psx-spx, también se verían; si los descartara, no. **Hace falta una PS1 o un
-  emulador de PS1** (en el equipo no hay ninguno instalado).
-- **Gotas en la lente.** Leen una textura de 4 bits de la página 0 con una paleta distinta
-  por gota y salen como cuadros oscuros. Puede ser su aspecto real; sin referencia de PS1
-  no se puede saber.
-- **Dos cuadros de menos** en los frames 126–130 del guion de carrera, los menús justo
-  antes de entrar: 239 contra 241 de la referencia. `front_end_120.txt` no llega ahí.
+- **Dos cuadros de menos** en los menús: en los frames 126–130 de `race_long.txt` (239
+  contra 241 de la referencia) y en todos los que recorre `lluvia.txt` (296–1 160, de la
+  pantalla de pista al garaje). Los frames de carrera son idénticos. `front_end_120.txt`
+  no llega ahí.
 - **M4:** factor de escala de las texturas, método y formato.
 - **Alcance:** si la primera versión incluye 2P y FMV.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.

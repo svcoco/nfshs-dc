@@ -228,7 +228,6 @@ typedef struct GameHost {
     HostMode mode;           /* arranca en el front end, como la referencia */
     int      capturing;      /* dentro de una rutina de dibujado capturada */
     int      unlock;         /* --unlock: pistas y coches disponibles (ver unlock.c) */
-    char     clima;          /* --clima W|S|N: fuerza clima y hora de la carrera (unlock.c) */
     uint64_t unlocks;
     uint64_t views_fonttext;      /* Font_TextXY atendidas por el host */
     uint64_t views_captured;      /* rutinas corridas en marco anidado */
@@ -428,7 +427,6 @@ uint32_t overlay_ot_len(Cpu *c, uint32_t start);
 void     overlay_record_ot(GameHost *h, Cpu *c, uint32_t start);
 void     overlay_race_compose(GameHost *h);
 void host_unlock_everything(GameHost *h, Cpu *c);
-void host_force_weather(GameHost *h, Cpu *c);
 uint32_t host_capture_prims(GameHost *h, Cpu *c, uint32_t addr);
 int  host_showroom_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 /* Rellena los buffers de libpad. Se llama en el frame_top, no en cada campo. */

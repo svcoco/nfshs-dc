@@ -485,8 +485,10 @@ impl GameHost {
         // vez por campo mientras pasa la pelicula, asi que genera frames en los que el
         // juego no ejecuta nada; el port en C no reproduce video (es M5) y por tanto no
         // los genera. Para el test diferencial los dos lados tienen que saltarse el
-        // video, o las secuencias de frames no son comparables.
-        if std::env::var_os("NFSHS_DIFF_NO_MOVIE").is_some() {
+        // video, o las secuencias de frames no son comparables. En modo diff
+        // (NFSHS_DIFF_OUT) tambien: hasta M3 no hacia falta porque las copias de MOVIES
+        // eran de 2 048 bytes por sector y aqui no se podian leer.
+        if std::env::var_os("NFSHS_DIFF_NO_MOVIE").is_some() || std::env::var_os("NFSHS_DIFF_OUT").is_some() {
             return;
         }
         let name_at = c.m.r32(0x8005_2E68 + 4 * index);
@@ -624,15 +626,8 @@ impl Host for GameHost {
             return true;
         }
         if (0x8005_11B0..=0x8005_1528).contains(&addr) {
-            // En modo diff, los VIDEO_* devuelven 0 igual que el stub del port en C
-            // (dc/src/host/video.c): el modulo de video de la referencia reserva un
-            // bloque en el heap del juego con una llamada anidada y devuelve el
-            // puntero, lo que por si solo desplaza toda la secuencia de llamadas. El
-            // video de verdad es M5; aqui se neutraliza en los dos lados, como el SPU.
-            if std::env::var_os("NFSHS_DIFF_OUT").is_some() {
-                c.r[2] = 0;
-                return true;
-            }
+            // (en modo diff tambien: el port en C hace lo mismo desde M3, dc/src/host/video.c,
+            // y el test diferencial compara el bloque del heap y lo que devuelve cada llamada)
             let clock = self.clock;
             let file = if addr == 0x8005_1380 { c.m.cstr(a1) } else { String::new() };
             let mut videos = std::mem::take(&mut self.videos);

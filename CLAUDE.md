@@ -364,7 +364,9 @@ la referencia que escribe en RAM; si se porta, detrás de una opción apagada po
 como `--unlock`) y la **pila de diagnóstico** del port clavada en 0.
 
 **Para comparar, se neutralizan en los dos lados** las conveniencias del host de la
-referencia, no solo en el port: el SPU (`src/ps1/diffspu.rs`) y los `VIDEO_*`.
+referencia, no solo en el port: el SPU (`src/ps1/diffspu.rs`) y las películas
+(`Movie_Play`). Los `VIDEO_*` se neutralizaban hasta M3; desde entonces corren en los dos lados
+y se comparan (`docs/hitos/M3.md`).
 **`unlock_everything` sí se porta** (`--unlock` en el port, que es el comportamiento por
 omisión de la referencia): parecía cosmético, pero marcar pistas y coches como disponibles
 **da acceso a carreras**, y sin ello los dos lados no son comparables. No marca la

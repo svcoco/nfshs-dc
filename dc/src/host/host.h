@@ -323,6 +323,11 @@ typedef struct GameHost {
     /* ---- videos del front end ---- */
     uint64_t video_calls;
     uint32_t last_video_call;
+    uint64_t video_frames;        /* frames del video wall escritos en la VRAM (M3) */
+    /* Reloj de la plataforma en microsegundos (NULL: no se mide). Con el, el tiempo
+     * acumulado del video wall, de la conversion de texturas y del dibujo. */
+    uint64_t (*now_us)(void);
+    uint64_t video_us, tex_us, draw_us;
 
     /* ---- dibujo que se cuenta pero no se pinta (M2a) ---- */
     uint64_t fe_shapes, fe_squares, player_views;
@@ -489,6 +494,8 @@ int  host_file_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 int  host_game_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 int  host_memcard_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 int  host_video_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
+/* Abre un archivo del disco extraido (sin leerlo) y da su tamano; 0 si no esta. */
+int  host_disk_open(GameHost *h, const char *name, FILE **out, uint32_t *size);
 /* Hooks: funciones que SI estan recompiladas, donde el host solo mira o produce un
  * efecto lateral y despues deja correr el codigo original. */
 void host_hook(GameHost *h, Cpu *c, uint32_t addr);

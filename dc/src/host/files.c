@@ -113,7 +113,7 @@ static int mount_read(const Mount *mo, uint32_t off, void *dst, uint32_t n)
 /* Abre el archivo del disco extraido (gamedata en PC, /cd o /rd en Dreamcast) y da su
  * tamano, SIN leerlo. Lo usan tanto lookup() como el montaje de BIGF, que no quiere el
  * contenido. Devuelve 0 si no esta. */
-static int disk_open(GameHost *h, const char *name, FILE **out, uint32_t *size)
+int host_disk_open(GameHost *h, const char *name, FILE **out, uint32_t *size)
 {
     char norm[256], path[1024];
     FILE *f;
@@ -145,7 +145,7 @@ static uint8_t *lookup(GameHost *h, const char *name, uint32_t *size)
     /* Si esta en el disco se lee entero: son los sueltos (NFS4.EXE, FRONT.BIN...) y
      * son pequenos. Los BIGF no pasan por aqui, los monta FILE_addbigsync. Si esta
      * pero no se deja leer, se devuelve fallo sin mirar los montajes, como siempre. */
-    if (disk_open(h, name, &f, &n)) {
+    if (host_disk_open(h, name, &f, &n)) {
         buf = (uint8_t *)malloc(n > 0u ? (size_t)n : 1u);
         if (buf != NULL && (n == 0u || fread(buf, 1, (size_t)n, f) == (size_t)n)) {
             fclose(f);
@@ -264,7 +264,7 @@ static int open_src(GameHost *h, const char *name, OpenFile *o)
                         h->police[j] = b[3];
         }
     }
-    if (disk_open(h, name, &f, &n)) {
+    if (host_disk_open(h, name, &f, &n)) {
         o->fh = f;
         o->base = 0u;
         o->size = n;
@@ -529,7 +529,7 @@ int host_file_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
             FILE *bf = NULL;
             uint32_t bsz = 0;
             data = NULL;
-            if (disk_open(h, name, &bf, &bsz)) {
+            if (host_disk_open(h, name, &bf, &bsz)) {
                 handle = mount_bigf(h, bf, NULL, bsz);
                 if (handle == 0u)
                     fclose(bf);

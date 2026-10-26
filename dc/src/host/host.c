@@ -397,7 +397,8 @@ void host_report(const GameHost *h, const Cpu *c)
         printf("  AVISO: %llu cuadros no cupieron, %llu primitivas sin grabar\n",
                (unsigned long long)h->overlay.dropped,
                (unsigned long long)h->overlay_unknown);
-    printf("  llamadas de video:           %llu\n", (unsigned long long)h->video_calls);
+    printf("  llamadas de video:           %llu (frames a la VRAM %llu)\n",
+           (unsigned long long)h->video_calls, (unsigned long long)h->video_frames);
     printf("  flips (PutDispEnv):          %llu\n", (unsigned long long)h->flips);
     printf("  area de pantalla:            %u,%u %ux%u\n",
            (unsigned)h->display[0], (unsigned)h->display[1],

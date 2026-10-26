@@ -312,9 +312,18 @@ void host_frame_top(GameHost *h, Cpu *c)
     view_dump_frame(h);
 #endif
     pausa_presenta(h);
-    host_build_textures(h);
-    if (h->on_draw != NULL)
-        h->on_draw(h);
+    {
+        uint64_t t0 = h->now_us ? h->now_us() : 0u, t1;
+
+        host_build_textures(h);
+        t1 = h->now_us ? h->now_us() : 0u;
+        if (h->on_draw != NULL)
+            h->on_draw(h);
+        if (h->now_us) {
+            h->tex_us += t1 - t0;
+            h->draw_us += h->now_us() - t1;
+        }
+    }
     overlay_reset(&h->overlay);
     h->hud_cmds_n = 0;
     h->sroom_n = 0;

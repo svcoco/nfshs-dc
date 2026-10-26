@@ -146,6 +146,9 @@ static void *diag_thread(void *arg)
                (unsigned long)cpu.ticks, (unsigned long)cpu.calls,
                (unsigned long)(cpu.calls - prev_calls),
                (unsigned long)cpu.interpreted, (unsigned long)host.frames);
+        printf("        acumulado: video wall %lu ms (%lu frames)  texturas %lu ms  dibujo %lu ms\n",
+               (unsigned long)(host.video_us / 1000u), (unsigned long)host.video_frames,
+               (unsigned long)(host.tex_us / 1000u), (unsigned long)(host.draw_us / 1000u));
         printf("        archivos %lu ok / %lu fallidos  BIGF %lu ok / %lu fallidos\n",
                (unsigned long)host.files.opens, (unsigned long)host.files.opens_failed,
                (unsigned long)host.files.mounts_ok,
@@ -323,6 +326,7 @@ int main(int argc, char **argv)
      * (docs/hitos/M1a.md). */
     host.car_cone_width = 1u;
     host.poll_input = on_frame;
+    host.now_us = timer_us_gettime64;
     /* El PVR: a partir de aqui el juego se DIBUJA, no solo se cuenta. */
     if (render_init()) {
         host.tex_buf = render_texbuf();

@@ -382,7 +382,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
 | 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **Hecho en emulador** (2026-10-25); la lluvia, comparada con el original en DuckStation |
-| 7 | El showroom del front end | **En curso**: grabado con oráculo, dibujado con su mapa de reflejo, con las 64 pinturas y los 39 coches horneados; faltan las sombras de los pasos de rueda y la policía |
+| 7 | El showroom del front end | **En curso**: grabado con oráculo, dibujado con su mapa de reflejo, con las 64 pinturas y los 39 coches horneados; falta la policía (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -511,8 +511,15 @@ reflejo usa los mismos vértices que la carrocería y la prueba es de **profundi
 solo suma sobre el panel que se ve. Visto en Flycast: brillos en el capó y el parabrisas que
 cambian al girar el coche, y sin la línea de puntos.
 
-**Falta:** las sombras de los pasos de rueda en el showroom y la policía (su librea depende de
-la pista).
+**Las sombras de los pasos de rueda no van en el showroom (medido, 2026-10-26).** Estaban en
+la lista de pendientes por un comentario de la referencia, que las pinta en negro si el juego
+las pide. Pero el juego **no las pide**: en todos los coches del showroom grabados la parte 5
+(la única que resta, en los 16 modelos que la tienen) tiene visibilidad 0. Son 2 432 registros
+de 10 modelos distintos (ADB7, BMWM, BMWZ, CMRO, CORV, F550, JXKR, MSLK, P993, TRAM), coche y
+reflejo, más los 1 092 del SLK en `race_long` y `lluvia`. Solo se encienden en carrera, donde
+ya se restan desde el paso 6. No hay nada que dibujar.
+
+**Falta:** la policía (su librea depende de la pista).
 
 ### Paso 6: los efectos (hecho en emulador)
 

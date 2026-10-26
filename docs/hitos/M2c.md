@@ -53,7 +53,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | 4 | **Horneado y dibujo de los coches** | **Hecho (2026-10-24)**: los coches se ven; 30-40 fps, y el coste **no es dibujarlos** |
 | 5 | **El HUD** | **Hecho (2026-10-24)**: 4 769 frames de carrera con la lista 2D identica a la referencia, HUD incluido |
 | 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | **Hecho en emulador (2026-10-25)**: todos los efectos con oraculo, salvo la imagen; la lluvia, comparada con el original en DuckStation |
-| 7 | **El showroom del front end**: el coche de seleccion, concesionario y garaje | **En curso (2026-10-26)**: grabado con oraculo, dibujado con el PVR, pinturas y mapa de reflejo; faltan las sombras de los pasos de rueda y la policia |
+| 7 | **El showroom del front end**: el coche de seleccion, concesionario y garaje | **En curso (2026-10-26)**: grabado con oraculo, dibujado con el PVR, pinturas y mapa de reflejo; falta la policia (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
 
 Los pasos 1 y 3 van primero **porque tienen oraculo**, igual que la lista 2D de M2a y la
 vista de M2b: la referencia graba exactamente lo mismo, asi que se comparan campo a campo
@@ -527,5 +527,19 @@ justifican (`car-pal-stats`, `car-pal-tuples`):
   invertido en el coche espejado).
 - Visto en Flycast: brillos en el capo y el parabrisas que se mueven al girar el coche.
 
-**Falta:** las sombras de los pasos de rueda en el showroom y la policia (su librea depende
-de la pista).
+### 5. Las sombras de los pasos de rueda: no van en el showroom (medido, 2026-10-26)
+
+La referencia pinta en negro las partes que restan si el juego las pide (`dark` en
+`Showroom::geometry`), y eso se habia leido como "faltan en el showroom". Medido en el arnes,
+con la visibilidad de partes grabada en cada `ShowroomCar`:
+
+| Guion | Coches | Registros | Parte 5 visible |
+|---|---|---|---|
+| recorrer coches (10 modelos) | ADB7, BMWM, BMWZ, CMRO, CORV, F550, JXKR, MSLK, P993, TRAM | 2 432 | 0 |
+| `race_long` | MSLK | 92 | 0 |
+| `lluvia` | MSLK | 1 000 | 0 |
+
+La parte 5 es la unica que resta en los 16 modelos que tienen alguna (23 no tienen). El juego
+solo la enciende en carrera, donde ya se dibuja restando (paso 6). No hay nada que portar.
+
+**Falta:** la policia (su librea depende de la pista).

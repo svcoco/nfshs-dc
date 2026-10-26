@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 
+#include <stdlib.h>
 #include <string.h>
 
 /* SPUCNT, el registro de control (0x1F801DAA). */
@@ -155,10 +156,67 @@ static uint32_t bus_read(Cpu *c, void *self, uint32_t a, uint32_t n)
     return word >> ((a & 3u) * 8u);
 }
 
+#ifndef PS1_DIAG
+#define PS1_DIAG 1
+#endif
+#if PS1_DIAG
+/* DIAG (M4): las cadenas de llamadas que acaban escribiendo en el SPU, para encontrar la API
+ * de sonido del juego (NFSHS_SNDCALLERS; informe con ps1_spu_callers_report). Las 6
+ * funciones mas internas de la pila de diagnostico, y cuantas escrituras pasan por cada una. */
+#define SNDC_N   6u
+#define SNDC_TAB 512u
+static struct { uint32_t f[SNDC_N]; uint64_t n; } s_sndc[SNDC_TAB];
+static int s_sndc_on = -1;
+
+static void sndc_nota(const Cpu *c)
+{
+    uint32_t f[SNDC_N] = {0}, h = 0, i, k;
+
+    if (s_sndc_on < 0)
+        s_sndc_on = getenv("NFSHS_SNDCALLERS") != NULL;
+    if (!s_sndc_on)
+        return;
+    for (k = 0; k < SNDC_N && k < c->stack_depth && c->stack_depth - 1u - k < PS1_STACK_MAX; k++)
+        f[k] = c->stack[c->stack_depth - 1u - k];
+    for (k = 0; k < SNDC_N; k++)
+        h = h * 31u + f[k];
+    for (i = h % SNDC_TAB, k = 0; k < SNDC_TAB; k++, i = (i + 1u) % SNDC_TAB)
+        if (s_sndc[i].n == 0u || memcmp(s_sndc[i].f, f, sizeof f) == 0) {
+            memcpy(s_sndc[i].f, f, sizeof f);
+            s_sndc[i].n++;
+            return;
+        }
+}
+
+void ps1_spu_callers_report(FILE *out, unsigned top)
+{
+    for (unsigned shown = 0; shown < top; shown++) {
+        uint64_t best = 0;
+        uint32_t bi = 0;
+        for (uint32_t i = 0; i < SNDC_TAB; i++)
+            if (s_sndc[i].n > best) {
+                best = s_sndc[i].n;
+                bi = i;
+            }
+        if (best == 0u)
+            break;
+        fprintf(out, "  %8llu ", (unsigned long long)best);
+        for (uint32_t k = 0; k < SNDC_N; k++)
+            fprintf(out, " %08x", (unsigned)s_sndc[bi].f[k]);
+        fprintf(out, "\n");
+        s_sndc[bi].n = 0;
+    }
+}
+#else
+void ps1_spu_callers_report(FILE *out, unsigned top) { (void)out; (void)top; }
+#define sndc_nota(c) ((void)0)
+#endif
+
 static void bus_write(Cpu *c, void *self, uint32_t a, uint32_t v, uint32_t n)
 {
     SpuStub *s = (SpuStub *)self;
     s->writes++;
+    sndc_nota(c);
 
     switch (a) {
     case DMA4_MADR:

@@ -27,6 +27,27 @@ static uint16_t texbuf[512u * 1024u];
 /* --shot: el frame que hay que dibujar y donde dejarlo. Se hace desde el gancho por
  * frame porque es el unico punto en que la lista de dibujo esta completa: justo
  * despues se vacia para el frame siguiente. */
+/* DIAG (M4): NFSHS_SNDAPI=archivo anota cada llamada del juego a la API de sonido de EA
+ * (0x800E7000-0x800EB000) que viene de fuera del driver (0x800E7000-0x8010D000): frame,
+ * funcion, llamante y a0-a3. Para saber que pide el juego y con que argumentos. */
+static FILE *s_sndapi;
+static const GameHost *s_sndapi_host;
+
+static void sndapi_enter(Cpu *c, uint32_t f)
+{
+    uint32_t caller;
+
+    if (f < 0x800E7000u || f >= 0x800EB000u || c->stack_depth < 2u ||
+        c->stack_depth - 2u >= PS1_STACK_MAX)
+        return;
+    caller = c->stack[c->stack_depth - 2u];
+    if (caller >= 0x800E7000u && caller < 0x8010D000u)
+        return;
+    fprintf(s_sndapi, "%llu %08x %08x %08x %08x %08x %08x\n",
+            (unsigned long long)s_sndapi_host->frames, (unsigned)f, (unsigned)caller,
+            (unsigned)c->r[4], (unsigned)c->r[5], (unsigned)c->r[6], (unsigned)c->r[7]);
+}
+
 static uint64_t shot_frame;
 static const char *shot_file;
 static uint64_t track_frame;
@@ -277,6 +298,10 @@ int main(int argc, char **argv)
     cpu.r[28] = ADDR_GP;
     cpu.r[31] = 0;
     cpu.stack_depth = 0;
+    if (getenv("NFSHS_SNDAPI") != NULL && (s_sndapi = fopen(getenv("NFSHS_SNDAPI"), "w")) != NULL) {
+        s_sndapi_host = &host;
+        ps1_on_enter = sndapi_enter;
+    }
 
     if (setjmp(cpu.stop_jmp) == 0) {
         cpu.stop_armed = 1;
@@ -324,10 +349,16 @@ int main(int argc, char **argv)
             printf("texturas volcadas: %u en %s\n", (unsigned)vivas, tex_path);
         }
     }
+    if (s_sndapi != NULL)
+        fclose(s_sndapi);
     host_report(&host, &cpu);
     if (getenv("NFSHS_INTERPLOG") != NULL) {
         printf("\n=== entradas al interprete, por direccion ===\n");
         ps1_interp_report(stdout, 40);
+    }
+    if (getenv("NFSHS_SNDCALLERS") != NULL) {
+        printf("\n=== escrituras al SPU, por cadena de llamadas (la mas interna primero) ===\n");
+        ps1_spu_callers_report(stdout, 60);
     }
     printf("\n=== bus de hardware (stub del SPU) ===\n");
     printf("  lecturas / escrituras:     %llu / %llu\n",

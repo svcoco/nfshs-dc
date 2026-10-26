@@ -90,9 +90,13 @@ $(BUILD)/run_tests: test/unit/run_tests.c $(PS1RT_SRCS) $(RENDER_SRCS)
 
 # Prueba de carga: compila todo el C generado a objetos (no enlaza; para eso hace
 # falta el host, que es el paso 3 de M1a).
+# Solo el arnes de PC: el observador de entrada a funciones (diagnostico, M4). Dreamcast no
+# lo lleva: anade una comprobacion en cada entrada de funcion.
+PCDIAG := -DPS1_ENTER_HOOK=1
+
 genobj: $(GEN)/parts.mk
 	@mkdir -p $(BUILD)/gen $(TMPDIR)
-	@$(MAKE) --no-print-directory -f tools/genobj.mk 		CC="$(CC)" CFLAGS="$(CFLAGS) $(GENFLAGS)" CPPFLAGS="$(CPPFLAGS)" 		GEN="$(GEN)" OBJDIR="$(BUILD)/gen"
+	@$(MAKE) --no-print-directory -f tools/genobj.mk 		CC="$(CC)" CFLAGS="$(CFLAGS) $(GENFLAGS)" CPPFLAGS="$(CPPFLAGS) $(PCDIAG)" 		GEN="$(GEN)" OBJDIR="$(BUILD)/gen"
 
 pc: $(BUILD)/nfshs-dc
 	@echo "listo: $(BUILD)/nfshs-dc"
@@ -100,7 +104,7 @@ pc: $(BUILD)/nfshs-dc
 # Enlaza el C generado con ps1rt, el host y el arnes de x86.
 $(BUILD)/nfshs-dc: genobj $(HLE_TABLE) $(PS1RT_SRCS) $(HOST_SRCS) $(PC_SRCS)
 	@mkdir -p $(BUILD) $(TMPDIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ $(PS1RT_SRCS) $(RENDER_SRCS) $(HOST_SRCS) $(PC_SRCS) $(HLE_TABLE) $(BUILD)/gen/*.o
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(PCDIAG) -o $@ $(PS1RT_SRCS) $(RENDER_SRCS) $(HOST_SRCS) $(PC_SRCS) $(HLE_TABLE) $(BUILD)/gen/*.o
 
 # ---------------------------------------------------------------- Dreamcast (M1b)
 #

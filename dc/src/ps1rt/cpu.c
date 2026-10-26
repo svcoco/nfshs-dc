@@ -13,6 +13,9 @@
 #ifndef PS1_DIAG
 #define PS1_DIAG 1
 #endif
+#if PS1_ENTER_HOOK
+void (*ps1_on_enter)(Cpu *c, uint32_t f);
+#endif
 #if PS1_DIAG
 /* DIAG: cuantas veces entra el interprete por cada direccion, para saber que codigo no
  * esta recompilado (ps1_interp_report). Tabla abierta; lo que no cabe se cuenta aparte. */

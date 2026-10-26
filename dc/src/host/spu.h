@@ -46,5 +46,7 @@ typedef struct {
 
 void ps1_spu_init(SpuStub *s);
 void ps1_spu_attach(SpuStub *s, Cpu *c);
+/* DIAG (M4): las cadenas de llamadas que escribieron en el SPU (NFSHS_SNDCALLERS). */
+void ps1_spu_callers_report(FILE *out, unsigned top);
 
 #endif /* PS1_HOST_SPU_H */

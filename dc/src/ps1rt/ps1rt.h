@@ -211,11 +211,25 @@ extern uint32_t ps1_interp_addr[PS1_INTERP_TOP];
 extern uint64_t ps1_interp_hits[PS1_INTERP_TOP];
 
 /* ---- pila de diagnostico ------------------------------------------------------- */
+/* DIAG (M4): un observador de entrada a funciones, solo en el arnes de PC
+ * (-DPS1_ENTER_HOOK=1). Sirve para ver con que argumentos llama el juego a una API sin
+ * cambiar la recompilacion ni la lista de hooks (que cambiaria los ticks). */
+#ifndef PS1_ENTER_HOOK
+#define PS1_ENTER_HOOK 0
+#endif
+#if PS1_ENTER_HOOK
+extern void (*ps1_on_enter)(Cpu *c, uint32_t f);
+#endif
+
 static inline void ps1_push(Cpu *c, uint32_t f)
 {
     if (PS1_LIKELY(c->stack_depth < PS1_STACK_MAX))
         c->stack[c->stack_depth] = f;
     c->stack_depth++;
+#if PS1_ENTER_HOOK
+    if (ps1_on_enter != NULL)
+        ps1_on_enter(c, f);
+#endif
 }
 
 static inline void ps1_pop(Cpu *c)

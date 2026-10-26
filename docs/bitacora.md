@@ -21,14 +21,14 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
 | **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se dibuja entera con HUD, a 30–43 fps**; **paso 6 hecho en emulador**: todos los efectos, clima y reflejos incluidos |
-| M3, M4, M5 | Sin empezar |
+| M3 Audio · M4 Controles · M5 Guardado y VMU · M6 Optimización · M7 Enhancements | Sin empezar (numeración del 2026-10-26) |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
 datos del disco y dibuja con el PVR tanto el **front end** (~60 fps, completo y legible)
 como la **carrera**: pista, cielo, objetos del escenario, **coches** y **HUD** —cronómetro,
 velocidad, marcha, tacómetro con aguja y mapa—, con las texturas y el color de vértice del
 original. En carrera da **30–43 fps** en Flycast; el coste no está en dibujar sino en
-**grabar los coches** (código real del juego cada frame), que es trabajo de M3. Del paso 6
+**grabar los coches** (código real del juego cada frame), que es trabajo de M6. Del paso 6
 de M2c (los efectos) ya se dibujan las **sombras** de los coches, las **líneas pintadas** de
 la carretera, las **marcas de neumático**, los **destellos** de las farolas, los **halos** de
 faros y frenos, el **humo**, el **flare del sol**, el **clima** (la lluvia; la nieve, sin probar) y los
@@ -346,7 +346,7 @@ abre** y la plataforma carga `/cd/BAKED/<NOMBRE>.TRK`.
 
 Dibujar la pista cuesta del orden de medio frame. Sigue por encima del mínimo de 30 fps
 sostenidos, y **todavía sin FTRV**: la transformación va en C con `float` normal. Esa
-optimización es de M3 y ahora hay con qué medirla.
+optimización es de M6 y ahora hay con qué medirla.
 
 ### Paso 4: el cielo
 
@@ -441,7 +441,7 @@ de VRAM por coche).
 
 **Dibujar los coches no cuesta casi nada; lo que cuesta es grabarlos.** Con el dibujo
 apagado el ritmo es el mismo, así que la caída de ~60 a 30–40 fps la produce el paso 3,
-que corre código real del juego cada frame. Es trabajo de M3.
+que corre código real del juego cada frame. Es trabajo de M6.
 
 ### Paso 7: el showroom del front end (en curso)
 
@@ -772,7 +772,11 @@ incompleta— los encontró el oráculo, no la lectura del código.
   las primitivas semitransparentes; ARGB1555 tiene **un solo bit** de alfa. Hoy se
   resuelve por modo de mezcla del cuadro entero, no por texel.
 - **Leer el front end en 480i.** Está probado el modo, no la legibilidad en una tele.
-- **M4:** factor de escala de las texturas, método y formato.
+- **M7:** factor de escala de las texturas, método y formato.
+- **Hitos renumerados (2026-10-26, decisión de Jorge):** M3 audio, M4 controles, M5 guardado
+  y VMU, M6 optimización, M7 enhancements. En los `docs/hitos/` anteriores, «M3» como
+  optimización es el M6 y «M4» el M7. **Sin hito:** FMV, 2P, packs de texturas externos y el
+  pulido final.
 - **Alcance:** si la primera versión incluye 2P y FMV.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.
 - **Autor de nfshs-rs:** contacto sobre licencia y posible colaboración.
@@ -781,7 +785,7 @@ incompleta— los encontró el oráculo, no la lectura del código.
   activos, y el 3D del port ya se rasteriza a 640×480 desde la geometría (el «2×» de un
   emulador de PS1). Por encima, solo el FSAA horizontal del PVR (1 280×480 promediado):
   probado en Flycast sin commit, coste sin medir. Pendiente de decisión de Jorge, a evaluar en
-  M3 con una consola.
+  M6 con una consola.
 - **RAM de los coches.** Cada `.CAR` de carrera ocupa ~410 KB en RAM mientras está en la caché
   (6 modelos: ~2,5 MB) porque guarda los índices para poder cambiar de pintura. Sin medir con
   una carrera de 8 coches distintos más tráfico; si aprieta, los índices se pueden releer del CD

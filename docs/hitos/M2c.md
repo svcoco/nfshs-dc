@@ -241,7 +241,7 @@ anidada y, por coche, `BWorldSm_QuadLight`, `DrawC_PrimStart` y **una segunda pa
 entera** de `R3DCar_InsertCarFacetII` para los halos.
 
 Sigue **por encima del minimo de 30 fps sostenidos** de CLAUDE.md seccion 3, y es codigo
-recompilado: justo lo que M3 ataca («codegen, SH-4 a mano en hooks»). Un candidato
+recompilado: justo lo que M6 ataca («codegen, SH-4 a mano en hooks»). Un candidato
 concreto ya identificado es la **segunda pasada de halos**, cuyo resultado hoy se tira
 porque los halos son el paso 6.
 

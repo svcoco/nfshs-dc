@@ -18,7 +18,10 @@ Por eso el plan las separa en el tiempo:
 - **M1b** responde «¿compila y arranca en SH-4?» con la traducción **ya demostrada
   correcta**, así que cualquier divergencia nueva es del cambio de arquitectura.
 - **M2** añade el renderer, que es trabajo nuevo y no una traducción.
-- **M3** es el único hito donde el rendimiento es el criterio.
+- **M3 a M5** completan el middleware que falta: audio, controles, y guardado con la VMU.
+- **M6** es el único hito donde el rendimiento es el criterio. Va después del middleware
+  (decisión de Jorge, 2026-10-26) para optimizar el port completo y no una parte.
+- **M7** mejora el código y los assets actuales (texturas escaladas).
 
 El coste de este orden es que se tarda más en ver algo en pantalla. El beneficio quedó
 demostrado en M1a, y está documentado abajo.
@@ -123,7 +126,7 @@ ancho). Para comparar hay que neutralizarlas **en los dos lados**. Pero `unlock_
 enseñó que no se puede juzgar una de ellas sin medirla: parecía cosmética y resultó que
 **da acceso a carreras**. La regla que queda: cada mejora de la referencia se porta detrás
 de una opción apagada por omisión, y si va a estar en el Dreamcast es una decisión de
-producto de M5, no de implementación.
+producto de M7, no de implementación.
 
 ## Lo que se aprendió en M1b (cerrado en Flycast, 2026-10-23)
 

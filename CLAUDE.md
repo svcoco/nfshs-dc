@@ -130,11 +130,18 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 | M1a | Backend C + ps1rt en C, en PC (x86) | **Hecho (2026-10-18).** Test diferencial contra la versión Rust: **120 frames idénticos** en el front end y **231** en la carrera (incluida la transición), comparando 512 hashes de página, los 32 registros, hi, lo, cop0, los 64 del GTE, `cont` y ticks. **Cinco bugs reales** encontrados, todos de integración host/juego. Pruebas unitarias 227/227. El manejador de `Render_RenderPlayerView` queda para M2b (`docs/hitos/M1a.md`) |
 | M1b | Cross-compilar a SH-4 (KOS, `-m4-single`) + host mínimo (archivos, pad, timers, VSync, BIOS) | **Hecho en Flycast con BIOS real (2026-10-23).** Arranca desde CDI; front end a 69–78 fps y carrera simulando a **98–113 fps**; `.text` de 3,43 MB con `-Os`, ELF `text 3,8 MB / bss 4,85 MB`; 227/227 unitarias en SH-4. Falta quemarlo y probarlo en una consola |
 | M2a | Grabación en C + modos 480p/480i + 2D en PVR + espejo de VRAM y texturas | Front end navegable y legible en ambos modos |
-| M2b | Pista y cielo en PVR (transformación en SH-4, recorte por plano cercano) | **Hecho en emulador (2026-10-23).** La carrera se dibuja a **60 fps** con ~1 150 triángulos de pista y 104 de cielo. La transformación va en C con `float`, **sin FTRV**: esa optimización queda para M3 y ahora hay con qué medirla (`docs/hitos/M2b.md`) |
+| M2b | Pista y cielo en PVR (transformación en SH-4, recorte por plano cercano) | **Hecho en emulador (2026-10-23).** La carrera se dibuja a **60 fps** con ~1 150 triángulos de pista y 104 de cielo. La transformación va en C con `float`, **sin FTRV**: esa optimización queda para M6 y ahora hay con qué medirla (`docs/hitos/M2b.md`) |
 | M2c | Coches, props y efectos | **Pasos 1-6 hechos en emulador (2026-10-25); paso 7 (showroom) en curso.** Objetos, coches, HUD y todos los efectos grabados, validados contra la referencia y dibujados; la carrera se juega a 30-43 fps; la lluvia, comparada con el original en DuckStation. Carrera completa de un jugador (`docs/hitos/M2c.md`) |
-| M3 | Optimización (codegen, SH-4 a mano en hooks, LOD) + audio SPU→AICA | **30 fps sostenidos** en carrera como mínimo, sin tope por arriba (60 es el objetivo ideal); música, motor y efectos |
-| M4 "Enhancements" | Escalado de texturas horneado en el PC | Texturas de pista, coches y HUD escaladas dentro del presupuesto de VRAM, con respaldo a las originales |
-| M5 | Motor NFSHS preparado: VMU, rumble, FMV, 2P, pulido, build con el disco del usuario, packs de texturas externos | Motor jugable de punta a punta con el disco del usuario y un pack de texturas distribuido aparte |
+| M3 | Middleware de audio: SPU → AICA (ADPCM de PS1 convertido al hornear) | Música, motor y efectos en el front end y en carrera |
+| M4 | Middleware de IO: controles (mando de Dreamcast, analógicos, gatillos, vibración) | Front end y carrera jugables con el mando de Dreamcast |
+| M5 | Middleware de IO: guardado y VMU (memory card de PS1 → VMU) | Guardar y cargar la partida en la VMU |
+| M6 | Revisión y optimización (codegen, SH-4 a mano en hooks, FTRV, LOD) | **30 fps sostenidos** en carrera como mínimo, sin tope por arriba (60 es el objetivo ideal) |
+| M7 "Enhancements" | Mejoras del código y de los assets actuales (escalado de texturas horneado en el PC, mejoras de la referencia como opción) | Texturas de pista, coches y HUD escaladas dentro del presupuesto de VRAM, con respaldo a las originales |
+
+Numeración vigente desde el **2026-10-26 (decisión de Jorge)**. En los `docs/hitos/` de antes
+de esa fecha, «M3» como optimización es el **M6** de ahora y «M4» como escalado de texturas
+es el **M7**. Del antiguo M5 quedan **sin hito asignado**: FMV, 2P, packs de texturas
+externos y el pulido final (la vibración pasa a M4 y la VMU a M5).
 
 ## 5. Arquitectura objetivo
 
@@ -201,7 +208,7 @@ Archivos del disco de Jorge:
     `VSync(N)` (0 call sites con argumento 0) y la cadencia la impone el host. Lo medido:
     su lógica apunta a **60 Hz, un flip por campo de vídeo**. El fps real del original es
     un hecho de rendimiento del hardware y necesitaría DuckStation; la pregunta que importa
-    para el port es la equivalente en Dreamcast, y se mide en M1b y M3.
+    para el port es la equivalente en Dreamcast, y se mide en M1b y M6.
 
 ### Trampas conocidas del recompilador
 
@@ -337,7 +344,7 @@ referencia, no solo en el port: el SPU (`src/ps1/diffspu.rs`) y los `VIDEO_*`.
 omisión de la referencia): parecía cosmético, pero marcar pistas y coches como disponibles
 **da acceso a carreras**, y sin ello los dos lados no son comparables. No marca la
 propiedad del coche, así que el guion entra por *test drive*. Si el Dreamcast lo ofrece
-como opción al jugador, es una decisión de producto de M5.
+como opción al jugador, es una decisión de producto de M7.
 
 ### Próximo trabajo: M1b (cross-compilar a SH-4)
 
@@ -400,7 +407,9 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
   - **Audio:** hay que mapear las subidas DMA del driver EA a las muestras convertidas.
   - **FMV:** STR/MDEC.
 - **Abiertas:**
-  - **M4:** factor de escala de las texturas (2× como base), método y formato.
+  - **M7:** factor de escala de las texturas (2× como base), método y formato.
+  - **Sin hito asignado** tras la renumeración del 2026-10-26: FMV, 2P, packs de texturas
+    externos y el pulido final.
   - **Alcance:** si la primera versión incluye 2P y FMV.
   - *(cerrada 2026-10-23: el arranque con BIOS real funciona desde un **CDI** con
     disposición MIL-CD, que genera `dc/tools/mkdisc/mkdisc.sh` por omisión. El GDI solo

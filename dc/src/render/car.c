@@ -30,7 +30,7 @@ int car_load(CarModel *m, const char *path)
 {
     FILE *f;
     long size;
-    uint32_t off_parts, off_verts, atlas_off, i;
+    uint32_t off_parts, off_verts, atlas_off, env_off, i;
 
     memset(m, 0, sizeof(*m));
     f = fopen(path, "rb");
@@ -54,7 +54,7 @@ int car_load(CarModel *m, const char *path)
     fclose(f);
     m->size = (uint32_t)size;
 
-    if (memcmp(m->raw, "NFSC", 4) != 0 || crd32(m->raw + 4) != 1u) {
+    if (size <= 40 || memcmp(m->raw, "NFSC", 4) != 0 || crd32(m->raw + 4) != 2u) {
         car_free(m);
         return 0;
     }
@@ -65,11 +65,13 @@ int car_load(CarModel *m, const char *path)
     atlas_off = crd32(m->raw + 20);
     for (i = 0; i < 3u; i++)
         m->half_extents[i] = crdf(m->raw + 24u + 4u * i);
+    env_off = crd32(m->raw + 36u);
 
-    off_parts = 36u;   /* la cabecera: 4+4+2+2+2+2+4+4+12 */
+    off_parts = 40u;   /* la cabecera: 4+4+2+2+2+2+4+4+12+4 */
     off_verts = off_parts + (uint32_t)m->parts * 24u;
     if (off_verts + m->verts * 24u != atlas_off ||
-        atlas_off + (uint32_t)m->atlas_w * m->atlas_h * 2u != m->size) {
+        atlas_off + (uint32_t)m->atlas_w * m->atlas_h * 2u != env_off ||
+        env_off + (uint32_t)m->parts * 8u > m->size) {
         car_free(m);
         return 0;
     }
@@ -91,9 +93,48 @@ int car_load(CarModel *m, const char *path)
         for (k = 0; k < 3u; k++)
             m->part[i].hub[k] = crdf(p + 12u + 4u * k);
     }
+    /* los reflejos: la cabecera por parte y despues los registros, en orden */
+    {
+        uint32_t rec = env_off + (uint32_t)m->parts * 8u;
+
+        for (i = 0; i < m->parts; i++) {
+            CarPart *cp = &m->part[i];
+
+            cp->env_tris = crd32(m->raw + env_off + 8u * i);
+            cp->env_geo = crd32(m->raw + env_off + 8u * i + 4u);
+            if (cp->env_tris == 0u)
+                continue;
+            if (cp->env_tris * 3u != cp->vert_n || rec + cp->env_tris * 28u > m->size) {
+                car_free(m);
+                return 0;
+            }
+            cp->env_rec = m->raw + rec;
+            rec += cp->env_tris * 28u;
+        }
+        if (rec != m->size) {
+            car_free(m);
+            return 0;
+        }
+    }
     m->vert = (const float *)(const void *)(m->raw + off_verts);
     m->atlas = (const uint16_t *)(const void *)(m->raw + atlas_off);
     return 1;
+}
+
+int car_refl_load(uint16_t *texels, const char *path)
+{
+    uint8_t cab[8];
+    FILE *f = fopen(path, "rb");
+    size_t n = (size_t)CAR_REFL_SIZE * CAR_REFL_SIZE;
+    int ok;
+
+    if (f == NULL)
+        return 0;
+    ok = fread(cab, 1, 8, f) == 8 && memcmp(cab, "NFSR", 4) == 0 && crd32(cab + 4) == 1u &&
+         fread(texels, 2, n, f) == n;
+    fclose(f);
+    /* el archivo es little-endian, como el SH-4 y el x86 */
+    return ok;
 }
 
 void car_free(CarModel *m)
@@ -128,9 +169,36 @@ static void norm3(float v[3])
     }
 }
 
-void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView *view,
-              int solo_resta, float sw, float sh, TrackEmit emit, void *user, TrackStats *st)
+int car_env_abr(const struct CarDraw *d, int pasada)
 {
+    const uint32_t *map = pasada == CAR_PASS_ENV_A ? d->env_a : d->env_b;
+
+    if (!d->env_ok || map[0] == 0u)
+        return -1;
+    return (int)((map[1] >> 16 >> 5) & 3u);
+}
+
+/* La parte del GEO de cada una de las siete que reflejan, en el orden de env_n. */
+static int parte_env(uint32_t pi)
+{
+    static const uint8_t pis[CAR_ENV_PARTS] = { 0, 8, 10, 41, 42, 45, 46 };
+    uint32_t k;
+
+    for (k = 0; k < CAR_ENV_PARTS; k++)
+        if (pis[k] == pi)
+            return (int)k;
+    return -1;
+}
+
+void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView *view,
+              int pasada, float sw, float sh, TrackEmit emit, void *user, TrackStats *st)
+{
+    int solo_resta = pasada == CAR_PASS_SUBTRACT;
+    int reflejo = pasada == CAR_PASS_ENV_A || pasada == CAR_PASS_ENV_B;
+    const uint32_t *map = pasada == CAR_PASS_ENV_A ? d->env_a : d->env_b;
+    uint8_t u0 = 0, v0 = 0, despl = 0;
+    float ga = 0.0f, gs = 0.0f;
+    uint32_t env_argb = 0;
     View vw;
     TrackMat mat;
     float ejes[3][3];            /* x, y, z del coche, en espacio de mundo */
@@ -141,6 +209,25 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
         memset(st, 0, sizeof(*st));
     if (m->raw == NULL)
         return;
+    if (reflejo) {
+        uint32_t cc[3], j;
+
+        if (car_env_abr(d, pasada) < 0)
+            return;
+        u0 = (uint8_t)map[0];
+        v0 = (uint8_t)(map[0] >> 8);
+        despl = (uint8_t)d->env_scroll;
+        /* la guinada de la camara alrededor del coche, 4096 por vuelta */
+        ga = cosf((float)d->env_yaw * (TAU / 4096.0f));
+        gs = sinf((float)d->env_yaw * (TAU / 4096.0f));
+        /* su color, con el 0x80 de PS1 como el 1,0 */
+        for (j = 0; j < 3u; j++) {
+            cc[j] = ((d->env_colour >> (8u * j)) & 0xFFu) * 2u;
+            if (cc[j] > 255u)
+                cc[j] = 255u;
+        }
+        env_argb = 0x80000000u | (cc[0] << 16) | (cc[1] << 8) | cc[2];
+    }
     view_init(&vw, view, sw, sh);
     memset(&mat, 0, sizeof mat);
 
@@ -205,12 +292,22 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
         int es_rueda = p->wheel != 0xFFu;
         uint32_t t;
 
+        int ke = -1;
+        int ram = 0;
+
         /* 1..16 se dibuja; 0 no esta y 17 en adelante son halos de luz, que son 2D */
         if (on == 0u || on >= 17u || p->vert_n == 0u)
             continue;
-        /* cada pasada dibuja un tipo de partes: las normales, o solo las que se restan */
-        if ((p->subtract != 0u) != (solo_resta != 0))
+        if (reflejo) {
+            /* solo las partes que reflejan */
+            if (p->env_tris == 0u || p->env_rec == NULL)
+                continue;
+            ke = parte_env(pi);
+            ram = ke >= 0 && d->env_n[ke] != 0u && d->env_n[ke] == p->env_geo;
+        } else if ((p->subtract != 0u) != (solo_resta != 0)) {
+            /* cada pasada dibuja un tipo de partes: las normales, o solo las que se restan */
             continue;
+        }
 
         if (es_rueda) {
             int tras = p->wheel >= 2u;
@@ -255,6 +352,65 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                 tri[k].v = v[4];
                 tri[k].argb = 0xFF000000u | (tinta((c >> 16) & 0xFFu, tono) << 16) |
                               (tinta((c >> 8) & 0xFFu, tono) << 8) | tinta(c & 0xFFu, tono);
+            }
+            if (reflejo) {
+                const uint8_t *r = p->env_rec + (size_t)(t / 3u) * 28u;
+                float e1[3], e2[3], cr[3], tc[3];
+                uint32_t j;
+
+                /* el mapa B solo va en los poligonos marcados 0x3F3 */
+                if (pasada == CAR_PASS_ENV_B && (crd16(r) & 0x3F3u) == 0u)
+                    continue;
+                /* NCLIP de DrawC_Prim: solo los que miran a la camara (el modelo tiene la X
+                 * espejada respecto a PS1, asi que su sentido de giro es el contrario) */
+                for (j = 0; j < 3u; j++) {
+                    e1[j] = wld[1][j] - wld[0][j];
+                    e2[j] = wld[2][j] - wld[0][j];
+                    tc[j] = vw.cam[j] - wld[0][j];
+                }
+                cr[0] = e1[1] * e2[2] - e1[2] * e2[1];
+                cr[1] = e1[2] * e2[0] - e1[0] * e2[2];
+                cr[2] = e1[0] * e2[1] - e1[1] * e2[0];
+                if (-(cr[0] * tc[0] + cr[1] * tc[1] + cr[2] * tc[2]) <= 0.0f)
+                    continue;
+                for (k = 0; k < 3u; k++) {
+                    const uint8_t *c3 = r + 4u + 8u * k;
+                    uint32_t gv = crd16(c3);
+                    float n[3], hacia[3], dist, tira;
+                    uint8_t u, v;
+
+                    if (ram && gv < d->env_n[ke]) {
+                        for (j = 0; j < 3u; j++)
+                            n[j] = (float)d->env_norm[d->env_first[ke] + gv][j];
+                    } else {
+                        for (j = 0; j < 3u; j++)
+                            n[j] = (float)(int16_t)crd16(c3 + 2u + 2u * j);
+                    }
+                    if (pasada == CAR_PASS_ENV_A) {
+                        int x = (int)(ga * n[0] + gs * n[2]);
+                        int z = (int)(-gs * n[0] + ga * n[2]);
+
+                        u = (uint8_t)(u0 + 64u + (uint8_t)x);
+                        v = (uint8_t)(v0 + (uint8_t)(z < 0 ? -z : z));
+                        tira = 0.01f;
+                    } else {
+                        u = (uint8_t)(u0 + 64u + (uint8_t)(int)n[1]);
+                        v = (uint8_t)(v0 + despl + (uint8_t)(int)n[2]);
+                        u = (uint8_t)((u & 0x7Fu) | (u0 & 0x80u));
+                        v = (uint8_t)((v & 0x3Fu) | (v0 & 0xC0u));
+                        tira = 0.02f;
+                    }
+                    tri[k].u = ((float)u + 0.5f) / 256.0f;
+                    tri[k].v = ((float)v + 0.5f) / 256.0f;
+                    tri[k].argb = env_argb;
+                    /* un pelo hacia la camara, sobre la carroceria que cubre */
+                    for (j = 0; j < 3u; j++)
+                        hacia[j] = vw.cam[j] - wld[k][j];
+                    dist = sqrtf(hacia[0] * hacia[0] + hacia[1] * hacia[1] + hacia[2] * hacia[2]);
+                    if (dist > 1e-4f)
+                        for (j = 0; j < 3u; j++)
+                            wld[k][j] += hacia[j] / dist * tira;
+                }
             }
             for (k = 0; k < 3u; k++) {
                 float dd[3];

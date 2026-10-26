@@ -222,6 +222,7 @@ impl GameHost {
                     self.loading.clear();
                 }
                 self.mode = Mode::Race;
+                force_weather(c);
                 return None;
             }
             _ => return None,

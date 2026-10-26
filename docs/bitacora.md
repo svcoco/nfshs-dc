@@ -20,7 +20,7 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
-| **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se dibuja entera con HUD, a 30–43 fps**; paso 6 en curso: faltan el clima y los reflejos |
+| **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se dibuja entera con HUD, a 30–43 fps**; **paso 6 hecho en emulador**: todos los efectos, clima y reflejos incluidos |
 | M3, M4, M5 | Sin empezar |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
@@ -31,7 +31,8 @@ original. En carrera da **30–43 fps** en Flycast; el coste no está en dibujar
 **grabar los coches** (código real del juego cada frame), que es trabajo de M3. Del paso 6
 de M2c (los efectos) ya se dibujan las **sombras** de los coches, las **líneas pintadas** de
 la carretera, las **marcas de neumático**, los **destellos** de las farolas, los **halos** de
-faros y frenos, el **humo** y el **flare del sol**; faltan el clima y los reflejos.
+faros y frenos, el **humo**, el **flare del sol**, el **clima** (lluvia y nieve) y los
+**reflejos** de los coches.
 
 ---
 
@@ -380,7 +381,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 3 | Grabación de los coches | **Hecho**, validado palabra a palabra |
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
-| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **En curso**: faltan el clima y los reflejos |
+| 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **Hecho en emulador** (2026-10-25), con dos dudas abiertas del clima |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -441,7 +442,7 @@ de VRAM por coche).
 apagado el ritmo es el mismo, así que la caída de ~60 a 30–40 fps la produce el paso 3,
 que corre código real del juego cada frame. Es trabajo de M3.
 
-### Paso 6: los efectos (en curso)
+### Paso 6: los efectos (hecho en emulador)
 
 **Lo sustractivo, con la mezcla del PVR.** La PS1 tiene un modo que resta (`B − F`); el PVR
 suma siempre sus dos factores. La técnica conocida sale de una identidad,
@@ -526,8 +527,47 @@ le corte la base.
 
 De paso se corrigió el **modo 3** de PS1 (`B + F/4`) en el 2D: se dibujaba como `B + F/2`.
 
-**Falta:** el clima (grabado pero sin dibujar, y sin una pista con clima para probarlo) y
-los reflejos.
+**Los reflejos de los coches.** Son el camino de entorno de `DrawC_Prim`: cada polígono
+de las partes que reflejan (capó, techo y demás: 0, 8, 10, 41, 42, 45 y 46), solo los que
+miran a la cámara, otra vez con un **mapa de reflejo de la pista** (`ZTR<nn>R.PSH`, horneado
+a `.RFL` con la misma disposición que en VRAM). Las coordenadas del mapa salen de la normal
+de cada vértice; las del mapa A, girada por la guiñada de la cámara alrededor del coche.
+En las carreras medidas **el mapa A siempre suma y el B siempre resta**, así que el B va en
+la caja de la resta exacta.
+
+**Las normales son las de la RAM, no las del GEO.** Medido: de 1 176 esquinas, **0**
+coinciden y la diferencia llega a 98 (otra escala, unos 21 de longitud contra 64). El host
+las lee cada frame de los objetos de parte que el juego tiene cargados, como la referencia,
+y el `.CAR` (versión 2) trae para cada esquina su vértice del GEO para poder usarlas, más la
+normal del GEO de respaldo. Solo los coches de carrera tienen modelo en una ranura; el
+tráfico se queda sin reflejo, igual que en la referencia. Los datos de reflejo de cada coche
+(mapas, desplazamiento, color, guiñada) ya estaban en la captura de 99 palabras que compara
+el oráculo.
+
+**El clima.** En «test drive» el front end no ofrece clima, así que hace falta forzarlo: una
+herramienta de prueba, `--clima W|S|N` en el port (`/CLIMA.TXT` en el disco, `mkdisc
+--clima`) y `NFSHS_WEATHER` en la referencia, que escriben el clima y la hora en
+`GameSetup_tData` en cada frame del front end y al entrar en el bucle de carrera. **No es
+del juego.** Con lluvia el juego construye su clima en 3 796 de 5 000 frames: trazos de
+lluvia (líneas que suman) y gotas en la lente (con textura, a medias). Se dibuja encima del
+3D y de los destellos y debajo del HUD, en orden del pintor.
+
+**El oráculo encontró un fallo de verdad.** Con lluvia, 209 frames tenían el clima distinto
+con el mismo número de cuadros. La causa: el port convertía las líneas en cuadros con una
+regla de enteros que daba lo mismo que la referencia **solo en pantalla**; con una punta en
+x = 8 205, en `f32` el `dy²` se pierde, la normal sale justo −0,5 y redondea a −1. Ahora se
+reproduce cada operación `f32` (en `double`, redondeando a `float` tras cada paso, para no
+depender de que el compilador fusione operaciones). Con eso: **151 932 cuadros de lluvia y
+234 963 de nieve idénticos** en 5 000 frames, con la RAM idéntica en todos.
+
+**Dos dudas del clima que no puedo cerrar sin una PS1 o un emulador de PS1** (ver
+«Abierto»): uno de cada cinco trazos de lluvia tiene una punta fuera de los 11 bits de la
+GPU, y salen como líneas que cruzan la pantalla; y las gotas en la lente se ven como
+cuadros oscuros. En las dos el port hace lo mismo que la referencia.
+
+Una hipótesis que se descartó midiendo: que las gotas leyeran el propio framebuffer. Los
+dos búferes de dibujo están en (0, 256) y (320, 256), y las gotas leen la página 0, que no
+es ninguno de los dos.
 
 ### Paso 5: el HUD
 
@@ -665,15 +705,22 @@ incompleta— los encontró el oráculo, no la lectura del código.
   las primitivas semitransparentes; ARGB1555 tiene **un solo bit** de alfa. Hoy se
   resuelve por modo de mezcla del cuadro entero, no por texel.
 - **Leer el front end en 480i.** Está probado el modo, no la legibilidad en una tele.
+- **Trazos de lluvia fuera de rango.** 28 162 de 131 293 tienen una punta con x fuera de
+  los 11 bits de la GPU (hasta 8 205). El port y la referencia los dibujan tal cual y salen
+  como líneas largas que cruzan la pantalla. Si la GPU de PS1 truncara a 11 bits, como creo
+  que dice psx-spx, también se verían; si los descartara, no. **Hace falta una PS1 o un
+  emulador de PS1** (en el equipo no hay ninguno instalado).
+- **Gotas en la lente.** Leen una textura de 4 bits de la página 0 con una paleta distinta
+  por gota y salen como cuadros oscuros. Puede ser su aspecto real; sin referencia de PS1
+  no se puede saber.
 - **Dos cuadros de menos** en los frames 126–130 del guion de carrera, los menús justo
   antes de entrar: 239 contra 241 de la referencia. `front_end_120.txt` no llega ahí.
 - **M4:** factor de escala de las texturas, método y formato.
 - **Alcance:** si la primera versión incluye 2P y FMV.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.
 - **Autor de nfshs-rs:** contacto sobre licencia y posible colaboración.
-- **Reflejos de los coches.** Son lo único sustractivo que queda sin dibujar. Necesitan
-  las normales por vértice y los mapas de reflejo de la pista; se harán con la misma
-  mezcla del PVR que las sombras (ver «Decisiones vigentes»).
+- **El coste en fps del paso 6 está sin medir.** Destellos, humo, clima y reflejos
+  añaden rutinas del juego por frame y pases del PVR; no se ha separado su coste.
 - **Coste de las inversiones del PVR sin medir en consola.** Cada frame con efectos añade
   dos rectángulos translúcidos sobre la caja de los efectos. En pantalla completa serían
   ~0,6 M de píxeles por frame; la caja es mucho menor, pero el coste real en un Dreamcast

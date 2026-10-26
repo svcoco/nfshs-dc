@@ -25,6 +25,10 @@
 #include "addr.h"
 #include "host.h"
 
+#include <string.h>
+
+static void car_env_normals(Cpu *c, uint32_t car, CarDraw *d);
+
 /* Las seis rutinas de dibujado de la carroceria, que el paso de halos salta. Son las
  * mismas que ya usa showroom.c. */
 static const uint32_t CAR_BODY[6] = {
@@ -157,6 +161,14 @@ static int car_hook(Cpu *c, uint32_t addr)
         for (i = 0; i < 9u; i++)
             d->orient[i] = (int32_t)ps1_r32(c, car + 0xF0u + 4u * i);
         d->light = light;
+        for (i = 0; i < 4u; i++) {
+            d->env_a[i] = ps1_r32(c, ADDR_CAR_CACHE + 100u + 4u * i);
+            d->env_b[i] = ps1_r32(c, ADDR_CAR_CACHE + 116u + 4u * i);
+        }
+        d->env_scroll = ps1_r32(c, ADDR_CAR_CACHE + 132u);
+        d->env_colour = ps1_r32(c, ADDR_CAR_CACHE + 144u) & 0xFFFFFFu;
+        d->env_yaw = (int16_t)ps1_r16(c, ADDR_R3DCAR_CENTER + 0x14u);
+        car_env_normals(c, car, d);
         d->shadow_on = (uint8_t)(ps1_r32(c, ADDR_SHADOW_ON) != 0u);
         d->env_ok = (uint8_t)ok;
         d->parked = (uint8_t)((ps1_r32(c, car + 0x570u) & 4u) != 0u);
@@ -210,6 +222,44 @@ static int car_hook(Cpu *c, uint32_t addr)
     }
     c->r[2] = 0;
     return 1;
+}
+
+/* Las normales de reflejo que el juego tiene en memoria para el modelo del coche: las de
+ * sus objetos de parte cargados (0x80117BC0, por nivel de detalle y ranura de modelo), que
+ * NO son las del GEO (medido: 0 de 1 176 esquinas iguales, con otra escala). Solo los
+ * coches de carrera tienen ranura; el trafico se queda sin ellas, como en la referencia
+ * (read_env_normals de src/ps1/race.rs). */
+static void car_env_normals(Cpu *c, uint32_t car, CarDraw *d)
+{
+    static const uint8_t pis[CAR_ENV_PARTS] = { 0, 8, 10, 41, 42, 45, 46 };
+    int16_t slot = (int16_t)ps1_r16(c, car + 0x8BCu);
+    uint32_t lod = ps1_r8(c, car + 0x842u) >> 7, partes, k, usadas = 0;
+
+    memset(d->env_n, 0, sizeof d->env_n);
+    if (slot < 0 || slot >= 50)
+        return;
+    partes = ps1_r32(c, 0x80117BC0u + lod * 200u + (uint32_t)slot * 4u);
+    if (partes < 0x80000000u || partes >= 0x80200000u)
+        return;
+    for (k = 0; k < CAR_ENV_PARTS; k++) {
+        uint32_t pa = ps1_r32(c, partes + 4u * pis[k]), nv, np, j;
+
+        if (pa < 0x80000000u || pa >= 0x80200000u)
+            continue;
+        nv = ps1_r16(c, pa);
+        np = ps1_r32(c, pa + 20u);
+        if (nv == 0u || nv > 512u || np < 0x80000000u || np >= 0x80200000u ||
+            usadas + nv > CAR_ENV_NORMALS)
+            continue;
+        d->env_first[k] = (uint16_t)usadas;
+        d->env_n[k] = (uint16_t)nv;
+        for (j = 0; j < nv; j++) {
+            d->env_norm[usadas + j][0] = (int16_t)ps1_r16(c, np + 6u * j);
+            d->env_norm[usadas + j][1] = (int16_t)ps1_r16(c, np + 6u * j + 2u);
+            d->env_norm[usadas + j][2] = (int16_t)ps1_r16(c, np + 6u * j + 4u);
+        }
+        usadas += nv;
+    }
 }
 
 void host_record_cars(GameHost *h, Cpu *c)

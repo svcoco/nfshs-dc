@@ -103,6 +103,8 @@ typedef struct SkyData {
  * su modelo, su pose y que partes se ven. Va separado a proposito, porque la captura
  * tiene que seguir siendo palabra a palabra la de la referencia. */
 #define CARS_MAX 8u
+#define CAR_ENV_PARTS   7u     /* las partes con reflejo */
+#define CAR_ENV_NORMALS 1024u  /* medido: 294 en el coche del jugador */
 
 typedef struct CarDraw {
     char     code[8];          /* las 4 letras del modelo, de Car_tObj + 0x240 */
@@ -120,6 +122,17 @@ typedef struct CarDraw {
     uint8_t  shadow_on, env_ok, parked, pad_s;
     int32_t  shadow[4][3];
     uint8_t  shadow_rgb[3];
+    /* Los reflejos (DrawC_PrimStart, en el cache del coche): dos de los mapas de reflejo
+     * de la pista, como pixmaps (u, v, clut, u, v, tpage...; 0 en la primera palabra si no
+     * hay), el desplazamiento del segundo, su color (0xBBGGRR) y la guinada de la camara
+     * alrededor del coche (4096 por vuelta). Validos con `env_ok`. */
+    uint32_t env_a[4], env_b[4];
+    uint32_t env_scroll, env_colour;
+    int16_t  env_yaw;
+    /* Las normales de reflejo de sus partes 0, 8, 10, 41, 42, 45 y 46 como las tiene el
+     * juego en memoria: env_n[k] normales desde env_norm[env_first[k]] (0: no hay). */
+    uint16_t env_n[CAR_ENV_PARTS], env_first[CAR_ENV_PARTS];
+    int16_t  env_norm[CAR_ENV_NORMALS][3];
 } CarDraw;
 
 /* 99 palabras por coche; hasta 8 coches mas holgura. */
@@ -215,6 +228,7 @@ typedef struct GameHost {
     HostMode mode;           /* arranca en el front end, como la referencia */
     int      capturing;      /* dentro de una rutina de dibujado capturada */
     int      unlock;         /* --unlock: pistas y coches disponibles (ver unlock.c) */
+    char     clima;          /* --clima W|S|N: fuerza clima y hora de la carrera (unlock.c) */
     uint64_t unlocks;
     uint64_t views_fonttext;      /* Font_TextXY atendidas por el host */
     uint64_t views_captured;      /* rutinas corridas en marco anidado */
@@ -414,6 +428,7 @@ uint32_t overlay_ot_len(Cpu *c, uint32_t start);
 void     overlay_record_ot(GameHost *h, Cpu *c, uint32_t start);
 void     overlay_race_compose(GameHost *h);
 void host_unlock_everything(GameHost *h, Cpu *c);
+void host_force_weather(GameHost *h, Cpu *c);
 uint32_t host_capture_prims(GameHost *h, Cpu *c, uint32_t addr);
 int  host_showroom_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 /* Rellena los buffers de libpad. Se llama en el frame_top, no en cada campo. */

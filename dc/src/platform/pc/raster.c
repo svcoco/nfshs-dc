@@ -202,7 +202,8 @@ typedef struct {
     uint32_t pintados;
     int      cielo;           /* dibujando el cielo: no escribe profundidad */
     int      plano;           /* el cuadro en curso no lleva textura */
-    int      resta;           /* mezcla B*(1-F): lo que el PVR hace con sus factores */
+    int      resta;           /* B - F: lo que el PVR hace invirtiendo, sumando e invirtiendo */
+    int      abr;             /* -1 opaco; si no, el modo de PS1 con que se mezcla (0, 1, 3) */
     float    zmul;            /* acerca lo dibujado a la camara (z de 1/w) */
 } Pista;
 
@@ -252,7 +253,7 @@ static void tri_pista(Pista *P, const TrackVert *a, const TrackVert *b,
             o = (size_t)y * P->w + x;
             iz *= P->zmul;
             /* el efecto va con GEQUAL y sin escribir: tiene que poder empatar con lo opaco */
-            if (P->resta ? iz < P->z[o] : iz <= P->z[o])
+            if ((P->resta || P->abr >= 0) ? iz < P->z[o] : iz <= P->z[o])
                 continue;                /* hay algo mas cerca */
             if (P->plano) {
                 /* sin textura: PS1 pinta el color del vertice tal cual */
@@ -292,6 +293,19 @@ static void tri_pista(Pista *P, const TrackVert *a, const TrackVert *b,
                 P->rgb[o * 3u + 0u] = (uint8_t)(br > fr ? br - fr : 0);
                 P->rgb[o * 3u + 1u] = (uint8_t)(bg > fg ? bg - fg : 0);
                 P->rgb[o * 3u + 2u] = (uint8_t)(bbl > fb ? bbl - fb : 0);
+                P->pintados++;
+                continue;
+            }
+            if (P->abr >= 0) {
+                /* mezcla de PS1, sin escribir profundidad: 0 mitad, 1 suma, 3 suma un cuarto */
+                int f[3] = { CLAMP255(r), CLAMP255(g), CLAMP255(bb) }, k;
+
+                for (k = 0; k < 3; k++) {
+                    int bv = P->rgb[o * 3u + (size_t)k];
+
+                    P->rgb[o * 3u + (size_t)k] = (uint8_t)CLAMP255(
+                        P->abr == 1 ? bv + f[k] : P->abr == 3 ? bv + f[k] / 4 : (bv + f[k]) / 2);
+                }
                 P->pintados++;
                 continue;
             }
@@ -460,7 +474,8 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
             vista.camera_pos[1] += (int32_t)(alto * 65536.0);   /* y crece hacia arriba */
         }
     }
-    uint32_t coches_tri = 0, efectos_tri = 0, marcas_tri = 0, marcas_det = 0;
+    uint32_t coches_tri = 0, efectos_tri = 0, marcas_tri = 0, marcas_det = 0, reflejo_tri = 0;
+    static const uint16_t *s_refl;
     FILE *f;
 
     if (w <= 0 || hh <= 0 || (size_t)w * hh * 3u > sizeof rgb || h->views_n == 0u)
@@ -482,6 +497,7 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
     P.cielo = 0;
     P.plano = 0;
     P.resta = 0;
+    P.abr = -1;
     P.zmul = 1.0f;
 
     /* El cielo primero: va detras de todo y no escribe profundidad. */
@@ -529,6 +545,47 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
         }
         P.atlas = track->atlas; P.aw = track->atlas_w; P.ah = track->atlas_h;
 
+        /* Los reflejos de los coches, con la pagina de mapas de reflejo de la pista. El
+         * mapa A va aqui (suma); el B, que resta, va con los efectos de abajo. */
+        {
+            static uint16_t refl[CAR_REFL_SIZE * CAR_REFL_SIZE];
+            static char refl_de[16];
+            char ruta[64];
+
+            if (strncmp(refl_de, h->track_name, sizeof refl_de) != 0) {
+                uint32_t i;
+                char may[16];
+
+                memcpy(refl_de, h->track_name, sizeof refl_de - 1u);
+                refl_de[sizeof refl_de - 1u] = 0;
+                for (i = 0; i + 1u < sizeof may && h->track_name[i] != 0; i++)
+                    may[i] = (char)((h->track_name[i] >= 'a' && h->track_name[i] <= 'z')
+                                    ? h->track_name[i] - 'a' + 'A' : h->track_name[i]);
+                may[i] = 0;
+                snprintf(ruta, sizeof ruta, "dc/build/baked/%sR.RFL", may);
+                if (!car_refl_load(refl, ruta)) {
+                    printf("  reflejos: no pude cargar %s\n", ruta);
+                    memset(refl, 0, sizeof refl);
+                }
+            }
+            for (ci = 0; ci < h->cars_n && ci < CARS_MAX && getenv("PS1_NOFX") == NULL; ci++) {
+                const CarDraw *d = &h->car_draw[ci];
+                TrackStats est;
+                int abr = car_env_abr(d, CAR_PASS_ENV_A);
+
+                if (d->code[0] == 0 || abr < 0 || abr == 2 ||
+                    strncmp(modelo.code, d->code, sizeof modelo.code) != 0 || modelo.raw == NULL)
+                    continue;
+                P.atlas = refl; P.aw = CAR_REFL_SIZE; P.ah = CAR_REFL_SIZE;
+                P.abr = abr;
+                car_draw(&modelo, d, &vista, CAR_PASS_ENV_A, (float)w, (float)hh, emite, &P, &est);
+                reflejo_tri += est.quads_out;
+                P.abr = -1;
+            }
+            P.atlas = track->atlas; P.aw = track->atlas_w; P.ah = track->atlas_h;
+            s_refl = refl;
+        }
+
         /* Los efectos que el original dibuja RESTANDO: la sombra de cada coche en el
          * suelo y la de sus pasos de rueda. Van despues de todo lo opaco. */
         P.resta = 1;
@@ -554,8 +611,14 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
             efectos_tri += est.quads_out;
             if (strncmp(modelo.code, d->code, sizeof modelo.code) == 0 && modelo.raw != NULL) {
                 P.atlas = modelo.atlas; P.aw = modelo.atlas_w; P.ah = modelo.atlas_h;
-                car_draw(&modelo, d, &vista, 1, (float)w, (float)hh, emite, &P, &est);
+                car_draw(&modelo, d, &vista, CAR_PASS_SUBTRACT, (float)w, (float)hh, emite, &P, &est);
                 efectos_tri += est.quads_out;
+                /* y el mapa B del reflejo, que resta */
+                if (car_env_abr(d, CAR_PASS_ENV_B) == 2) {
+                    P.atlas = s_refl; P.aw = CAR_REFL_SIZE; P.ah = CAR_REFL_SIZE;
+                    car_draw(&modelo, d, &vista, CAR_PASS_ENV_B, (float)w, (float)hh, emite, &P, &est);
+                    reflejo_tri += est.quads_out;
+                }
             }
         }
         P.resta = 0;
@@ -591,7 +654,23 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
         printf("  destellos: %u de %u delante de la camara, %u pixeles; flare del sol %u cuadros\n",
                (unsigned)vistos, (unsigned)h->glows_n, (unsigned)(P.pintados - antes),
                (unsigned)h->sky_quads_n);
+        /* el clima, encima de todo el 3D y sin prueba de profundidad: un z que siempre gana */
+        {
+            static const float siempre[4] = { 1e30f, 1e30f, 1e30f, 1e30f };
+            uint32_t antes_c = P.pintados;
+
+            for (pase = 0; pase < 2; pase++)
+                for (i = 0; i < h->weather_quads_n; i++) {
+                    const OverlayQuad *q = &h->weather_quad[i];
+
+                    if ((q->semi && q->abr == 2u) == pase)
+                        cuadro_destello(&P, h, texbuf, q, siempre, sx, sy);
+                }
+            printf("  clima: %u cuadros, %u pixeles\n", (unsigned)h->weather_quads_n,
+                   (unsigned)(P.pintados - antes_c));
+        }
     }
+    printf("  reflejos de los coches: %u triangulos\n", (unsigned)reflejo_tri);
     printf("  efectos restados: %u triangulos, marcas de neumatico: %u de %u\n",
            (unsigned)efectos_tri, (unsigned)marcas_tri, (unsigned)h->skids_n);
     printf("  (marcas: %u triangulos detras de la camara)\n", (unsigned)marcas_det);

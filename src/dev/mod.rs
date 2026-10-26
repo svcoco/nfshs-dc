@@ -19,7 +19,7 @@ use std::path::Path;
 pub use headless::{front_end_play, screenshot};
 
 /// The commands [`run`] knows.
-pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "bake-track", "bake-car", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car"];
+pub const COMMANDS: &[&str] = &["ref-compare", "match-shapes", "shot", "dump-shape-pal", "dump-shape", "crop", "dump-psh", "dump-track", "bake-track", "bake-car", "bake-refl", "verify-decompress", "dump-audio", "boot-race", "boot-main", "dump-movie", "fe-play", "contact", "heap-free", "dump-car"];
 
 /// Run developer command `cmd` (`args` as on the command line); false if there is none.
 pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::RaceConfig) -> Result<bool> {
@@ -91,6 +91,8 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             opt(args, "--colour").and_then(|v| v.parse().ok()).unwrap_or(0),
             Path::new(&args[3]),
         )?,
+        // bake-refl NN OUT.RFL: the track's reflection maps for the cars' reflections
+        "bake-refl" => bakecar::bake_reflections(data, args[2].parse()?, Path::new(&args[3]))?,
         "verify-decompress" => {
             // compare against reference outputs produced by tools/mipsemu.py (re/dec/<name>.bin)
             let (mut ok, mut bad) = (0, 0);

@@ -62,8 +62,8 @@ decide Jorge. No se hace por cuenta propia.
 
 **Estado a 2026-10-25:** el front end, la pista, el cielo, los objetos, los coches, el HUD,
 las sombras, las líneas pintadas, las marcas de neumático, los destellos y halos, el humo y
-el flare del sol van por el PVR. **No hay ninguna excepción.** Faltan el clima y los
-reflejos, que siguen el mismo camino.
+el flare del sol, el clima y los reflejos de los coches van por el PVR. **No hay ninguna
+excepción.**
 
 **Una cautela honesta.** Todas las cifras de rendimiento son de Flycast: no hay Dreamcast
 disponible. Si alguna técnica resultara demasiado cara en consola real, esa sería la

@@ -2,6 +2,7 @@
 #include "addr.h"
 #include "host.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -317,7 +318,7 @@ static void parse_prim(GameHost *h, Cpu *c, uint32_t a, uint32_t len)
         int gouraud = (code & 0x10u) != 0;
         int16_t p0[2], p1[2];
         uint32_t c0 = w0 & 0xFFFFFFu, c1;
-        int32_t dx, dy, nx, ny, n2;
+        int32_t dx, dy, nx, ny;
 
         xy_of(ps1_r32(c, a + 4u), p0);
         if (gouraud) {
@@ -329,21 +330,31 @@ static void parse_prim(GameHost *h, Cpu *c, uint32_t a, uint32_t len)
         }
         dx = p1[0] - p0[0];
         dy = p1[1] - p0[1];
-        /* La referencia toma la normal de media unidad y la redondea:
-         * (round(-dy/n * 0,5), round(dx/n * 0,5)). Eso solo da +-1 cuando la linea es
-         * horizontal o vertical (el componente vale justo 0,5); en cualquier diagonal
-         * los dos quedan por debajo de 0,5, redondean a 0 y se cae al (0, 1). Con
-         * coordenadas de pantalla (menos de 1024) eso es exacto tambien en float, asi
-         * que aqui va en enteros, sin coma flotante. Engordar las diagonales por su eje
-         * dominante, como se hacia antes, movia la aguja del tacometro un pixel. */
-        n2 = dx * dx + dy * dy;
-        (void)n2;
-        if (dy == 0 && dx != 0) {
-            nx = 0; ny = (dx > 0) ? 1 : -1;
-        } else if (dx == 0 && dy != 0) {
-            nx = (dy > 0) ? -1 : 1; ny = 0;
-        } else {
-            nx = 0; ny = 1;
+        /* La normal de media unidad, redondeada, exactamente como la referencia en f32:
+         * n = max(sqrt(dx*dx + dy*dy), 1), (round(-dy/n * 0,5), round(dx/n * 0,5)), y
+         * (0, 1) si las dos salen 0. En pantalla solo da +-1 en horizontales y verticales,
+         * pero NO es una regla de enteros: con una punta fuera de la pantalla (la lluvia
+         * llega a x = 8 205) el dy*dy se pierde en el f32, la normal sale justo -0,5 y
+         * redondea a -1. Por eso se reproduce cada operacion f32: en double, que es exacto
+         * para estos enteros, y redondeando a float tras cada paso (redondear un double
+         * a float da el mismo resultado que la operacion IEEE en f32 para producto,
+         * suma, raiz y division). Asi no depende de que el compilador fusione operaciones
+         * (el SH-4 tiene FMAC). */
+        {
+            float fx = (float)((double)dx * (double)dx);
+            float fy = (float)((double)dy * (double)dy);
+            float n = (float)sqrt((double)(float)((double)fx + (double)fy));
+            float ux, uy;
+
+            if (n < 1.0f)
+                n = 1.0f;
+            ux = (float)((double)-dy / (double)n) * 0.5f;
+            uy = (float)((double)dx / (double)n) * 0.5f;
+            /* round de Rust: la mitad se aleja del cero */
+            nx = (int32_t)(ux < 0.0f ? -floor(0.5 - (double)ux) : floor((double)ux + 0.5));
+            ny = (int32_t)(uy < 0.0f ? -floor(0.5 - (double)uy) : floor((double)uy + 0.5));
+            if (nx == 0 && ny == 0)
+                ny = 1;
         }
         pts[0][0] = p0[0];            pts[0][1] = p0[1];
         pts[1][0] = p1[0];            pts[1][1] = p1[1];

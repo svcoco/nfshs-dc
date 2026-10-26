@@ -54,6 +54,9 @@ static uint64_t s_frames, s_quads, s_strips, s_quads_destellos;
 static Track     s_track;
 static char      s_track_cargada[16];
 static pvr_ptr_t s_atlas;
+/* La pagina de mapas de reflejo de la pista (bake-refl), para los reflejos de los coches. */
+static pvr_ptr_t s_refl;
+static uint64_t  s_tri_reflejo;
 static uint64_t  s_tri, s_tri_frames;
 
 uint64_t render_tris(void)       { return s_tri; }
@@ -70,6 +73,10 @@ static void pista_carga(const char *nombre)
     if (s_atlas != NULL) {
         pvr_mem_free(s_atlas);
         s_atlas = NULL;
+    }
+    if (s_refl != NULL) {
+        pvr_mem_free(s_refl);
+        s_refl = NULL;
     }
     /* El nombre se anota ANTES de intentar nada: si la carga falla no se reintenta en
      * cada frame. Reintentarlo costaba un fopen por frame y hundia el ritmo a 4,5 fps. */
@@ -99,6 +106,20 @@ static void pista_carga(const char *nombre)
     printf("pista %s: %u bloques, %u cuadros, atlas %ux%u\n", nombre,
            (unsigned)s_track.blocks, (unsigned)s_track.quads,
            (unsigned)s_track.atlas_w, (unsigned)s_track.atlas_h);
+
+    /* y sus mapas de reflejo: sin ellos los coches se dibujan igual, sin reflejo */
+    {
+        static uint16_t refl[CAR_REFL_SIZE * CAR_REFL_SIZE];
+
+        snprintf(ruta, sizeof ruta, "/cd/BAKED/%sR.RFL", may);
+        if (!car_refl_load(refl, ruta)) {
+            printf("reflejos: no pude cargar %s\n", ruta);
+        } else if ((s_refl = pvr_mem_malloc(sizeof refl)) == NULL) {
+            printf("reflejos: no caben en la VRAM del PVR\n");
+        } else {
+            pvr_txr_load(refl, s_refl, sizeof refl);
+        }
+    }
 }
 
 /* Modos de dibujo del mundo. El cielo no escribe profundidad (va detras de todo) y sus
@@ -344,9 +365,19 @@ static void efectos_recorre(GameHost *h, TrackEmit emit, int dibuja)
             if (dibuja)
                 efecto_ctx(s_coches[k].atlas, s_coches[k].modelo.atlas_w,
                            s_coches[k].modelo.atlas_h);
-            car_draw(&s_coches[k].modelo, d, &h->view[0], 1, 640.0f, 480.0f, emit, NULL, &est);
+            car_draw(&s_coches[k].modelo, d, &h->view[0], CAR_PASS_SUBTRACT, 640.0f, 480.0f,
+                     emit, NULL, &est);
             if (dibuja)
                 s_tri_efectos += est.quads_out;
+            /* y el mapa B del reflejo, que resta (modo 2 de su pagina de textura) */
+            if (s_refl != NULL && car_env_abr(d, CAR_PASS_ENV_B) == 2) {
+                if (dibuja)
+                    efecto_ctx(s_refl, CAR_REFL_SIZE, CAR_REFL_SIZE);
+                car_draw(&s_coches[k].modelo, d, &h->view[0], CAR_PASS_ENV_B, 640.0f, 480.0f,
+                         emit, NULL, &est);
+                if (dibuja)
+                    s_tri_reflejo += est.quads_out;
+            }
         }
     }
 }
@@ -401,6 +432,48 @@ static void efecto_ctx(pvr_ptr_t atlas, uint32_t w, uint32_t hh)
     pvr_poly_compile(&hdr, &cxt);
     pvr_prim(&hdr, sizeof(hdr));
 }
+
+/* El mapa A del reflejo de cada coche: se mezcla como dice su pagina de textura (en las
+ * carreras medidas, siempre suma) y se prueba contra lo opaco sin escribir profundidad. Si
+ * alguno restara, iria con el B en la caja de la resta; no se ha visto ninguno. */
+static void reflejos_dibuja(GameHost *h)
+{
+    uint32_t ci;
+
+    if (s_refl == NULL || h->views_n == 0u)
+        return;
+    s_fase = FASE_RESTO;
+    for (ci = 0; ci < h->cars_n && ci < CARS_MAX; ci++) {
+        const CarDraw *d = &h->car_draw[ci];
+        int abr = car_env_abr(d, CAR_PASS_ENV_A);
+        pvr_poly_cxt_t cxt;
+        pvr_poly_hdr_t hdr;
+        TrackStats est;
+        uint32_t k;
+
+        if (d->code[0] == 0 || abr < 0 || abr == 2)
+            continue;
+        k = coche_modelo(d->code);
+        if (k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL)
+            continue;
+        pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
+                         PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
+                         CAR_REFL_SIZE, CAR_REFL_SIZE, s_refl, PVR_FILTER_NONE);
+        cxt.depth.comparison = PVR_DEPTHCMP_GEQUAL;
+        cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+        cxt.gen.culling = PVR_CULLING_NONE;
+        /* modos de PS1 0, 1 y 3: mitad, suma y suma un cuarto (alfa 128 = mitad) */
+        cxt.blend.src = abr == 1 ? PVR_BLEND_ONE : PVR_BLEND_SRCALPHA;
+        cxt.blend.dst = abr == 0 ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ONE;
+        pvr_poly_compile(&hdr, &cxt);
+        pvr_prim(&hdr, sizeof(hdr));
+        car_draw(&s_coches[k].modelo, d, &h->view[0], CAR_PASS_ENV_A, 640.0f, 480.0f,
+                 pista_emite, NULL, &est);
+        s_tri_reflejo += est.quads_out;
+    }
+}
+
+uint64_t render_refl_tris(void) { return s_tri_reflejo; }
 
 static void efectos_dibuja(GameHost *h)
 {
@@ -648,8 +721,10 @@ static void modo_mezcla(pvr_poly_cxt_t *cxt, int semi, uint8_t abr)
  */
 #define Z_FONDO 0.0001f       /* el plano de fondo de KOS (pvr_state.zclip) */
 
+static float s_z_pintor;      /* el z del orden del pintor del clima (ver clima_dibuja) */
+
 static void destello_quad(GameHost *h, const OverlayQuad *q, float sx, float sy,
-                          const float *z, int sumar)
+                          const float *z, int sumar, int pintor)
 {
     const TexEntry *e;
     pvr_poly_cxt_t cxt;
@@ -669,7 +744,7 @@ static void destello_quad(GameHost *h, const OverlayQuad *q, float sx, float sy,
                          PVR_FILTER_NONE);
     else
         pvr_poly_cxt_col(&cxt, PVR_LIST_TR_POLY);
-    cxt.depth.comparison = PVR_DEPTHCMP_GEQUAL;
+    cxt.depth.comparison = pintor ? PVR_DEPTHCMP_ALWAYS : PVR_DEPTHCMP_GEQUAL;
     cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
     cxt.gen.culling = PVR_CULLING_NONE;
     if (sumar) {
@@ -689,7 +764,7 @@ static void destello_quad(GameHost *h, const OverlayQuad *q, float sx, float sy,
             v.flags = PVR_CMD_VERTEX_EOL;
         v.x = (float)q->pts[k][0] * sx;
         v.y = (float)q->pts[k][1] * sy;
-        v.z = z != NULL ? z[k] : Z_FONDO;
+        v.z = z != NULL ? z[k] : pintor ? s_z_pintor : Z_FONDO;
         v.u = e != NULL ? ((float)q->tex.uv[k][0] - (float)e->u0) / (float)e->w : 0.0f;
         v.v = e != NULL ? ((float)q->tex.uv[k][1] - (float)e->v0) / (float)e->h : 0.0f;
         v.argb = color_de(q, k, q->semi);
@@ -726,7 +801,7 @@ static void destellos_dibuja(GameHost *h, float sx, float sy)
             const OverlayQuad *q = &h->glow_quad[g->first + k];
 
             if (!resta(q)) {
-                destello_quad(h, q, sx, sy, &z[(g->first + k) * 4u], 0);
+                destello_quad(h, q, sx, sy, &z[(g->first + k) * 4u], 0, 0);
                 continue;
             }
             hay_resta = 1;
@@ -759,8 +834,57 @@ static void destellos_dibuja(GameHost *h, float sx, float sy)
         for (k = 0; k < g->n; k++)
             if (resta(&h->glow_quad[g->first + k]))
                 destello_quad(h, &h->glow_quad[g->first + k], sx, sy,
-                              &z[(g->first + k) * 4u], 1);
+                              &z[(g->first + k) * 4u], 1, 0);
     }
+    inversion(bx0, by0, bx1, by1);
+}
+
+/* El clima (lluvia o nieve, y las gotas en la lente): 2D que el juego construye despues
+ * del mundo, grabado tal cual (host/glows.c). Va encima de todo el 3D y de los destellos y
+ * debajo del HUD, en el orden en que se grabo y sin prueba de profundidad, como en la
+ * referencia (game/layers.rs). Lo que reste va con su propia caja de invertir, sumar e
+ * invertir; en las carreras medidas no hay ninguno (lluvia sumando, gotas a medias). */
+static void clima_dibuja(GameHost *h, float sx, float sy)
+{
+    float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+    uint32_t i, c;
+    int hay_resta = 0;
+
+    if (h->views_n == 0u || h->weather_quads_n == 0u)
+        return;
+    s_z_pintor = 1.0f;
+    for (i = 0; i < h->weather_quads_n; i++) {
+        const OverlayQuad *q = &h->weather_quad[i];
+
+        if (!resta(q)) {
+            destello_quad(h, q, sx, sy, NULL, 0, 1);
+            s_z_pintor += 0.001f;
+            continue;
+        }
+        hay_resta = 1;
+        for (c = 0; c < 4u; c++) {
+            float x = (float)q->pts[c][0] * sx, y = (float)q->pts[c][1] * sy;
+
+            if (x < bx0) bx0 = x;
+            if (x > bx1) bx1 = x;
+            if (y < by0) by0 = y;
+            if (y > by1) by1 = y;
+        }
+    }
+    if (!hay_resta)
+        return;
+    bx0 = floorf(bx0) - 1.0f; by0 = floorf(by0) - 1.0f;
+    bx1 = ceilf(bx1) + 1.0f;  by1 = ceilf(by1) + 1.0f;
+    if (bx0 < 0.0f) bx0 = 0.0f;
+    if (by0 < 0.0f) by0 = 0.0f;
+    if (bx1 > 640.0f) bx1 = 640.0f;
+    if (by1 > 480.0f) by1 = 480.0f;
+    if (bx1 <= bx0 || by1 <= by0)
+        return;
+    inversion(bx0, by0, bx1, by1);
+    for (i = 0; i < h->weather_quads_n; i++)
+        if (resta(&h->weather_quad[i]))
+            destello_quad(h, &h->weather_quad[i], sx, sy, NULL, 1, 1);
     inversion(bx0, by0, bx1, by1);
 }
 
@@ -791,11 +915,15 @@ void render_frame(GameHost *h)
     /* el flare del sol: sobre el cielo y debajo del mundo */
     if (h->views_n != 0u)
         for (i = 0; i < h->sky_quads_n; i++)
-            destello_quad(h, &h->sky_quad[i], sx, sy, NULL, 0);
+            destello_quad(h, &h->sky_quad[i], sx, sy, NULL, 0, 0);
+    /* el mapa A del reflejo de los coches, que va antes que el B */
+    reflejos_dibuja(h);
     /* lo que se resta, antes del 2D para que este quede encima */
     efectos_dibuja(h);
     /* los destellos, encima de lo restado y debajo del HUD, como en la referencia */
     destellos_dibuja(h, sx, sy);
+    /* y el clima, encima de todo el 3D y debajo del HUD */
+    clima_dibuja(h, sx, sy);
 
     for (i = h->overlay.n; i > 0u; i--) {
         const OverlayQuad *q = &h->overlay.quad[i - 1u];

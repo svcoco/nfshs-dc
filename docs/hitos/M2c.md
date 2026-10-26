@@ -52,7 +52,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | 3 | **Grabacion de los coches** | **Hecho (2026-10-24)**: 9 494 coches identicos a la referencia en 5 000 frames |
 | 4 | **Horneado y dibujo de los coches** | **Hecho (2026-10-24)**: los coches se ven; 30-40 fps, y el coste **no es dibujarlos** |
 | 5 | **El HUD** | **Hecho (2026-10-24)**: 4 769 frames de carrera con la lista 2D identica a la referencia, HUD incluido |
-| 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | la carrera se parece al original |
+| 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | **Hecho en emulador (2026-10-25)**: todos los efectos con oraculo, salvo la imagen; dos dudas del clima abiertas |
 
 Los pasos 1 y 3 van primero **porque tienen oraculo**, igual que la lista 2D de M2a y la
 vista de M2b: la referencia graba exactamente lo mismo, asi que se comparan campo a campo
@@ -301,11 +301,11 @@ interpolando UV y color (hasta 8 vertices), y se mandan como tira en zigzag.
 
 El HUD no mueve el ritmo: el coste sigue siendo el de grabar los coches (paso 4).
 
-## 10. Paso 6 (en curso): los efectos (2026-10-25)
+## 10. Paso 6: los efectos (hecho en emulador, 2026-10-25)
 
-Hechas las **sombras**, las **líneas pintadas**, las **marcas de neumático**, los
-**destellos** de las farolas, los **halos** de los coches, el **humo** y el **flare del sol**.
-Faltan el clima y los reflejos.
+Hechos las **sombras**, las **líneas pintadas**, las **marcas de neumático**, los
+**destellos** de las farolas, los **halos** de los coches, el **humo**, el **flare del sol**,
+el **clima** y los **reflejos** de los coches.
 
 ### Lo sustractivo: resta exacta con tres mezclas del PVR
 
@@ -390,3 +390,44 @@ En Flycast, la farola y el flare del sol se ven en su sitio.
 
 **Sin medir:** el coste en fps de correr esas rutinas cada frame, y el del dibujo, que en
 este paso no se separó.
+
+### Los reflejos de los coches
+
+`DrawC_Prim`, camino de entorno: los polígonos de las partes 0, 8, 10, 41, 42, 45 y 46 que
+miran a la cámara se dibujan otra vez con un mapa de reflejo de la pista.
+
+| Mapa | Coordenadas | Polígonos | Mezcla medida |
+|---|---|---|---|
+| A | normal girada por la guiñada de la cámara: u = u0 + 64 + x, v = v0 + \|z\| | todos | suma (modo 1) |
+| B | normal tal cual: u = u0 + 64 + y, v = v0 + desplazamiento + z, en la ventana 128 × 64 | los marcados 0x3F3 | resta (modo 2) |
+
+- **Mapas:** `bake-refl NN OUT.RFL` hornea `ZTR<nn>R.PSH` a una página de 256 × 256 con cada
+  mapa de 128 × 64 en u 128, v 64·n, como el juego en VRAM (8 542 texeles con color en
+  ZTR06).
+- **`.CAR` versión 2:** por cada triángulo de las partes que reflejan, sus indicadores y,
+  por esquina, su vértice del GEO y la normal del GEO entre 64. El coche del jugador crece
+  11 KB (392 triángulos); los demás, 2 KB.
+- **Normales de la RAM.** Las del GEO no sirven: **0 de 1 176** esquinas coinciden con las
+  que el juego tiene en memoria (hasta 98 de diferencia, otra escala). El host las lee cada
+  frame (`car_env_normals`, unas 300 por coche) y el renderer las usa si el número de
+  vértices cuadra con el GEO. Solo los coches de carrera tienen ranura de modelo; el
+  tráfico no refleja, como en la referencia.
+- **Visto:** en el arnés de PC, 195 triángulos de reflejo en el coche del jugador en el
+  frame 420; en Flycast, el mismo brillo y moteado en el capó durante la presentación.
+
+### El clima
+
+| Escenario (`race_long`, 5 000 frames) | Cuadros de clima idénticos |
+|---|---|
+| seco | 0 |
+| lluvia (`CLIMA=W`) | 151 932 |
+| nieve (`CLIMA=S`) | 234 963 |
+
+Se fuerza con `--clima` / `NFSHS_WEATHER` / `mkdisc --clima` (herramienta de prueba, no del
+juego). El oráculo destapó que la conversión de líneas a cuadros del port solo coincidía con
+la referencia en pantalla: con una punta en x = 8 205 la normal en `f32` redondea distinto.
+Ahora se reproduce la aritmética `f32` exacta.
+
+**Abierto, sin una PS1 de referencia:** los trazos de lluvia con una punta fuera de los 11
+bits de la GPU (21 %) salen como líneas que cruzan la pantalla, y las gotas en la lente como
+cuadros oscuros. En los dos casos el port hace lo mismo que la referencia.

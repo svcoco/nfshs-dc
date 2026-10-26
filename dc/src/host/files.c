@@ -199,6 +199,23 @@ static OpenFile *find_file(FileLayer *fl, uint32_t handle)
     return NULL;
 }
 
+/* Los modelos de policia (CBMW, CDBL, CCMR, CCOV, CCPR sin su primera letra): su librea es
+ * la de la region de la pista (ver host_car_file). */
+static const char POLICIA[5][4] = { "BMW", "DBL", "CMR", "COV", "CPR" };
+
+const char *host_car_file(const GameHost *h, const char *code, char out[5])
+{
+    uint32_t j;
+
+    memcpy(out, code, 4);
+    out[4] = '\0';
+    if (code[0] == 'C')
+        for (j = 0; j < 5u; j++)
+            if (strncmp(code + 1, POLICIA[j], 3) == 0 && h->police[j] != 0)
+                out[0] = h->police[j];
+    return out;
+}
+
 /* Localiza un archivo del juego y lo deja listo para leerse A DEMANDA, sin traer su
    contenido. Primero suelto en el disco; si no, dentro de los BIGF montados, del mas
    reciente al mas antiguo y por el nombre base, sin distinguir mayusculas (el mismo
@@ -229,6 +246,22 @@ static int open_src(GameHost *h, const char *name, OpenFile *o)
             for (i = 0; b + i < L - 4u && i + 1u < sizeof h->track_name; i++)
                 h->track_name[i] = name[b + i];
             h->track_name[i] = '\0';
+        }
+        /* y al abrir un modelo de coche de policia, la region de su librea (host_car_file) */
+        {
+            char nb[256];
+            const char *b;
+            size_t lb;
+            uint32_t j;
+
+            normalize(name, nb, sizeof nb);
+            b = basename_of(nb);
+            lb = strlen(b);
+            if ((lb == 11u || lb == 12u) && strncmp(b, "ZZZ", 3) == 0 &&
+                strcmp(b + lb - 4u, ".VIV") == 0)
+                for (j = 0; j < 5u; j++)
+                    if (strncmp(b + 4, POLICIA[j], 3) == 0)
+                        h->police[j] = b[3];
         }
     }
     if (disk_open(h, name, &f, &n)) {

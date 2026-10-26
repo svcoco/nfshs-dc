@@ -382,7 +382,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
 | 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **Hecho en emulador** (2026-10-25); la lluvia, comparada con el original en DuckStation |
-| 7 | El showroom del front end | **En curso**: grabado con oráculo, dibujado con su mapa de reflejo, con las 64 pinturas y los 39 coches horneados; falta la policía (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
+| 7 | El showroom del front end | **En curso**: grabado con oráculo, dibujado con su mapa de reflejo, con las 64 pinturas y los 39 coches horneados; y la policía con la librea de su región (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -519,7 +519,18 @@ de 10 modelos distintos (ADB7, BMWM, BMWZ, CMRO, CORV, F550, JXKR, MSLK, P993, T
 reflejo, más los 1 092 del SLK en `race_long` y `lluvia`. Solo se encienden en carrera, donde
 ya se restan desde el paso 6. No hay nada que dibujar.
 
-**Falta:** la policía (su librea depende de la pista).
+**La policía, con la librea de su región (2026-10-26).** Los códigos de policía (`CBMW`,
+`CDBL`, `CCMR`, `CCOV`, `CCPR`) no son archivos: el juego cambia la primera letra por la de la
+región de la pista y abre esa librea (`zzzgBMWs.viv` en Alemania). El host anota la letra de
+la última que abre (`host_car_file`) y el renderer carga ese `.CAR`. `make bake-coches`
+hornea además las **14 libreas** del disco (A/B/F/G para el BMW, A/B/F/G/U para el Diablo,
+B/F/G para el Camaro, y el Corvette y el Porsche de la C), unos 5,4 MB. Comprobado en una
+**persecución** por los menús (`hot pursuit` → solo → beginner → Alemania): el juego abre
+`zzzgCMRs.viv` y `zzzgBMWs.viv`, el port resuelve `CBMW` a `GBMW` y el rasterizador de PC
+dibuja la patrulla blanca con la franja verde. En Flycast la persecución corre, pero en las
+capturas no salió ninguna patrulla de cerca.
+
+**Paso 7 completo en emulador** salvo mirar de cerca una patrulla en Flycast.
 
 ### Paso 6: los efectos (hecho en emulador)
 

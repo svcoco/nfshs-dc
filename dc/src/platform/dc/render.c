@@ -273,6 +273,14 @@ static uint32_t coche_modelo(const char *code)
     return s_coches_n++;
 }
 
+/* El modelo de un coche del juego: la policia, con la librea de la region (host_car_file). */
+static uint32_t coche_de(const GameHost *h, const char *code)
+{
+    char archivo[5];
+
+    return coche_modelo(host_car_file(h, code, archivo));
+}
+
 /* La textura del modelo `k` con la pintura `paint`, subida al PVR; NULL si no se pudo. */
 static pvr_ptr_t coche_textura(uint32_t k, uint8_t paint)
 {
@@ -324,7 +332,7 @@ static void coches_dibuja(GameHost *h)
 
         if (d->code[0] == 0)
             continue;
-        k = coche_modelo(d->code);
+        k = coche_de(h, d->code);
         if (k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL)
             continue;
         tx = coche_textura(k, d->paint);
@@ -425,7 +433,7 @@ static void efectos_recorre(GameHost *h, TrackEmit emit, int dibuja)
             s_tri_efectos += est.quads_out;
 
         /* y la de los pasos de rueda, que son partes del propio coche y su atlas */
-        k = coche_modelo(d->code);
+        k = coche_de(h, d->code);
         if (k != 0xFFFFFFFFu && s_coches[k].modelo.raw != NULL &&
             coche_textura(k, d->paint) != NULL) {
             if (dibuja)
@@ -519,7 +527,7 @@ static void reflejos_dibuja(GameHost *h)
 
         if (d->code[0] == 0 || abr < 0 || abr == 2)
             continue;
-        k = coche_modelo(d->code);
+        k = coche_de(h, d->code);
         if (k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL)
             continue;
         pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
@@ -1148,7 +1156,7 @@ static void showroom_coches(GameHost *h)
         if (q->kind != OVL_SR_CAR || (uint16_t)q->pts[0][0] >= SROOM_MAX)
             continue;
         s = &h->sroom[(uint16_t)q->pts[0][0]];
-        k = coche_modelo(s->d.code);
+        k = coche_de(h, s->d.code);
         if (k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL)
             continue;
         tx = coche_textura(k, s->d.paint);
@@ -1200,7 +1208,7 @@ static void showroom_reflejos(GameHost *h, int espejo)
         if ((s->mirrored != 0) != (espejo != 0) || car_env_abr(&s->d, CAR_PASS_ENV_SR) < 0)
             continue;
         e = tex_find(&h->texcache, (uint16_t)(s->d.env_a[1] >> 16), (uint16_t)(s->d.env_a[0] >> 16));
-        k = coche_modelo(s->d.code);
+        k = coche_de(h, s->d.code);
         if (e == NULL || k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL)
             continue;
         showroom_vista(h, s, &rv, &d);

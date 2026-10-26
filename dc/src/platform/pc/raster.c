@@ -528,19 +528,22 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
 
         for (ci = 0; ci < h->cars_n && ci < CARS_MAX; ci++) {
             const CarDraw *d = &h->car_draw[ci];
-            char ruta[64];
+            char ruta[64], archivo[5];
+            const char *code;
             TrackStats cst;
 
             if (d->code[0] == 0)
                 continue;
-            if (strncmp(modelo.code, d->code, sizeof modelo.code) != 0) {
+            /* la policia, con la librea de la region (host_car_file) */
+            code = host_car_file(h, d->code, archivo);
+            if (strncmp(modelo.code, code, sizeof modelo.code) != 0) {
                 car_free(&modelo);
-                snprintf(ruta, sizeof ruta, "dc/build/baked/%s.CAR", d->code);
+                snprintf(ruta, sizeof ruta, "dc/build/baked/%s.CAR", code);
                 if (!car_load(&modelo, ruta)) {
                     printf("  coche: no pude cargar %s\n", ruta);
                     continue;
                 }
-                strncpy(modelo.code, d->code, sizeof modelo.code - 1u);
+                strncpy(modelo.code, code, sizeof modelo.code - 1u);
             }
             car_paint(&modelo, d->paint, pintado);
             P.atlas = pintado; P.aw = modelo.atlas_w; P.ah = modelo.atlas_h;

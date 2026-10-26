@@ -202,12 +202,16 @@ bake:
 # depende de la pista y el cargador la resuelve en tiempo de ejecucion.
 CARS_RACE    := MSLK BMWZ CMRO TRAM ADB7 JXKR BMWM CORV F550 P993 F375 DIAB MCLK MCF1 X993 XCF1 BNS1 BNS2
 CARS_TRAFFIC := ARMY BEEP BMW5 CBUS CHOP COMC CUCA F500 GUAT LOGT MERC PKUP RIAT SAND SBUS TAXI TBUS TON1 TON2 VAN WOLW
+# la policia: una librea por region (la primera letra; el juego elige la de la pista, ver
+# host_car_file). Son todas las que hay en el disco.
+CARS_POLICE  := ABMW BBMW FBMW GBMW ADBL BDBL FDBL GDBL UDBL BCMR FCMR GCMR CCOV CCPR
 
 bake-coches:
 	@test -x "$(NFSHS)" || test -x "$(NFSHS).exe" || { echo "falta la referencia: cargo build --release en la raiz"; exit 1; }
 	@mkdir -p $(BAKED)
 	@for c in $(CARS_RACE); do $(NFSHS) bake-car $$c $(BAKED)/$$c.CAR 2>&1 | grep -v INFO || exit 1; done
 	@for c in $(CARS_TRAFFIC); do $(NFSHS) bake-car $$c $(BAKED)/$$c.CAR --rival 2>&1 | grep -v INFO || exit 1; done
+	@for c in $(CARS_POLICE); do $(NFSHS) bake-car $$c $(BAKED)/$$c.CAR 2>&1 | grep -v INFO || exit 1; done
 
 disc:
 	@echo "Pendiente: M2." && exit 1

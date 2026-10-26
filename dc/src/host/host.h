@@ -375,6 +375,9 @@ typedef struct GameHost {
     /* El nombre base del ultimo .GRP que el juego abrio: es como el port sabe QUE pista
      * tiene que cargar horneada, sin tener que leerselo al juego por otro sitio. */
     char     track_name[16];
+    /* La letra de region de la ultima librea de policia que el juego abrio, por modelo (ver
+     * host_car_file): `zzzgbmws.viv` deja 'G' para el BMW. 0 si no abrio ninguna. */
+    char     police[5];
     int      light_ok;
 
     /* Trozos de pista que cada vista decide dibujar. Es la cifra que dimensiona M2b:
@@ -471,6 +474,12 @@ void pad_write(GameHost *h, Cpu *c);
 /* Pide a la cache las texturas que usa la lista de dibujo de este frame y convierte
  * lo que falte. Se llama con la lista ya completa. */
 void host_build_textures(GameHost *h);
+
+/* El modelo horneado de un coche (el nombre de su .CAR, 4 letras y el 0 en `out`). Es su
+ * codigo, salvo la policia: CBMW, CDBL, CCMR, CCOV y CCPR no son archivos, el juego cambia la
+ * primera letra por la de la region de la pista y abre esa librea (CBMW -> zzzgbmws.viv en
+ * Alemania). Aqui se usa la ultima que abrio, como opened_variant de la referencia. */
+const char *host_car_file(const GameHost *h, const char *code, char out[5]);
 
 /* Frontera de frame del juego, con la misma regla que la referencia:
  *   - front end: PutDispEnv del flip del motor, con ra == 0x800BF164

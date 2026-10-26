@@ -1,0 +1,34 @@
+# Una persecucion (hot pursuit), llegando por los menus (M2c paso 7: la policia).
+#
+# Las pantallas se comprobaron con --textlog y dc/test/diff/screens.py:
+#   [game setup]   UP x2 -> one player
+#   [race type]    DOWN x2 -> hot pursuit
+#   [race setup]   solo
+#   [skill level]  beginner
+#   [track select] germany / landstrasse -> continue
+#   [car select]   race (el BMW Z3 que ofrece)
+# En Alemania el juego abre las libreas "g" (zzzgCMRs.viv, zzzgBMWs.viv). Las patrullas
+# entran en vista desde el frame 4119 del arnes.
+0 -
+20 UP
+26 -
+36 UP
+42 -
+60 CROSS
+66 -
+100 DOWN
+106 -
+120 DOWN
+126 -
+140 CROSS
+146 -
+340 CROSS
+346 -
+540 CROSS
+546 -
+800 CROSS
+806 -
+1040 CROSS
+1046 -
+1300 CROSS
+#end 6000

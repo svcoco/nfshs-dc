@@ -53,7 +53,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | 4 | **Horneado y dibujo de los coches** | **Hecho (2026-10-24)**: los coches se ven; 30-40 fps, y el coste **no es dibujarlos** |
 | 5 | **El HUD** | **Hecho (2026-10-24)**: 4 769 frames de carrera con la lista 2D identica a la referencia, HUD incluido |
 | 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | **Hecho en emulador (2026-10-25)**: todos los efectos con oraculo, salvo la imagen; la lluvia, comparada con el original en DuckStation |
-| 7 | **El showroom del front end**: el coche de seleccion, concesionario y garaje | **En curso (2026-10-26)**: grabado con oraculo, dibujado con el PVR, pinturas y mapa de reflejo; falta la policia (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
+| 7 | **El showroom del front end**: el coche de seleccion, concesionario y garaje | **En curso (2026-10-26)**: grabado con oraculo, dibujado con el PVR, pinturas y mapa de reflejo; y la policia con la librea de su region; en emulador (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
 
 Los pasos 1 y 3 van primero **porque tienen oraculo**, igual que la lista 2D de M2a y la
 vista de M2b: la referencia graba exactamente lo mismo, asi que se comparan campo a campo
@@ -542,4 +542,20 @@ con la visibilidad de partes grabada en cada `ShowroomCar`:
 La parte 5 es la unica que resta en los 16 modelos que tienen alguna (23 no tienen). El juego
 solo la enciende en carrera, donde ya se dibuja restando (paso 6). No hay nada que portar.
 
-**Falta:** la policia (su librea depende de la pista).
+### 6. La policia, con la librea de su region (2026-10-26)
+
+- `CBMW`, `CDBL`, `CCMR`, `CCOV` y `CCPR` no son archivos: el juego cambia la primera letra
+  por la de la region de la pista y abre esa librea (`CBMW` -> `zzzgBMWs.viv` en Alemania).
+- `host/files.c` anota, al abrir un `zzz?xxx[hs].viv` de policia, su letra
+  (`GameHost.police`), y `host_car_file` traduce el codigo al `.CAR` de esa librea, como
+  `opened_variant` de la referencia. Lo usan los dos renderers. El estado del juego no
+  cambia: el test diferencial sigue identico.
+- `make bake-coches` hornea las 14 libreas del disco (`CARS_POLICE`): ABMW BBMW FBMW GBMW,
+  ADBL BDBL FDBL GDBL UDBL, BCMR FCMR GCMR, CCOV, CCPR. De 380 a 403 KB cada una.
+- Prueba: una persecucion por los menus (`hot pursuit`, solo, beginner, Alemania). En el
+  arnes, el juego abre `zzzgCMRs.viv` y `zzzgBMWs.viv`; las patrullas entran en vista desde
+  el frame 4119 y `CBMW` se resuelve a `GBMW`. El rasterizador de PC (mismo `car.c`) dibuja
+  la patrulla blanca con la franja verde. En Flycast la persecucion corre; el coche oscuro
+  que sale en las capturas es el Z3 del jugador, con la camara exterior tras salirse.
+
+**Pendiente de mirar:** una patrulla de cerca en Flycast.

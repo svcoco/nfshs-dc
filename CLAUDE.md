@@ -159,6 +159,14 @@ considerablemente; se estudian, se miden y decide Jorge. Hoy son:
   rasteriza el 3D a 640×480 (el «2×» de un emulador de PS1); por encima, el PVR solo
   supermuestrea 2× en horizontal (FSAA), no en vertical, y sus texturas llegan a 1 024
   téxeles.
+- **Disco de arranque (boot disc).** Un disco que lleva solo el programa de Dreamcast:
+  arranca, pide cambiar al **disco original de PS1** del jugador y lee los datos de él. Así
+  el programa no se empaqueta nunca con el juego (hoy el CDI lleva los 552 MB del disco
+  junto al programa). Precedente conocido, no medido: Bleem!cast. Sin investigar todavía;
+  lo que habría que medir: que la unidad GD-ROM lea con KOS los sectores del CD de PS1
+  (modo 2, XA) y dónde se hornean los assets, que hoy se hornean en el PC (§3) y con el
+  disco original tendrían que hornearse en la consola o leerse sin hornear. Cambiar eso
+  es decisión de Jorge.
 
 ## 5. Arquitectura objetivo
 
@@ -425,8 +433,8 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
   - **FMV (M3):** STR/MDEC.
 - **Abiertas:**
   - **M9:** factor de escala de las texturas (2× como base), método y formato.
-  - **Objetivos descartables de M9:** salida en 720p, resolución interna 3× y widescreen
-    (ver §4).
+  - **Objetivos descartables de M9:** salida en 720p, resolución interna 3×, widescreen y
+    disco de arranque para usar el disco original de PS1 (ver §4).
     *(Todo tiene hito desde el 2026-10-26: FMV es el M3, los dos jugadores van con los
     controles en M5, el pulido final en M8 y los packs de texturas en M9.)*
   - *(cerrada 2026-10-23: el arranque con BIOS real funciona desde un **CDI** con

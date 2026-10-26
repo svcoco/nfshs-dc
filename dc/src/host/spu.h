@@ -27,8 +27,26 @@
 #define DMA_DPCR      0x1F8010F0u
 #define DMA_DICR      0x1F8010F4u
 
+/* M4: la salida del middleware de audio. El driver de EA pide al hardware por los
+ * registros del SPU; el stub mantiene el estado logico (registros, RAM de sonido, DMA, IRQ)
+ * y, si hay salida, le pasa cada peticion a la plataforma, que la hace sonar con el AICA
+ * (dc/src/platform/dc/aica_spu.c). Sin salida (arnes de PC, test diferencial) el stub se
+ * comporta igual que siempre. Decision de Jorge: docs/hitos/M4.md, secciones 5 y 7. */
+typedef struct SpuSink {
+    void *ctx;
+    /* la RAM de sonido cambio en [addr, addr + len) (DMA o FIFO); `ram` es toda la RAM de
+     * sonido (512 KB) y `addr + len` puede pasar del final (da la vuelta) */
+    void     (*upload)(void *ctx, const uint8_t *ram, uint32_t addr, uint32_t len);
+    /* escritura de un registro del SPU (desplazamiento desde 0x1F801C00), ya guardada en
+     * `regs` */
+    void     (*reg)(void *ctx, const uint16_t *regs, uint32_t off, uint16_t v);
+    /* el driver lee el nivel de envolvente de la voz `v` (0: la voz termino) */
+    uint16_t (*level)(void *ctx, unsigned v);
+} SpuSink;
+
 typedef struct {
     Ps1IoBus iface;                        /* lo que ve ps1rt */
+    const SpuSink *sink;                   /* M4: el middleware de audio, o NULL */
     uint16_t reg[PS1_SPU_REG_BYTES / 2u];
     uint8_t  ram[PS1_SPU_RAM_SIZE];
     uint32_t transfer_addr;                /* donde escribe el DMA en la RAM de sonido */

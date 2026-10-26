@@ -34,10 +34,11 @@ static uint16_t read_reg(const SpuStub *s, uint32_t off)
 {
     off &= 0x3FEu;
     /* volumen de envolvente de cada voz (+0xC) y direccion de repeticion (+0xE).
-     * Como no se sintetiza, el volumen es 0: el driver de sonido lo lee para saber
-     * cuando una voz ha terminado, y asi las da todas por terminadas. */
+     * Sin middleware de audio, el volumen es 0: el driver de sonido lo lee para saber
+     * cuando una voz ha terminado, y asi las da todas por terminadas. Con el middleware
+     * (Dreamcast, M4), lo dice el AICA: si la voz sigue sonando. */
     if (off < 0x180u && (off & 0xFu) == 0xCu)
-        return 0;
+        return s->sink != NULL ? s->sink->level(s->sink->ctx, off >> 4) : 0u;
     if (off < 0x180u && (off & 0xFu) == 0xEu)
         return 0;
     switch (off) {
@@ -71,11 +72,15 @@ static void write_reg(SpuStub *s, uint32_t off, uint16_t v)
         s->ram[a + 1u] = (uint8_t)(v >> 8);
         check_irq(s, a, 2u);
         s->transfer_addr = (s->transfer_addr + 2u) & (PS1_SPU_RAM_SIZE - 1u);
+        if (s->sink != NULL)
+            s->sink->upload(s->sink->ctx, s->ram, a, 2u);
         return;
     }
     if (off == 0x1AAu && (v & 0x40u) == 0u)
         s->irq_flag = 0;                    /* escribir SPUCNT sin el bit 6 reconoce */
     s->reg[off / 2u] = v;
+    if (s->sink != NULL)
+        s->sink->reg(s->sink->ctx, s->reg, off, v);
 }
 
 /* Canal 4 de DMA: mueve palabras de 32 bits entre la RAM principal (en MADR) y la RAM
@@ -120,6 +125,8 @@ static void dma4_run(SpuStub *s, Cpu *c)
                 (s->reg[0x1AAu / 2u] & 0x40u) ? "ON" : "off",
                 (unsigned)((uint32_t)s->reg[0x1A4u / 2u] << 3));
     check_irq(s, start, bytes);          /* la IRQ puede caer dentro de lo transferido */
+    if (to_spu && s->sink != NULL)
+        s->sink->upload(s->sink->ctx, s->ram, start & (PS1_SPU_RAM_SIZE - 1u), bytes);
     s->dma4[2] &= ~0x01000000u;          /* la transferencia ya no esta en curso */
     if (s->dicr & (1u << 20))
         s->dicr |= 1u << 28;
@@ -129,12 +136,23 @@ static void dma4_run(SpuStub *s, Cpu *c)
     s->irqs_raised++;
 }
 
+#ifndef PS1_DIAG
+#define PS1_DIAG 1
+#endif
+#if PS1_DIAG
+static void sndc_lectura(const Cpu *c, uint32_t off);
+#else
+#define sndc_lectura(c, off) ((void)0)
+#endif
+
 static uint32_t bus_read(Cpu *c, void *self, uint32_t a, uint32_t n)
 {
     SpuStub *s = (SpuStub *)self;
     uint32_t word;
     (void)c;
     s->reads++;
+    if (a >= PS1_SPU_BASE && a < PS1_SPU_BASE + PS1_SPU_REG_BYTES)
+        sndc_lectura(c, a - PS1_SPU_BASE);
 
     if (a >= PS1_SPU_BASE && a < PS1_SPU_BASE + PS1_SPU_REG_BYTES) {
         uint32_t off = a - PS1_SPU_BASE;
@@ -188,8 +206,28 @@ static void sndc_nota(const Cpu *c)
         }
 }
 
+/* y las lecturas: por registro, cuantas y la funcion que mas lo lee */
+static uint64_t s_rd_n[0x200];
+static uint32_t s_rd_f[0x200];
+
+static void sndc_lectura(const Cpu *c, uint32_t off)
+{
+    if (s_sndc_on < 0)
+        s_sndc_on = getenv("NFSHS_SNDCALLERS") != NULL;
+    if (!s_sndc_on || off >= 0x400u)
+        return;
+    s_rd_n[off >> 1]++;
+    if (c->stack_depth > 0u && c->stack_depth - 1u < PS1_STACK_MAX)
+        s_rd_f[off >> 1] = c->stack[c->stack_depth - 1u];
+}
+
 void ps1_spu_callers_report(FILE *out, unsigned top)
 {
+    fprintf(out, "  lecturas del SPU por registro (desplazamiento: veces, ultima funcion):\n");
+    for (uint32_t i = 0; i < 0x200u; i++)
+        if (s_rd_n[i])
+            fprintf(out, "    +%03x: %8llu  %08x\n", (unsigned)(i * 2u), (unsigned long long)s_rd_n[i],
+                    (unsigned)s_rd_f[i]);
     for (unsigned shown = 0; shown < top; shown++) {
         uint64_t best = 0;
         uint32_t bi = 0;

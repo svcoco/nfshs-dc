@@ -17,6 +17,7 @@
 #include "host.h"
 #include "ps1rt.h"
 #include "spu.h"
+#include "aica_spu.h"
 #include "render.h"
 #include "video.h"
 #include "movie.h"
@@ -85,6 +86,7 @@ static void on_frame(GameHost *h)
 
     if (h->pad_steps_n == 0u)
         h->pad_buttons[0] = dc_read_pad();
+    aica_spu_poll();
 
     /* Los primeros frames se anuncian de uno en uno: lo que hay que saber antes que
      * el rendimiento es si el juego ARRANCA. Despues, cada 60 frames. */
@@ -149,6 +151,7 @@ static void *diag_thread(void *arg)
         printf("        acumulado: video wall %lu ms (%lu frames)  texturas %lu ms  dibujo %lu ms\n",
                (unsigned long)(host.video_us / 1000u), (unsigned long)host.video_frames,
                (unsigned long)(host.tex_us / 1000u), (unsigned long)(host.draw_us / 1000u));
+        aica_spu_report();
         printf("        archivos %lu ok / %lu fallidos  BIGF %lu ok / %lu fallidos\n",
                (unsigned long)host.files.opens, (unsigned long)host.files.opens_failed,
                (unsigned long)host.files.mounts_ok,
@@ -309,6 +312,8 @@ int main(int argc, char **argv)
     cpu.cop0[12] = 0x401u;
     ps1_spu_init(&spu);
     ps1_spu_attach(&spu, &cpu);
+    /* M4: lo que el driver de sonido pide al SPU, al AICA */
+    aica_spu_init(&spu);
     cpu.tick_limit = TICK_LIMIT;
     cpu.spin_limit = SPIN_LIMIT;
 

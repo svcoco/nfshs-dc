@@ -863,6 +863,16 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             let bytes = std::fs::read(&args[2])?;
             let m = if bytes.starts_with(b"mTCD") { formats::str::Movie::parse_dct(&bytes) } else { formats::str::Movie::parse(&bytes) };
             println!("{}x{}, {} frames, {} audio samples at {} Hz{}", m.width, m.height, m.frames.len(), m.audio.len(), m.rate, if m.stereo { " stereo" } else { "" });
+            // FRAME "all": todos los frames en RGBA crudo, seguidos (oraculo del MDEC en C, M3)
+            if args[3] == "all" {
+                let dec = formats::str::Decoder::default();
+                let mut out = Vec::new();
+                for f in &m.frames {
+                    out.extend_from_slice(&dec.frame(f, m.width, m.height));
+                }
+                std::fs::write(&args[4], out)?;
+                return Ok(true);
+            }
             let n: usize = args[3].parse()?;
             let rgba = formats::str::Decoder::default().frame(&m.frames[n], m.width, m.height);
             image::RgbaImage::from_raw(m.width, m.height, rgba).context("image")?.save(&args[4])?;

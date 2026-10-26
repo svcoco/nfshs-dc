@@ -36,7 +36,7 @@ export TMPDIR
 export TMP  := $(TMPDIR)
 export TEMP := $(TMPDIR)
 
-.PHONY: help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size bake bake-coches disc diff clean
+.PHONY: help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size dc-bench-mdec bake bake-coches bake-movies disc diff clean
 
 help:
 	@echo "Analisis y generacion (Python, funcionan ya):"
@@ -172,6 +172,10 @@ $(DCBUILD)/o/%.o: %.c
 
 -include $(DC_OBJS:.o=.d)
 
+# El decodificador de video va a -O2 aunque el resto vaya a -Os: 28 ms por frame de la
+# intro frente a 44 (docs/hitos/M3.md, seccion 4).
+$(DCBUILD)/o/src/host/mdec.o: DCFLAGS += -O2
+
 # El C generado no se recompila aqui: lo hace dc-gen, que son 71 unidades y tarda.
 dc-gen: dc-check $(GEN)/parts.mk
 	@mkdir -p $(DCBUILD)/gen $(TMPDIR)
@@ -211,6 +215,24 @@ bake-coches:
 	@for c in $(CARS_RACE); do $(NFSHS) bake-car $$c $(BAKED)/$$c.CAR 2>&1 | grep -v INFO || exit 1; done
 	@for c in $(CARS_TRAFFIC); do $(NFSHS) bake-car $$c $(BAKED)/$$c.CAR --rival 2>&1 | grep -v INFO || exit 1; done
 	@for c in $(CARS_POLICE); do $(NFSHS) bake-car $$c $(BAKED)/$$c.CAR 2>&1 | grep -v INFO || exit 1; done
+
+# Las peliculas (M3): MOVIES/*.XA con los sectores enteros (video + audio XA), leidas de la
+# imagen del disco, porque una copia ISO normal pierde el audio (docs/hitos/M3.md).
+# (el nombre lleva espacios: make no los lleva bien en listas, asi que va entre comillas)
+IMAGE ?= $(ROOT)/gamedata/Need for Speed - High Stakes (USA).bin
+
+bake-movies:
+	@test -f "$(IMAGE)" || { echo "no encuentro la imagen: IMAGE=<ruta del .bin>"; exit 1; }
+	$(PYTHON) -I tools/bake/movies.py "$(IMAGE)" $(BAKED)/MOVIES
+
+# Cuanto cuesta el MDEC en SH-4 (M3). Mete 30 frames reales en el ELF (en build/, no se
+# versiona) y saca los tiempos a pantalla; se arranca con Flycast.
+dc-bench-mdec: dc-check
+	@test -d $(BAKED)/MOVIES || { echo "antes: make bake-movies"; exit 1; }
+	@mkdir -p $(DCBUILD)/bench $(BUILD)/m3 $(TMPDIR)
+	$(PYTHON) -I test/bench/mkframes.py $(BAKED)/MOVIES $(ROOT)/gamedata $(BUILD)/m3/mdec_frames.h
+	$(KOS_CC_W) $(DCFLAGS) -O2 -Isrc/host -I$(BUILD)/m3 test/bench/mdec_bench.c src/host/mdec.c -o $(DCBUILD)/bench/mdec.elf -lm
+	@echo "listo: dc/$(DCBUILD)/bench/mdec.elf -- arrancalo con Flycast"
 
 disc:
 	@echo "Pendiente: M2." && exit 1

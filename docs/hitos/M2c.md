@@ -2,6 +2,9 @@
 
 **Criterio de salida (CLAUDE.md §4):** una carrera completa de un jugador.
 
+**Estado: cerrado en emulador (2026-10-26)**, con `carrera_completa.txt` identica a la
+referencia en 40 000 frames (seccion 13). La prueba en una consola real es el M6.
+
 M2b dejo el mundo en pantalla: pista y cielo a 60 fps. Falta **todo lo que se mueve** y el
 HUD. Es el hito que convierte un paseo por un escenario en una carrera.
 
@@ -243,7 +246,7 @@ anidada y, por coche, `BWorldSm_QuadLight`, `DrawC_PrimStart` y **una segunda pa
 entera** de `R3DCar_InsertCarFacetII` para los halos.
 
 Sigue **por encima del minimo de 30 fps sostenidos** de CLAUDE.md seccion 3, y es codigo
-recompilado: justo lo que M6 ataca («codegen, SH-4 a mano en hooks»). Un candidato
+recompilado: justo lo que M7 ataca («codegen, SH-4 a mano en hooks»). Un candidato
 concreto ya identificado es la **segunda pasada de halos**, cuyo resultado hoy se tira
 porque los halos son el paso 6.
 

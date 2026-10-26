@@ -42,7 +42,7 @@ ganancia real es de 640 a 704 píxeles en horizontal (+10 %), sin nada en vertic
 |---|---|---|
 | 3D de la carrera | 320×240 (rectángulo de la vista, medido), coordenadas enteras del GTE | el PVR lo rasteriza a **640×480** desde la geometría en `float`: ×2 en los dos ejes, con precisión sub-píxel |
 | 2D del front end | 512×240 | escalado a 640×480 (×1,25 y ×2) |
-| HUD y texturas | texeles de PS1 | los mismos texeles, más grandes; el detalle nuevo es cosa de M7 (texturas escaladas) |
+| HUD y texturas | texeles de PS1 | los mismos texeles, más grandes; el detalle nuevo es cosa de M8 (texturas escaladas) |
 
 El 3D no se escala a partir de una imagen de PS1: se dibuja de nuevo a la resolución de salida.
 Por eso «subir la resolución interna 2×» ya está hecho en lo que se puede hacer sin cambiar
@@ -74,7 +74,7 @@ tiempos del PVR.
 1. **Mantener 640×480** en los dos cables. Es la resolución nativa del Dreamcast y la que
    tiene sentido con su temporización.
 2. **No hacer un modo de 720**: ganancia pequeña y un modo de vídeo fuera de lo estándar.
-3. **El FSAA horizontal, como opción a evaluar en M6** con una consola delante: es una técnica
+3. **El FSAA horizontal, como opción a medir en M6** con una consola delante (y a decidir en M7): es una técnica
    del propio PVR (encaja con el objetivo de arquitectura) y el código ya está probado en
    emulador. Si cabe en el presupuesto del PVR, puede ir encendido por omisión o como opción.
 

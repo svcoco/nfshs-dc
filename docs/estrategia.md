@@ -19,9 +19,12 @@ Por eso el plan las separa en el tiempo:
   correcta**, así que cualquier divergencia nueva es del cambio de arquitectura.
 - **M2** añade el renderer, que es trabajo nuevo y no una traducción.
 - **M3 a M5** completan el middleware que falta: audio, controles, y guardado con la VMU.
-- **M6** es el único hito donde el rendimiento es el criterio. Va después del middleware
-  (decisión de Jorge, 2026-10-26) para optimizar el port completo y no una parte.
-- **M7** mejora el código y los assets actuales (texturas escaladas).
+- **M6** lleva el port a una **consola real** (CD-R, 480i y 480p): hasta ahí todo se ha
+  validado en emulador, y es la primera vez que hay cifras del hardware de verdad.
+- **M7** es el único hito donde el rendimiento es el criterio. Va después del middleware y
+  de la consola (decisiones de Jorge, 2026-10-26): se optimiza el port completo, midiendo
+  en el hardware real y no en Flycast.
+- **M8** mejora el código y los assets actuales (texturas escaladas).
 
 El coste de este orden es que se tarda más en ver algo en pantalla. El beneficio quedó
 demostrado en M1a, y está documentado abajo.
@@ -126,7 +129,7 @@ ancho). Para comparar hay que neutralizarlas **en los dos lados**. Pero `unlock_
 enseñó que no se puede juzgar una de ellas sin medirla: parecía cosmética y resultó que
 **da acceso a carreras**. La regla que queda: cada mejora de la referencia se porta detrás
 de una opción apagada por omisión, y si va a estar en el Dreamcast es una decisión de
-producto de M7, no de implementación.
+producto de M8, no de implementación.
 
 ## Lo que se aprendió en M1b (cerrado en Flycast, 2026-10-23)
 
@@ -221,3 +224,21 @@ porcentaje.
 Ver `docs/bitacora.md`.
 
 Detalle y cifras en `docs/hitos/M2b.md` y `docs/hitos/M2c.md`.
+
+## Lo que se aprendió en M2 (cerrado en emulador, 2026-10-26)
+
+- **Un guion que llega a un estado nuevo encuentra fallos nuevos.** La pausa sacó la
+  deuda de los ayudantes del HUD (la RAM divergía al pausar); la carrera completa, dos
+  fallos de grabación en el último frame y al recolocar el coche; la noche, que el haz de
+  los faros no existía y que las pistas N y S estaban horneadas con el formato antiguo.
+  Ninguno se veía con los guiones de siempre.
+- **Para llegar lejos hace falta conducir, y el oráculo lo permite.** Ningún guion fijo
+  termina una carrera. El piloto de pruebas de la referencia, metido en su modo diferencial,
+  anota su entrada y los dos lados la reciben igual: 40 000 frames idénticos.
+- **Los nombres heredados se comprueban.** La variante «S» (snow) es lluvia de noche en
+  Alemania; lo dijo el original en DuckStation, no el nombre.
+- **Mirar el original antes de decidir que algo falta.** Las sombras de los pasos de rueda
+  del showroom estaban en la lista de pendientes; medido, el juego no las pide ahí.
+
+Lo que no se ha hecho en ningún momento es medir en una Dreamcast: todas las cifras de
+fps son de Flycast. Por eso la consola real (M6) va antes de optimizar (M7).

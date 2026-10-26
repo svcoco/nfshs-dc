@@ -19,6 +19,7 @@
 #include "spu.h"
 #include "render.h"
 #include "video.h"
+#include "movie.h"
 
 KOS_INIT_FLAGS(INIT_DEFAULT);
 
@@ -46,7 +47,7 @@ static uint64_t race_ms0, race_frame0;
  *
  * Los bits son los del mando digital de PS1 (ver PAD_NAMES en host/pad.c). El
  * Dreamcast no tiene SELECT, asi que no se mapea; lo demas va uno a uno. */
-static uint16_t read_pad(void)
+uint16_t dc_read_pad(void)
 {
     maple_device_t *dev = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
     cont_state_t *st = dev ? (cont_state_t *)maple_dev_status(dev) : NULL;
@@ -83,7 +84,7 @@ static void on_frame(GameHost *h)
     }
 
     if (h->pad_steps_n == 0u)
-        h->pad_buttons[0] = read_pad();
+        h->pad_buttons[0] = dc_read_pad();
 
     /* Los primeros frames se anuncian de uno en uno: lo que hay que saber antes que
      * el rendimiento es si el juego ARRANCA. Despues, cada 60 frames. */
@@ -327,6 +328,8 @@ int main(int argc, char **argv)
         host.tex_buf = render_texbuf();
         host.tex_cap = render_texcap();
         host.on_draw = render_frame;
+        /* las peliculas necesitan el PVR (el conversor YUV): solo con el render */
+        host.play_movie = movie_play;
         printf("PVR listo: %lu texeles de cache de texturas\n",
                (unsigned long)render_texcap());
         /* A partir de aqui la pantalla es del juego, asi que los diagnosticos se van

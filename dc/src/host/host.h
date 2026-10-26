@@ -297,6 +297,11 @@ typedef struct GameHost {
     /* La plataforma dibuja aqui: se llama con la lista COMPLETA y las texturas
      * ya convertidas, justo antes de vaciarla para el frame siguiente. */
     void (*on_draw)(struct GameHost *h);
+    /* Movie_Play (M3): la plataforma reproduce la pelicula `name` (MOVIES\name del disco)
+     * de principio a fin y devuelve los botones de PS1 con los que se corto (0 si acabo
+     * sola o no se pudo reproducir). NULL: no hay video (el arnes de PC y el test
+     * diferencial, que se lo saltan en los dos lados). */
+    uint16_t (*play_movie)(struct GameHost *h, const char *name);
     struct { uint64_t frame; uint16_t buttons; } pad_steps[PAD_SCRIPT_MAX];
     uint32_t pad_steps_n, pad_at;
     uint64_t pad_end;         /* campo en el que termina el guion (0: sin fin) */

@@ -12,6 +12,10 @@ static int night_beam_read(GameHost *h, Cpu *c, uint32_t player);
 
 /* Bandera que el juego pone para indicar que un video se salto. */
 #define MOVIE_SKIPPED 0x80052EBCu
+/* Si esta puesta, cualquier boton (no solo Start) marca el video como saltado. */
+#define MOVIE_SKIP_FLAG 0x80052EBEu
+/* Los nombres de las peliculas, uno por indice de Movie_Play (FRONT.BIN). */
+#define MOVIE_NAMES 0x80052E68u
 
 /* Render_RenderPlayerView(vista, jugador): LA PARTE DE LOGICA.
  *
@@ -227,12 +231,30 @@ int host_game_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
 
     switch (addr) {
     case 0x8004D1C4u:
-        /* Movie_Play(video): los videos los reproduce el host. En M1a no hay video
-         * (los STR/MDEC son M5), asi que no se reproduce nada y se devuelve la
-         * bandera de "saltado" tal como la deja el juego, que es exactamente lo que
-         * devuelve la referencia. */
+        /* Movie_Play(video): la pelicula la reproduce la plataforma (M3). Como el bucle
+         * del original (play_movie en la referencia): cualquier boton la corta, y Start
+         * solo (o la bandera 0x80052EBE del juego) la marca como saltada. Devuelve esa
+         * marca. Sin plataforma de video no se reproduce nada, igual que la referencia
+         * en el test diferencial. */
         h->movies_played++;
         h->last_movie = a0 & 0xFFu;
+        if (h->play_movie != NULL) {
+            uint32_t at = ps1_r32(c, MOVIE_NAMES + 4u * (a0 & 0xFFu));
+            char name[16];
+            unsigned k = 0;
+
+            while (at != 0u && k + 1u < sizeof name && ps1_r8(c, at + k) != 0u) {
+                name[k] = (char)ps1_r8(c, at + k);
+                k++;
+            }
+            name[k] = '\0';
+            if (k > 0u) {
+                uint16_t b = h->play_movie(h, name);
+
+                if (b != 0u && (b == (1u << 3) || ps1_r8(c, MOVIE_SKIP_FLAG) != 0u))
+                    ps1_w16(c, MOVIE_SKIPPED, 1u);
+            }
+        }
         *ret = (uint32_t)(int32_t)(int16_t)(uint16_t)ps1_r16(c, MOVIE_SKIPPED);
         return 1;
     /* ---- dibujo que el host se queda ----

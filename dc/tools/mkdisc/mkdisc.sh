@@ -5,7 +5,9 @@
 # xorriso (pacman -S xorriso). Lo demas (makeip, scramble, sh-elf-objcopy) lo trae KOS.
 #
 # El disco lleva el binario y los datos del juego. NO lleva la imagen original del CD
-# (es de donde se extrajo todo) ni los FMV (el reproductor de video es M5).
+# (es de donde se extrajo todo) ni las copias de MOVIES/ del directorio de datos, que no
+# tienen el audio: las peliculas van con sus sectores enteros en BAKED/FMV (M3,
+# make -C dc bake-movies).
 #
 #   mkdisc.sh --elf dc/build/dc/nfshs.elf --data gamedata --out dc/build/dc/disc
 #   mkdisc.sh ... --format gdi    la otra disposicion (ver abajo)

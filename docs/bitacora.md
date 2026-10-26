@@ -20,7 +20,7 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
-| **M2c** Coches, objetos y efectos | Pasos 1 a 5 de 6; **la carrera se dibuja entera con HUD, a 30–43 fps**; **paso 6 hecho en emulador**: todos los efectos, clima y reflejos incluidos |
+| **M2c** Coches, objetos y efectos | **Pasos 1 a 8 hechos en emulador**: la carrera se dibuja entera con HUD y efectos a 30–43 fps, el showroom y la pausa; falta una carrera completa hasta la meta y la nieve |
 | M3 Audio · M4 Controles · M5 Guardado y VMU · M6 Optimización · M7 Enhancements | Sin empezar (numeración del 2026-10-26) |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
@@ -382,7 +382,8 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
 | 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **Hecho en emulador** (2026-10-25); la lluvia, comparada con el original en DuckStation |
-| 7 | El showroom del front end | **En curso**: grabado con oráculo, dibujado con su mapa de reflejo, con las 64 pinturas y los 39 coches horneados; y la policía con la librea de su región (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
+| 7 | El showroom del front end | **Hecho en emulador**: grabado con oráculo, dibujado con su mapa de reflejo, con las 64 pinturas y los 39 coches horneados; y la policía con la librea de su región (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
+| 8 | La pausa en carrera | **Hecho en emulador** (2026-10-26): con oráculo de RAM, 2D y vista |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -443,7 +444,35 @@ de VRAM por coche).
 apagado el ritmo es el mismo, así que la caída de ~60 a 30–40 fps la produce el paso 3,
 que corre código real del juego cada frame. Es trabajo de M6.
 
-### Paso 7: el showroom del front end (en curso)
+### Paso 8: la pausa en carrera (hecho en emulador, 2026-10-26)
+
+En pausa el original no vuelve a pintar el mundo: copia la última imagen y dibuja encima el
+menú con `Font_TextXY` y cuatro ayudantes del HUD (`Hud_BuildString`, `Hud_BlackThinBox`,
+`Hud_RenderPauseBox` y `Hud_FBuildF4`). La referencia los **atiende** (el original no corre)
+y graba comandos. El port los dejaba correr, así que **la RAM divergía al pausar**; era la
+deuda de «los cuatro ayudantes» que venía de M1a.
+
+- **Los ayudantes, como la referencia:** `Hud_BuildString` calcula el ancho con
+  `HudPmx_gShapes` y graba un comando por carácter; los demás graban el suyo y devuelven 0;
+  los que llama el HUD que la referencia dibuja con su propio port no se graban.
+- **Las cámaras quietas** (`hold_cameras`): en cada frame de pausa `Camera_gInfo` vuelve a
+  como lo encontró la pausa. Escribe en la RAM, así que también hacía falta para el oráculo.
+- **El flare del sol** se conserva en pausa, y sin vistas no se vuelcan objetos, como la
+  referencia.
+- **Cada comando es un marcador** en la lista 2D (para el volcado) **seguido de sus cuadros**,
+  con las texturas que el juego tiene en la VRAM: la fuente y las formas del HUD (cada entrada
+  de `HudPmx_gShapes` lleva su página, como un `POLY_GT4`).
+- **Lo que se ve:** las vistas y el HUD del último frame jugado y el último menú, porque el
+  juego solo lo redibuja cuando cambia. El frame que no pinta nada al reanudar repite el
+  último, como `held` en la referencia.
+
+**Oráculo:** volcado de la lista 2D **versión 3**, con los comandos de la pausa y sus
+parámetros en los dos lados. Con `pausa.txt` (pausa del frame 700 al 1000): **1 200 frames
+de RAM idénticos**, 211 227 cuadros y **28 comandos de pausa idénticos**, y la vista idéntica.
+`race_long` sigue idéntico en todo. **Visto en Flycast:** «Game Paused» con Continue,
+Restart, Options y Quit Race sobre la carretera y el HUD.
+
+### Paso 7: el showroom del front end (hecho en emulador)
 
 El coche de la selección, del concesionario y del garaje no se pintaba: del showroom solo
 estaba portada la **mecánica** (lo que el original escribe en memoria y en el GTE). Ahora se

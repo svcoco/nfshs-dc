@@ -334,7 +334,7 @@ andamio. Los cinco bugs que encontró el test estaban todos en la integración h
 esa clase ya está barrida por los 231 frames.
 
 Deuda anotada, no olvidada (está desarrollada en `docs/hitos/M1a.md`): el manejador de
-`0x800B4024` (va a M2b), los **cuatro ayudantes del HUD**, `CAR_CONE_WIDTH = 2` (mejora de
+`0x800B4024` (va a M2b), los **cuatro ayudantes del HUD** (resueltos en M2c, la pausa), `CAR_CONE_WIDTH = 2` (mejora de
 la referencia que escribe en RAM; si se porta, detrás de una opción apagada por omisión,
 como `--unlock`) y la **pila de diagnóstico** del port clavada en 0.
 

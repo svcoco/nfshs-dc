@@ -55,7 +55,7 @@ void overlay_push(GameHost *h, const int16_t pts[4][2], const uint32_t colours[4
         return;
     }
     q = &o->quad[o->n++];
-    q->kind = OVL_QUAD;
+    q->kind = h->ovl_hud ? OVL_HUD_QUAD : OVL_QUAD;
     for (k = 0; k < 4u; k++) {
         /* el desplazamiento de la vista que se esta grabando */
         q->pts[k][0] = (int16_t)(pts[k][0] + o->prim_offset[0]);
@@ -600,7 +600,7 @@ static void necesita(GameHost *h, const OverlayQuad *q, uint32_t n)
     uint32_t i;
 
     for (i = 0; i < n; i++)
-        if (q[i].kind == OVL_QUAD && q[i].has_tex)
+        if ((q[i].kind == OVL_QUAD || q[i].kind == OVL_HUD_QUAD) && q[i].has_tex)
             tex_need(&h->texcache, q[i].tex.tpage, q[i].tex.clut, q[i].tex.uv);
 }
 
@@ -611,12 +611,7 @@ void host_build_textures(GameHost *h)
     if (h->tex_buf == NULL || h->tex_cap == 0u)
         return;
     tex_begin_frame(&h->texcache);
-    for (i = 0; i < h->overlay.n; i++) {
-        const OverlayQuad *q = &h->overlay.quad[i];
-
-        if (q->kind == OVL_QUAD && q->has_tex)
-            tex_need(&h->texcache, q->tex.tpage, q->tex.clut, q->tex.uv);
-    }
+    necesita(h, h->overlay.quad, h->overlay.n);
     /* y las de los destellos, el flare del sol y el clima de la carrera */
     necesita(h, h->glow_quad, h->glow_quads_n);
     necesita(h, h->sky_quad, h->sky_quads_n);
@@ -697,7 +692,7 @@ int overlay_dump_open(GameHost *h, const char *path)
     if (f == NULL)
         return 0;
     fwrite("NFSO", 1, 4, f);
-    put32o(f, 2u);   /* version 2: anade los coches y el suelo del showroom */
+    put32o(f, 3u);   /* version 2: los coches y el suelo del showroom; 3: la pausa */
     h->ovl_dump = f;
     return 1;
 }
@@ -717,7 +712,14 @@ void overlay_dump_frame(GameHost *h)
             nq += (h->overlay.quad[i].kind <= OVL_CLIP);
         put32o(f, nq);
     }
-    put32o(f, 0u);                       /* el port no produce otros comandos todavia */
+    /* los "otros comandos": de momento solo los de la pausa (ver OVL_HUD_CMD) */
+    {
+        uint32_t no = 0;
+
+        for (i = 0; i < h->overlay.n; i++)
+            no += (h->overlay.quad[i].kind == OVL_HUD_CMD);
+        put32o(f, no);
+    }
     for (i = 0; i < h->overlay.n; i++)
         if (h->overlay.quad[i].kind <= OVL_CLIP)
             overlay_dump_quad(f, &h->overlay.quad[i]);
@@ -794,6 +796,43 @@ void overlay_dump_frame(GameHost *h)
             put32o(f, (uint16_t)q->pts[0][1]);
             for (k = 0; k < (uint16_t)q->pts[0][1]; k++)
                 overlay_dump_quad(f, &h->sroom_floor[(uint16_t)q->pts[0][0] + k]);
+        }
+        /* Version 3: los comandos de la pausa, cada uno con su posicion en la lista y sus
+         * parametros (120 bytes; el texto, hasta HUD_TEXT_MAX y con ceros detras). */
+        {
+            uint32_t no = 0;
+
+            for (i = 0; i < h->overlay.n; i++)
+                no += (h->overlay.quad[i].kind == OVL_HUD_CMD);
+            put32o(f, no);
+        }
+        antes = 0;
+        for (i = 0; i < h->overlay.n; i++) {
+            const OverlayQuad *q = &h->overlay.quad[i];
+            const HudCmd *m;
+
+            if (q->kind <= OVL_CLIP) {
+                antes++;
+                continue;
+            }
+            if (q->kind != OVL_HUD_CMD)
+                continue;
+            m = &h->hud_cmd[(uint16_t)q->pts[0][0]];
+            put32o(f, antes);
+            fputc(m->kind, f);
+            fputc(m->semi, f);
+            fputc(m->shape, f);
+            fputc(m->pal, f);
+            fputc(m->space, f);
+            fputc(m->len, f);
+            fputc((uint8_t)m->dx0, f);
+            fputc((uint8_t)m->dx1, f);
+            put16(f, (uint16_t)m->x);
+            put16(f, (uint16_t)m->y);
+            put16(f, (uint16_t)m->w);
+            put16(f, (uint16_t)m->h);
+            put32o(f, m->colour);
+            fwrite(m->text, 1, HUD_TEXT_MAX, f);
         }
     }
 }
@@ -923,4 +962,171 @@ void overlay_font_quads(GameHost *h, Cpu *c, uint32_t text, int32_t x, int32_t y
         }
         x += adv;
     }
+}
+
+/* ---- la pausa (M2c) ----
+ *
+ * Los comandos que la referencia graba en una carrera en pausa (Font_TextXY y los cuatro
+ * ayudantes del HUD), resueltos en cuadros como los dibuja su port del HUD (ps1hud.rs).
+ * Las texturas son las del propio juego en la VRAM de PS1: las formas de HudPmx_gShapes
+ * y la fuente. El dibujo recorre la lista del final al principio, asi que lo que va
+ * primero se mete el ultimo: cada comando apila sus cuadros y los suelta al reves.
+ */
+typedef struct {
+    int16_t  pts[4][2];
+    uint32_t colour;
+    int      con_tex, semi;
+    QuadTex  tex;
+    uint8_t  abr;
+} Pieza;
+
+#define PIEZAS_MAX 16u
+static Pieza s_pz[PIEZAS_MAX];
+static uint32_t s_pz_n;
+
+static void pieza_plana(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t dx0, int32_t dx1,
+                        uint32_t colour, int semi)
+{
+    Pieza *p;
+
+    if (s_pz_n >= PIEZAS_MAX)
+        return;
+    p = &s_pz[s_pz_n++];
+    memset(p, 0, sizeof *p);
+    p->pts[0][0] = (int16_t)(x0 + dx0); p->pts[0][1] = (int16_t)y0;
+    p->pts[1][0] = (int16_t)(x1 + dx1); p->pts[1][1] = (int16_t)y0;
+    p->pts[2][0] = (int16_t)x0;         p->pts[2][1] = (int16_t)y1;
+    p->pts[3][0] = (int16_t)x1;         p->pts[3][1] = (int16_t)y1;
+    p->colour = colour & 0xFFFFFFu;
+    p->semi = semi;
+}
+
+/* La forma `i` de HudPmx_gShapes en (x, y), con su textura de la VRAM (Hud_BuildGT4). */
+static void pieza_forma(Cpu *c, uint32_t i, int32_t x, int32_t y, uint32_t colour, int semi)
+{
+    uint32_t e = ADDR_HUD_SHAPES + 20u * i;
+    uint16_t u = (uint16_t)ps1_r8(c, e), v = (uint16_t)ps1_r8(c, e + 1u);
+    uint16_t w = (uint16_t)ps1_r16(c, e + 16u), hh = (uint16_t)ps1_r16(c, e + 18u);
+    Pieza *p;
+
+    if (w == 0u || hh == 0u || s_pz_n >= PIEZAS_MAX)
+        return;
+    p = &s_pz[s_pz_n++];
+    memset(p, 0, sizeof *p);
+    p->pts[0][0] = (int16_t)x;       p->pts[0][1] = (int16_t)y;
+    p->pts[1][0] = (int16_t)(x + w); p->pts[1][1] = (int16_t)y;
+    p->pts[2][0] = (int16_t)x;       p->pts[2][1] = (int16_t)(y + hh);
+    p->pts[3][0] = (int16_t)(x + w); p->pts[3][1] = (int16_t)(y + hh);
+    p->colour = colour & 0xFFFFFFu;
+    p->con_tex = 1;
+    p->semi = semi;
+    p->tex.clut = (uint16_t)ps1_r16(c, e + 2u);
+    p->tex.tpage = (uint16_t)ps1_r16(c, e + 6u);
+    p->tex.uv[0][0] = u;              p->tex.uv[0][1] = v;
+    p->tex.uv[1][0] = (uint16_t)(u + w); p->tex.uv[1][1] = v;
+    p->tex.uv[2][0] = u;              p->tex.uv[2][1] = (uint16_t)(v + hh);
+    p->tex.uv[3][0] = (uint16_t)(u + w); p->tex.uv[3][1] = (uint16_t)(v + hh);
+    p->abr = (uint8_t)((p->tex.tpage >> 5) & 3u);
+}
+
+/* El tamano de la esquina redondeada (la forma 17), 7 x 7 si no esta. */
+static void esquina(Cpu *c, int32_t *cw, int32_t *ch)
+{
+    uint32_t e = ADDR_HUD_SHAPES + 20u * 17u;
+
+    *cw = (int32_t)ps1_r16(c, e + 16u);
+    *ch = (int32_t)ps1_r16(c, e + 18u);
+    if (*cw == 0 || *ch == 0) {
+        *cw = 7;
+        *ch = 7;
+    }
+}
+
+/* Hud_BlackThinBox: un marco negro de 2 pixeles con las esquinas redondeadas. */
+static void pieza_marco(Cpu *c, int32_t x, int32_t y, int32_t w, int32_t hh)
+{
+    int32_t cw, ch;
+
+    esquina(c, &cw, &ch);
+    pieza_plana(x + cw - 2, y - 2, x + w - cw, y, 0, 0, 0u, 0);
+    pieza_plana(x - 2, y + ch - 2, x, y + hh - ch + 2, 0, 0, 0u, 0);
+    pieza_plana(x + w - 2, y + ch - 2, x + w, y + hh - ch + 2, 0, 0, 0u, 0);
+    pieza_plana(x + cw - 2, y + hh, x + w - cw, y + hh + 2, 0, 0, 0u, 0);
+    pieza_forma(c, 14u, x - 2, y - 2, 0u, 0);
+    pieza_forma(c, 15u, x + w - cw, y - 2, 0u, 0);
+    pieza_forma(c, 16u, x - 2, y + hh - ch + 2, 0u, 0);
+    pieza_forma(c, 17u, x + w - cw, y + hh - ch + 2, 0u, 0);
+}
+
+/* Hud_RenderPauseBox: una caja roja oscura semitransparente bajo una franja negra de
+ * titulo, con el marco y las esquinas y el borde de abajo negros. */
+static void pieza_pausa(Cpu *c, int32_t x, int32_t y, int32_t w, int32_t hh)
+{
+    int32_t cw, ch;
+
+    esquina(c, &cw, &ch);
+    pieza_plana(x, y + 12, x + w, y + hh, 0, 0, 0x461414u, 1);
+    pieza_plana(x, y, x + w, y + 12, 0, 0, 0u, 0);
+    pieza_marco(c, x, y, w, hh);
+    pieza_plana(x, y + hh - 2, x + w, y + hh, 0, 0, 0u, 0);
+    pieza_forma(c, 17u, x + w - cw, y + hh - ch, 0u, 0);
+    pieza_forma(c, 16u, x - 2, y + hh - ch, 0u, 0);
+    pieza_forma(c, 15u, x + w - cw, y + 10, 0u, 0);
+    pieza_forma(c, 14u, x - 2, y + 10, 0u, 0);
+}
+
+void overlay_hud_cmd(GameHost *h, Cpu *c, const HudCmd *cmd, uint32_t text)
+{
+    Overlay *o = &h->overlay;
+    int16_t ofs0 = o->prim_offset[0], ofs1 = o->prim_offset[1];
+    uint32_t i;
+
+    if (h->hud_cmds_n >= HUD_CMDS_MAX || o->n >= OVERLAY_MAX) {
+        o->dropped++;
+        return;
+    }
+    h->hud_cmd[h->hud_cmds_n] = *cmd;
+    /* el marcador */
+    memset(&o->quad[o->n], 0, sizeof o->quad[0]);
+    o->quad[o->n].kind = OVL_HUD_CMD;
+    o->quad[o->n].pts[0][0] = (int16_t)h->hud_cmds_n;
+    o->n++;
+    h->hud_cmds_n++;
+
+    /* y sus cuadros, en coordenadas de pantalla tal cual */
+    o->prim_offset[0] = 0;
+    o->prim_offset[1] = 0;
+    h->ovl_hud = 1;
+    if (cmd->kind == HUD_TEXT) {
+        overlay_font_quads(h, c, text, cmd->x, cmd->y);
+    } else {
+        s_pz_n = 0;
+        switch (cmd->kind) {
+        case HUD_SHAPE:
+            pieza_forma(c, cmd->shape, cmd->x, cmd->y, cmd->colour, 1);
+            break;
+        case HUD_THINBOX:
+            pieza_marco(c, cmd->x, cmd->y, cmd->w, cmd->h);
+            break;
+        case HUD_PAUSEBOX:
+            pieza_pausa(c, cmd->x, cmd->y, cmd->w, cmd->h);
+            break;
+        case HUD_RECT:
+            pieza_plana(cmd->x, cmd->y, cmd->x + cmd->w, cmd->y + cmd->h, cmd->dx0, cmd->dx1,
+                        cmd->colour, cmd->semi);
+            break;
+        default:
+            break;
+        }
+        for (i = s_pz_n; i > 0u; i--) {
+            const Pieza *p = &s_pz[i - 1u];
+            uint32_t col[4];
+
+            col[0] = col[1] = col[2] = col[3] = p->colour;
+            overlay_push(h, p->pts, col, p->con_tex ? &p->tex : NULL, p->semi, p->abr);
+        }
+    }
+    h->ovl_hud = 0;
+    o->prim_offset[0] = ofs0;
+    o->prim_offset[1] = ofs1;
 }

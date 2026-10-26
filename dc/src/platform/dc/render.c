@@ -1332,6 +1332,8 @@ void render_frame(GameHost *h)
             }
             continue;
         }
+        if (q->kind == OVL_HUD_CMD)
+            continue;               /* marcador de la pausa: sus cuadros van detras */
         if (q->kind == OVL_CLIP) {
             clip.x0 = (float)q->pts[0][0] * sx;
             clip.y0 = (float)q->pts[0][1] * sy;

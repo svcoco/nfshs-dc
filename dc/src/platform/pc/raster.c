@@ -156,6 +156,8 @@ int raster_dump(const GameHost *h, const uint16_t *texbuf, const char *path,
 
         if (q->kind == OVL_SR_CAR || q->kind == OVL_SR_FLOOR)
             continue;               /* el showroom: aun no lo dibuja el arnes */
+        if (q->kind == OVL_HUD_CMD)
+            continue;               /* marcador de la pausa: sus cuadros van detras */
         if (q->kind == OVL_CLIP) {
             L.cx0 = q->pts[0][0];
             L.cy0 = q->pts[0][1];

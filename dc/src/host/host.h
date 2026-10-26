@@ -190,6 +190,9 @@ typedef struct ShowroomCar {
 } ShowroomCar;
 
 #define HUD_LISTS_MAX  16u
+#define HUD_CMDS_MAX   256u   /* comandos de la pausa por frame */
+#define HUD_KEPT_MAX   768u   /* el HUD que se conserva en pausa (~176 cuadros por frame) */
+#define MENU_KEPT_MAX  512u   /* el menu de pausa que se conserva */
 #define DRAW_ENVS_MAX  64u
 
 typedef struct ObjectDraw {
@@ -258,7 +261,6 @@ typedef struct GameHost {
     uint64_t views_captured;      /* rutinas corridas en marco anidado */
     uint64_t showroom_cars;       /* R3DCar_InsertCarFacetMenuII atendidas */
     uint64_t showroom_floors;     /* R3DCar_Showroom atendidas */
-    uint64_t views_hud_unported;  /* ayudantes del HUD que habria que atender y no estan */
 
     uint64_t unknown_calls;  /* llamadas al host que no estan en la lista HLE */
     uint32_t unknown_last;
@@ -416,6 +418,28 @@ typedef struct GameHost {
     uint32_t hud_start[HUD_LISTS_MAX];
     uint32_t hud_lists;
     uint64_t hud_single;                  /* frames con una sola tabla (ver overlay.c) */
+
+    /* ---- la pausa (M2c) ----
+     * En pausa el original no vuelve a pintar la imagen: copia la ultima y dibuja encima el
+     * menu con Font_TextXY y los ayudantes del HUD, que el host atiende como la referencia
+     * (comandos en hud_cmd, ver OVL_HUD_CMD). Para dibujar, el host conserva lo que la
+     * pausa encontro: las vistas, el HUD y el flare del sol del ultimo frame jugado, y el
+     * ultimo menu (el juego solo lo redibuja cuando cambia). */
+    HudCmd      hud_cmd[HUD_CMDS_MAX];
+    uint32_t    hud_cmds_n;
+    uint8_t     ovl_hud;                  /* overlay_push marca OVL_HUD_QUAD */
+    int         paused;                   /* este frame es de pausa (host_frame_top) */
+    uint8_t     cams_held[2u * 0x110u];   /* Camera_gInfo al pausar (hold_cameras) */
+    int         cams_held_ok;
+    OverlayQuad sky_kept[SKY_QUADS_MAX];
+    uint32_t    sky_kept_n;
+    RaceView    views_kept[VIEWS_MAX];
+    uint32_t    views_kept_n;
+    OverlayQuad hud_kept[HUD_KEPT_MAX];
+    uint32_t    hud_kept_n;
+    OverlayQuad menu_kept[MENU_KEPT_MAX];
+    uint32_t    menu_kept_n;
+    uint64_t    hud_kept_lost;            /* cuadros que no cupieron; si no es 0, sube el tope */
     int32_t  area_tl[2];                  /* esquina del ultimo E3 */
     /* SetDrawEnv: el recorte y el desplazamiento de cada paquete de entorno, para
      * recortar las vistas de HUD al grabarlas. */

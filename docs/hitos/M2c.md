@@ -53,7 +53,8 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | 4 | **Horneado y dibujo de los coches** | **Hecho (2026-10-24)**: los coches se ven; 30-40 fps, y el coste **no es dibujarlos** |
 | 5 | **El HUD** | **Hecho (2026-10-24)**: 4 769 frames de carrera con la lista 2D identica a la referencia, HUD incluido |
 | 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | **Hecho en emulador (2026-10-25)**: todos los efectos con oraculo, salvo la imagen; la lluvia, comparada con el original en DuckStation |
-| 7 | **El showroom del front end**: el coche de seleccion, concesionario y garaje | **En curso (2026-10-26)**: grabado con oraculo, dibujado con el PVR, pinturas y mapa de reflejo; y la policia con la librea de su region; en emulador (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
+| 7 | **El showroom del front end**: el coche de seleccion, concesionario y garaje | **Hecho en emulador (2026-10-26)**: grabado con oraculo, dibujado con el PVR, pinturas y mapa de reflejo; y la policia con la librea de su region (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
+| 8 | **La pausa en carrera**: el menu y lo que se ve detras | **Hecho en emulador (2026-10-26)**: RAM, 2D y vista identicas con `pausa.txt` |
 
 Los pasos 1 y 3 van primero **porque tienen oraculo**, igual que la lista 2D de M2a y la
 vista de M2b: la referencia graba exactamente lo mismo, asi que se comparan campo a campo
@@ -256,7 +257,7 @@ sustituyen**: la referencia deja correr el codigo original, que construye el HUD
 una por vista. Lo que hace el host es **grabar esas tablas** en cada `DrawOTag`, salvo la
 del mundo (la primera, con miles de paquetes), y al cerrar el frame quedarse con las que
 van detras de las vistas de jugador. Los ayudantes solo se sustituyen con la partida en
-**pausa**, que queda pendiente.
+**pausa**, que es el paso 8 (seccion 12).
 
 Y tenia oraculo desde M2a: es la misma lista 2D. En carrera daba 68 361 comandos contra
 210 157; ahora, en el guion largo:
@@ -443,7 +444,7 @@ lluvia sobre la pista **seca** y sin sus texturas, y salían trazos que cruzaban
 gotas como cuadros oscuros, que parecían dudas sobre la GPU de PS1. Eran artefactos del
 forzado, que se retiró.
 
-## 11. Paso 7 (en curso): el showroom del front end (2026-10-25)
+## 11. Paso 7 (hecho en emulador): el showroom del front end (2026-10-25)
 
 Del showroom solo estaba portada la mecanica: el coche no se pintaba. Plan acordado con Jorge:
 (1) grabarlo como la referencia, (2) dibujarlo con el PVR, (3) hornear todos los coches que
@@ -559,3 +560,49 @@ solo la enciende en carrera, donde ya se dibuja restando (paso 6). No hay nada q
   que sale en las capturas es el Z3 del jugador, con la camara exterior tras salirse.
 
 **Pendiente de mirar:** una patrulla de cerca en Flycast.
+
+## 12. Paso 8 (hecho en emulador): la pausa en carrera (2026-10-26)
+
+El original, en pausa, no pinta el mundo: muestra la imagen que copio y encima el menu, con
+`Font_TextXY` y cuatro ayudantes del HUD. La referencia (`views.rs`, `frame.rs`, `race.rs`)
+los atiende sin dejar correr el original. El port los dejaba correr y la RAM divergia en el
+primer frame de pausa (frame 701 de `pausa.txt`: tres paginas, `r14`/`r15` y 8 ticks).
+
+| Que | Como (igual que la referencia) |
+|---|---|
+| `Font_TextXY` (0x800CC7F0) | comando `Text`: x, y, cual de las 16 paletas de la fuente, espacio, texto |
+| `Hud_BuildString` (0x800D4E9C) | el ancho con `HudPmx_gShapes`; un `Shape` por caracter salvo si solo mide |
+| `Hud_BlackThinBox` (0x800D8690) | `ThinBox`, devuelve 0 |
+| `Hud_RenderPauseBox` (0x800D9ABC) | `PauseBox`, devuelve 0 |
+| `Hud_FBuildF4` (0x800D3558) | `Rect` (semi, x, y, w, h, color, dx0, dx1), devuelve 0 |
+| llamadas desde el HUD nativo de la referencia | no se graban (`NATIVE_HUD`) |
+| `hold_cameras` | cada frame de pausa devuelve `Camera_gInfo` (0x80110570, 2 x 0x110) a como estaba al pausar, salvo cambio de modo |
+| el flare del sol | si en pausa no se pinta, el del ultimo frame |
+| objetos en el volcado de vista | sin vistas, ninguno |
+
+**Representacion.** Cada comando es un marcador `OVL_HUD_CMD` (el volcado lo escribe con sus
+parametros) seguido de sus cuadros `OVL_HUD_QUAD`, que el volcado se salta y el PVR pinta
+como cualquier 2D. Las texturas son las de la VRAM de PS1: el texto, con el mismo blit de la
+fuente que el front end; las formas, de `HudPmx_gShapes`, que guarda por entrada u, v, paleta y
+**pagina** como un `POLY_GT4`. Las cajas siguen `ps1hud.rs` (marco negro de 2 pixeles con las
+esquinas 14-17; la caja de pausa, `0x461414` semitransparente, que en BBGGRR es azul oscuro).
+
+**Lo que se ve (`pausa_presenta`).** Las vistas y el HUD del ultimo frame jugado (el HUD se
+copia, hasta 768 cuadros) y el ultimo menu: el juego solo lo pinta cuando cambia, y un frame
+con solo rectangulos no lo cambia. Al reanudar hay un frame que no pinta nada (el 1003) y se
+ve el ultimo dibujado, como `held`.
+
+**Oraculo.** Volcado de la lista 2D **version 3** en los dos lados: los comandos de la pausa
+con su posicion y parametros (120 bytes). Con `pausa.txt`:
+
+| | Resultado |
+|---|---|
+| RAM | 1 200 frames identicos |
+| lista 2D | 211 227 cuadros y 28 comandos de pausa identicos; 0 comandos sin producir |
+| vista | 667 vistas, 31 604 objetos, 130 coches, 9 732 marcas identicos |
+
+`race_long` sigue identico en todo. Visto en Flycast: el menu "Game Paused" (Continue,
+Restart, Options, Quit Race) sobre la carretera y el HUD.
+
+**Sin probar:** las opciones del menu (Restart, Options, Quit Race) y una pausa en pantalla
+partida.

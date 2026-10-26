@@ -317,7 +317,8 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             // NFSHS_DIFF_OVERLAY: vuelca la LISTA DE DIBUJO por frame, para comparar la
             // grabacion 2D del port en C (dc/src/host/overlay.c) contra esta, que es la
             // que alimenta al renderer de referencia. Formato, todo little-endian:
-            //   cabecera: "NFSO" u32 version=2 (la 2 anade el showroom al final de cada frame)
+            //   cabecera: "NFSO" u32 version=3 (la 2 anade el showroom al final de cada frame;
+            //   la 3, los comandos de la pausa: Text, Shape, ThinBox, PauseBox y Rect)
             //   por frame: u32 frame, u32 cuadros, u32 otros_comandos, y por cuadro
             //              i16 pts[4][2], u32 colores[4], u8 hay_textura, u8 semi,
             //              u8 abr, u8 relleno, u16 tpage, u16 clut, u16 uv[4][2]
@@ -327,7 +328,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     use std::io::Write;
                     let mut f = std::io::BufWriter::new(std::fs::File::create(&path).expect("NFSHS_DIFF_OVERLAY"));
                     f.write_all(b"NFSO").expect("cabecera");
-                    f.write_all(&2u32.to_le_bytes()).expect("cabecera");
+                    f.write_all(&3u32.to_le_bytes()).expect("cabecera");
                     f
                 });
             // NFSHS_DIFF_VIEW: dumps the RACE VIEW per frame, to compare the C port's
@@ -431,6 +432,8 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                         let mut cars: Vec<u8> = Vec::new();
                         let mut floors: Vec<u8> = Vec::new();
                         let (mut ncar, mut nfloor) = (0u32, 0u32);
+                        let mut huds: Vec<u8> = Vec::new();
+                        let mut nhud = 0u32;
                         let quad = |r: &mut Vec<u8>, q: &OverlayCmd| {
                             if let OverlayCmd::Quad { pts, colours, tex, semi, abr } = q {
                                 for p in pts {
@@ -491,6 +494,49 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                                     r.extend_from_slice(&e.yaw.to_le_bytes());
                                     r.extend_from_slice(&[0u8, 0]);
                                 }
+                                OverlayCmd::Text { .. } | OverlayCmd::Shape { .. } | OverlayCmd::ThinBox { .. } | OverlayCmd::PauseBox { .. } | OverlayCmd::Rect { .. } => {
+                                    // (version 3) the pause's commands: where they sit and their
+                                    // parameters, 120 bytes (the text up to 96, zero padded)
+                                    nhud += 1;
+                                    let (mut kind, mut semi, mut shape, mut pal, mut space) = (0u8, 0u8, 0u8, 0u8, 0u8);
+                                    let (mut dx0, mut dx1, mut x, mut y, mut w, mut hh, mut colour) = (0i8, 0i8, 0i16, 0i16, 0i16, 0i16, 0u32);
+                                    let mut text = [0u8; 96];
+                                    let mut len = 0u8;
+                                    match cmd {
+                                        OverlayCmd::Text { x: a, y: b, colour: p, space: s, text: tx } => {
+                                            kind = 1;
+                                            (x, y, pal, space) = (*a, *b, *p, *s);
+                                            let n = tx.len().min(96);
+                                            text[..n].copy_from_slice(&tx[..n]);
+                                            len = n as u8;
+                                        }
+                                        OverlayCmd::Shape { shape: s, x: a, y: b, colour: col } => {
+                                            kind = 2;
+                                            (shape, x, y, colour) = (*s, *a, *b, *col);
+                                        }
+                                        OverlayCmd::ThinBox { x: a, y: b, w: c2, h: d } => {
+                                            kind = 3;
+                                            (x, y, w, hh) = (*a, *b, *c2, *d);
+                                        }
+                                        OverlayCmd::PauseBox { x: a, y: b, w: c2, h: d } => {
+                                            kind = 4;
+                                            (x, y, w, hh) = (*a, *b, *c2, *d);
+                                        }
+                                        OverlayCmd::Rect { semi: s, x: a, y: b, w: c2, h: d, colour: col, dx0: e0, dx1: e1 } => {
+                                            kind = 5;
+                                            (semi, x, y, w, hh, colour, dx0, dx1) = (u8::from(*s), *a, *b, *c2, *d, *col, *e0, *e1);
+                                        }
+                                        _ => {}
+                                    }
+                                    let r = &mut huds;
+                                    r.extend_from_slice(&before.to_le_bytes());
+                                    r.extend_from_slice(&[kind, semi, shape, pal, space, len, dx0 as u8, dx1 as u8]);
+                                    for v in [x, y, w, hh] {
+                                        r.extend_from_slice(&v.to_le_bytes());
+                                    }
+                                    r.extend_from_slice(&colour.to_le_bytes());
+                                    r.extend_from_slice(&text);
+                                }
                                 OverlayCmd::ShowroomFloor(v) => {
                                     nfloor += 1;
                                     let qs: Vec<&OverlayCmd> = v.iter().filter(|q| matches!(q, OverlayCmd::Quad { .. })).collect();
@@ -507,6 +553,8 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                         rec.extend_from_slice(&cars);
                         rec.extend_from_slice(&nfloor.to_le_bytes());
                         rec.extend_from_slice(&floors);
+                        rec.extend_from_slice(&nhud.to_le_bytes());
+                        rec.extend_from_slice(&huds);
                     }
                     out.write_all(&rec).expect("NFSHS_DIFF_OVERLAY");
                 }

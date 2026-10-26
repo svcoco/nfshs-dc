@@ -11,6 +11,7 @@ import sys
 
 Q = 56   # bytes por cuadro
 COCHE = 244   # un coche del showroom (version 2)
+HUD = 120     # un comando de la pausa (version 3): posicion y parametros
 
 
 def leer(path):
@@ -27,7 +28,7 @@ def leer(path):
             break
         cuadros = d[o:o + Q * nq]
         o += Q * nq
-        coches, suelos = [], []
+        coches, suelos, huds = [], [], []
         if version >= 2:
             # el showroom: coches (posicion en la lista y sus datos) y suelos (posicion,
             # cuantos cuadros y los cuadros)
@@ -42,7 +43,14 @@ def leer(path):
                 at, nq2 = struct.unpack_from('<II', d, o)
                 suelos.append((at, d[o + 8:o + 8 + Q * nq2]))
                 o += 8 + Q * nq2
-        frames.append((frame, otros, cuadros, coches, suelos))
+        if version >= 3:
+            # la pausa: Text, Shape, ThinBox, PauseBox y Rect, con su posicion
+            n, = struct.unpack_from('<I', d, o)
+            o += 4
+            for _ in range(n):
+                huds.append(d[o:o + HUD])
+                o += HUD
+        frames.append((frame, otros, cuadros, coches, suelos, huds))
     return frames
 
 
@@ -76,13 +84,14 @@ def main():
     n = min(len(a), len(b))
     tot_c = sum(len(f[2]) // Q for f in a)
     tot_r = sum(len(f[2]) // Q for f in b)
-    # los "otros" de la referencia incluyen el showroom, que va comparado aparte
-    otros = sum(f[1] - len(f[3]) - len(f[4]) for f in b)
+    # los "otros" de la referencia incluyen el showroom y la pausa, comparados aparte
+    otros = sum(f[1] - len(f[3]) - len(f[4]) - len(f[5]) for f in b)
     print(f'comandos (cuadros y recortes): C {tot_c}, referencia {tot_r}')
     print(f'comandos de la referencia que el port no produce todavia: {otros}')
 
     coches = sum(len(f[3]) for f in a)
     suelos = sum(len(f[4]) for f in a)
+    huds = sum(len(f[5]) for f in a)
     malos = 0
     for i in range(n):
         fa, fb = a[i], b[i]
@@ -97,6 +106,18 @@ def main():
             for k, (x, y) in enumerate(zip(fa[4], fb[4])):
                 if x != y:
                     print(f'  suelo {k}: en {x[0]} / {y[0]}, {len(x[1]) // Q} / {len(y[1]) // Q} cuadros')
+                    break
+            malos += 1
+            if malos >= maxdif:
+                break
+        if fa[5] != fb[5]:
+            print(f'\nframe {fa[0]}: pausa distinta: {len(fa[5])} comandos contra {len(fb[5])}')
+            for k, (x, y) in enumerate(zip(fa[5], fb[5])):
+                if x != y:
+                    ca = struct.unpack_from('<I8B4hI', x, 0)
+                    cb = struct.unpack_from('<I8B4hI', y, 0)
+                    print(f'  comando {k}: C {ca} {x[24:24 + x[9]]!r}')
+                    print(f'             ref {cb} {y[24:24 + y[9]]!r}')
                     break
             malos += 1
             if malos >= maxdif:
@@ -122,6 +143,7 @@ def main():
     if malos == 0 and len(a) == len(b):
         print(f'\nOK: {tot_c} cuadros identicos en {n} frames')
         print(f'OK: showroom identico: {coches} coches y {suelos} suelos')
+        print(f'OK: pausa identica: {huds} comandos')
         return 0
     print(f'\n{malos} frames con diferencias (de {n} comparados)')
     return 1

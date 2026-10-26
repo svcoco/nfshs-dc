@@ -16,9 +16,11 @@
  *
  * Para M1a lo que importa es **si el original corre y que devuelve**, no lo que se
  * dibuja; la grabacion de las primitivas es M2a. */
+#include "addr.h"
 #include "host.h"
 
 #include <stdio.h>
+#include <string.h>
 
 /* Front_Menu y Front_BuildStream pasan a front end; Sim_MainGameLoop pasa a carrera.
  * Los tres son hooks: cambian el modo y el original corre igual. */
@@ -102,6 +104,23 @@ uint32_t host_capture_prims(GameHost *h, Cpu *c, uint32_t addr)
     return ret;
 }
 
+/* Las funciones del HUD que la referencia dibuja con su propio port (NATIVE_HUD de
+ * src/ps1/host/mod.rs: Hud_RenderMapView, el uso de Hud_BlackThinBox en la cuenta atras,
+ * Hud_RenderHudView y Hud_RenderTacView): lo 2D que llaman desde ahi no se graba. */
+static int es_hud_nativo(uint32_t ra)
+{
+    static const uint32_t R[4][2] = {
+        { 0x800D840Cu, 0x800D8690u }, { 0x800D887Cu, 0x800D8B84u },
+        { 0x800D8EA4u, 0x800D981Cu }, { 0x800D981Cu, 0x800D9938u }
+    };
+    uint32_t i;
+
+    for (i = 0; i < 4u; i++)
+        if (ra >= R[i][0] && ra < R[i][1])
+            return 1;
+    return 0;
+}
+
 /* La carrera esta en pausa: su menu lo dibuja el host. */
 static int paused(Cpu *c)
 {
@@ -166,9 +185,34 @@ int host_views_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
          * solo importa que el original no corra y que v0 sea 0. */
         h->views_fonttext++;
         /* En el front end el texto son cuadros (uno por caracter); en una carrera en
-         * pausa la referencia produce un comando de texto, que es del paso 5. */
-        if (h->mode == HOST_FRONTEND)
+         * pausa la referencia produce un comando de texto (ver OVL_HUD_CMD). */
+        if (h->mode == HOST_FRONTEND) {
             overlay_font_quads(h, c, c->r[4], (int32_t)c->r[5], (int32_t)c->r[6]);
+        } else {
+            HudCmd m;
+            int32_t pal;
+            uint32_t i;
+
+            memset(&m, 0, sizeof m);
+            m.kind = HUD_TEXT;
+            m.x = (int16_t)c->r[5];
+            m.y = (int16_t)c->r[6];
+            /* la paleta: cual de las 16 de la fuente es la vigente */
+            pal = (int32_t)(ps1_r16(c, ADDR_FONT_CURRENT_CLUT) & 0x3Fu) -
+                  (int32_t)(ps1_r16(c, ADDR_FONT_CLUT_X) >> 4);
+            m.pal = (uint8_t)(pal < 0 ? 0 : pal > 15 ? 15 : pal);
+            m.space = (uint8_t)ps1_r8(c, ADDR_FONT_SPACE);
+            for (i = 0; i < 256u; i++) {
+                uint8_t ch = (uint8_t)ps1_r8(c, c->r[4] + i);
+
+                if (ch == 0u)
+                    break;
+                if (i < HUD_TEXT_MAX)
+                    m.text[i] = (char)ch;
+            }
+            m.len = (uint8_t)(i < HUD_TEXT_MAX ? i : HUD_TEXT_MAX);
+            overlay_hud_cmd(h, c, &m, c->r[4]);
+        }
         if (h->textlog) {
             char buf[80];
             uint32_t i;
@@ -188,16 +232,114 @@ int host_views_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
         return 1;
     }
 
-    /* Los cuatro ayudantes del HUD devuelven anchos calculados (Hud_BuildString mide la
-     * cadena con HUD_SHAPES), y portar ese calculo sin un escenario que lo ejercite seria
-     * escribir a ciegas. En el escenario de M1a **no se llaman ni una vez**, asi que se
-     * dejan correr y se cuentan: si un guion de carrera los toca, el informe lo grita en
-     * vez de divergir en silencio. */
-    h->views_hud_unported++;
-    if (h->views_hud_unported == 1u)
-        fprintf(stderr, "\n--- AVISO: ayudante del HUD sin portar (%#x) ---\n"
-                        "  la referencia lo atiende en este modo y devuelve un ancho;\n"
-                        "  el port deja correr el original, asi que la RAM va a divergir.\n",
-                (unsigned)addr);
-    return 0;
+    /* Los cuatro ayudantes del HUD, como views.rs de la referencia: el original no corre,
+     * se graba el comando y se devuelve lo que devolveria (el ancho en Hud_BuildString, 0
+     * en el resto). Los que llama el HUD que la referencia dibuja con su propio port
+     * (native_hud) no se graban. Se ejercitan en la pausa (guion pausa.txt). */
+    {
+        HudCmd m;
+        int nativo = es_hud_nativo(c->r[31]);
+
+        memset(&m, 0, sizeof m);
+        switch (addr) {
+        case HUD_BUILDSTRING: {
+            /* Hud_BuildString(texto, x, y, color, relleno, solo medir): las letras y
+             * cifras pequenas del HUD y los simbolos de los botones; devuelve el ancho */
+            uint32_t sp = c->r[29];
+            int medir = ps1_r32(c, sp + 20u) != 0u;
+            int graba = !medir && !nativo;
+            int32_t x0 = (int32_t)c->r[5], x = x0, y = (int32_t)c->r[6];
+            uint32_t i;
+
+            for (i = 0; i < 64u; i++) {
+                uint32_t ch = ps1_r8(c, c->r[4] + i), forma;
+                int32_t dy = 0;
+
+                if (ch == 0u)
+                    break;
+                if (ch == 0x20u) {
+                    x += 3;
+                    continue;
+                }
+                if (ch == 0x2Au) {          /* '*': el boton X, dos pixeles dentro */
+                    x += 2;
+                    forma = 170u;
+                } else if (ch == 0x5Eu) {
+                    forma = 170u;
+                } else if (ch == 0x28u) {
+                    forma = 169u;
+                } else if (ch == 0x29u) {
+                    forma = 168u;
+                } else if (ch == 0x26u) {
+                    forma = 174u;
+                } else if (ch >= 0x30u && ch <= 0x39u) {
+                    forma = ch + 110u;
+                } else if (ch == 0x2Du) {
+                    forma = 72u;
+                } else if (ch == 0x3Au) {
+                    forma = 73u;
+                } else if (ch >= 0xC0u && ch <= 0xDCu) {
+                    forma = ch - 118u;
+                    dy = -1;
+                } else if (ch == 0xE5u) {
+                    forma = 103u;
+                    dy = -1;
+                } else {
+                    forma = ch + 67u;
+                }
+                forma &= 0xFFu;
+                if (graba) {
+                    m.kind = HUD_SHAPE;
+                    m.shape = (uint8_t)forma;
+                    m.x = (int16_t)x;
+                    m.y = (int16_t)(y + dy);
+                    m.colour = c->r[7] & 0xFFFFFFu;
+                    overlay_hud_cmd(h, c, &m, 0u);
+                }
+                x += (int32_t)(int16_t)ps1_r16(c, ADDR_HUD_SHAPES + 20u * forma + 16u) +
+                     (ch == 0x2Au ? 3 : 1);
+            }
+            *ret = (uint32_t)(x - x0);
+            return 1;
+        }
+        case HUD_HELPER_8690:               /* Hud_BlackThinBox(x, y, w, h) */
+            if (!nativo) {
+                m.kind = HUD_THINBOX;
+                m.x = (int16_t)c->r[4];
+                m.y = (int16_t)c->r[5];
+                m.w = (int16_t)c->r[6];
+                m.h = (int16_t)c->r[7];
+                overlay_hud_cmd(h, c, &m, 0u);
+            }
+            *ret = 0;
+            return 1;
+        case HUD_HELPER_9ABC:               /* Hud_RenderPauseBox(x, y, w, h) */
+            m.kind = HUD_PAUSEBOX;
+            m.x = (int16_t)c->r[4];
+            m.y = (int16_t)c->r[5];
+            m.w = (int16_t)c->r[6];
+            m.h = (int16_t)c->r[7];
+            overlay_hud_cmd(h, c, &m, 0u);
+            *ret = 0;
+            return 1;
+        default: {                          /* Hud_FBuildF4(semi, x, y, w, h, color, dx0, dx1) */
+            uint32_t sp = c->r[29];
+
+            if (!nativo) {
+                m.kind = HUD_RECT;
+                m.semi = (uint8_t)(c->r[4] != 0u);
+                m.x = (int16_t)c->r[5];
+                m.y = (int16_t)c->r[6];
+                m.w = (int16_t)c->r[7];
+                m.h = (int16_t)ps1_r32(c, sp + 16u);
+                m.colour = ps1_r32(c, sp + 20u) & 0xFFFFFFu;
+                m.dx0 = (int8_t)ps1_r32(c, sp + 24u);
+                m.dx1 = (int8_t)ps1_r32(c, sp + 28u);
+                overlay_hud_cmd(h, c, &m, 0u);
+            }
+            *ret = 0;
+            return 1;
+        }
+        }
+    }
 }

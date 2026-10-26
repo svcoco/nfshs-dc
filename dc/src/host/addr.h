@@ -96,6 +96,12 @@
 #define ADDR_FONT_CURRENT_CLUT (ADDR_GP + 4880u)
 #define ADDR_FONT_COLOUR       (ADDR_GP + 4872u)
 #define ADDR_FONT_SPACE        (ADDR_GP + 4882u)  /* ancho del espacio */
+#define ADDR_FONT_CLUT_X       (ADDR_GP + 4864u)  /* x de la primera de sus 16 paletas */
+/* HudPmx_gShapes: las formas del HUD, 20 bytes como las UV de un POLY_GT4 (u, v, paleta;
+ * u, v, pagina; u, v; u, v) y despues ancho y alto. */
+#define ADDR_HUD_SHAPES        0x80111F5Cu
+/* Camera_gInfo: las camaras de los dos jugadores, 0x110 bytes cada una (modo en +0x70). */
+#define ADDR_CAMERA_INFO       0x80110570u
 #define ADDR_FONT_UP_CLUT      0x8013EB4Cu
 #define ADDR_FONT_UP_COLOUR    0x8013EB44u
 

@@ -353,9 +353,9 @@ void host_report(const GameHost *h, const Cpu *c)
            (unsigned long long)h->showroom_floors);
     printf("  desbloqueos:               %llu%s\n",
            (unsigned long long)h->unlocks, h->unlock ? "" : " (--unlock apagado)");
-    if (h->views_hud_unported != 0u)
-        printf("  AVISO ayudantes del HUD sin portar: %llu (la RAM divergira)\n",
-               (unsigned long long)h->views_hud_unported);
+    if (h->hud_kept_lost != 0u)
+        printf("  AVISO cuadros de la pausa que no cupieron: %llu (sube HUD_KEPT_MAX)\n",
+               (unsigned long long)h->hud_kept_lost);
     printf("  escrituras de mando:       %llu\n", (unsigned long long)h->pad_writes);
     printf("  MemCardSync entregados:    %llu (escrituras rechazadas: %llu)\n",
            (unsigned long long)h->mc_syncs, (unsigned long long)h->mc_writes_refused);

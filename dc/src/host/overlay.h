@@ -40,8 +40,31 @@ typedef enum {
      * pts[0][0] es el indice; en el suelo, pts[0][1] es cuantos cuadros. El volcado y el
      * dibujo 2D se los saltan. */
     OVL_SR_CAR = 2,          /* un coche del showroom: GameHost::sroom[pts[0][0]] */
-    OVL_SR_FLOOR = 3         /* su suelo: sroom_floor[pts[0][0]] .. + pts[0][1] */
+    OVL_SR_FLOOR = 3,        /* su suelo: sroom_floor[pts[0][0]] .. + pts[0][1] */
+    /* La pausa (y los ayudantes del HUD fuera de la carrera): la referencia graba comandos
+     * (Text, Shape, ThinBox, PauseBox, Rect) y los dibuja aparte. Aqui cada uno es un
+     * marcador (GameHost::hud_cmd[pts[0][0]], para el volcado) seguido de sus cuadros ya
+     * resueltos, que el volcado se salta y el dibujo pinta como cualquier otro. */
+    OVL_HUD_CMD = 4,
+    OVL_HUD_QUAD = 5
 } OverlayKind;
+
+/* Un comando de la pausa, como OverlayCmd de la referencia. */
+#define HUD_TEXT     1       /* Font_TextXY: x, y, paleta, espacio y el texto */
+#define HUD_SHAPE    2       /* un caracter de Hud_BuildString: forma, x, y, color */
+#define HUD_THINBOX  3       /* Hud_BlackThinBox: x, y, w, h */
+#define HUD_PAUSEBOX 4       /* Hud_RenderPauseBox: x, y, w, h */
+#define HUD_RECT     5       /* Hud_FBuildF4: semi, x, y, w, h, color, dx0, dx1 */
+#define HUD_TEXT_MAX 96u     /* el volcado guarda hasta aqui (los dos lados igual) */
+
+typedef struct {
+    uint8_t  kind;
+    uint8_t  semi, shape, pal, space, len;
+    int8_t   dx0, dx1;
+    int16_t  x, y, w, h;
+    uint32_t colour;
+    char     text[HUD_TEXT_MAX];
+} HudCmd;
 
 /* Esquinas en orden: arriba-izquierda, arriba-derecha, abajo-izquierda, abajo-derecha.
  * En OVL_CLIP solo se usan pts[0] (esquina) y pts[1] (ancho y alto); el resto no se
@@ -94,6 +117,8 @@ void overlay_shape_quads(struct GameHost *h, Cpu *c, uint32_t info, uint32_t fla
                          int32_t x, int32_t y, const uint32_t colours[4], uint32_t abr);
 /* Font_TextXY en el front end: un cuadro por caracter. */
 void overlay_font_quads(struct GameHost *h, Cpu *c, uint32_t text, int32_t x, int32_t y);
+/* Graba un comando de la pausa y sus cuadros (ver OVL_HUD_CMD). */
+void overlay_hud_cmd(struct GameHost *h, Cpu *c, const HudCmd *cmd, uint32_t text);
 /* Graba los paquetes de GPU escritos entre `start` y `end` del buffer de primitivas. */
 void overlay_record_packets(struct GameHost *h, Cpu *c, uint32_t start, uint32_t end);
 

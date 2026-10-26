@@ -15,6 +15,7 @@
  * El guion es lo que hara reproducible el test diferencial de M1a: la misma secuencia
  * de pulsaciones por numero de campo, en los dos lados.
  */
+#include "addr.h"
 #include "host.h"
 
 #include <stdio.h>
@@ -141,6 +142,93 @@ int pad_load_script(GameHost *h, const char *path)
     fclose(f);
     return 1;
 }
+/* En pausa las camaras se quedan quietas. Camera_Update del original corre en cada vuelta
+ * del bucle, en pausa o no: sus camaras de persecucion seguirian acercandose a su sitio
+ * detras de los coches parados, sin verse bajo la imagen copiada, y saltarian alli al
+ * reanudar. Cada frame en pausa devuelve Camera_gInfo a como lo encontro la pausa (salvo
+ * que cambie el modo de una camara). Es hold_cameras de la referencia, y escribe en la RAM:
+ * sin esto el test diferencial diverge al pausar. */
+static void hold_cameras(GameHost *h, Cpu *c)
+{
+    uint32_t n = (uint32_t)sizeof h->cams_held, i;
+    uint16_t m0, m1;
+
+    if (!h->paused) {
+        h->cams_held_ok = 0;
+        return;
+    }
+    if (!h->cams_held_ok) {
+        for (i = 0; i < n; i++)
+            h->cams_held[i] = (uint8_t)ps1_r8(c, ADDR_CAMERA_INFO + i);
+        h->cams_held_ok = 1;
+        return;
+    }
+    m0 = (uint16_t)(h->cams_held[0x70] | (h->cams_held[0x71] << 8));
+    m1 = (uint16_t)(h->cams_held[0x110 + 0x70] | (h->cams_held[0x110 + 0x71] << 8));
+    if (m0 != (uint16_t)ps1_r16(c, ADDR_CAMERA_INFO + 0x70u) ||
+        m1 != (uint16_t)ps1_r16(c, ADDR_CAMERA_INFO + 0x110u + 0x70u)) {
+        for (i = 0; i < n; i++)
+            h->cams_held[i] = (uint8_t)ps1_r8(c, ADDR_CAMERA_INFO + i);
+        return;
+    }
+    for (i = 0; i < n; i++)
+        ps1_w8(c, ADDR_CAMERA_INFO + i, h->cams_held[i]);
+}
+
+/* Lo que se ve en pausa (solo para dibujar; los volcados ya estan escritos). El original
+ * muestra la imagen que copio al pausar y encima el menu, que solo redibuja cuando cambia:
+ * aqui son las vistas y el HUD del ultimo frame jugado, y el ultimo menu. Como la
+ * referencia (race.rs), un frame cuyo 2D no tiene mas que rectangulos no cambia el menu. */
+static void pausa_presenta(GameHost *h)
+{
+    Overlay *o = &h->overlay;
+    uint32_t i, k;
+    int menu_nuevo = 0;
+
+    if (!h->paused) {
+        if (h->mode == HOST_RACE && h->views_n > 0u) {
+            /* el ultimo frame jugado: sus vistas y su HUD */
+            memcpy(h->views_kept, h->view, h->views_n * sizeof h->view[0]);
+            h->views_kept_n = h->views_n;
+            k = o->n < HUD_KEPT_MAX ? o->n : HUD_KEPT_MAX;
+            h->hud_kept_lost += o->n - k;
+            memcpy(h->hud_kept, o->quad, k * sizeof o->quad[0]);
+            h->hud_kept_n = k;
+        } else if (h->mode == HOST_RACE && h->views_n == 0u && o->n == 0u &&
+                   h->views_kept_n > 0u) {
+            /* un frame que no pinta nada (los primeros al cerrar el menu de pausa): se ve el
+             * ultimo dibujado, como `held` en la referencia; si no, saldria en negro */
+            memcpy(h->view, h->views_kept, h->views_kept_n * sizeof h->view[0]);
+            h->views_n = h->views_kept_n;
+            memcpy(o->quad, h->hud_kept, h->hud_kept_n * sizeof o->quad[0]);
+            o->n = h->hud_kept_n;
+        }
+        h->menu_kept_n = 0;
+        return;
+    }
+    for (i = 0; i < h->hud_cmds_n; i++)
+        if (h->hud_cmd[i].kind != HUD_RECT)
+            menu_nuevo = 1;
+    if (menu_nuevo) {
+        k = o->n < MENU_KEPT_MAX ? o->n : MENU_KEPT_MAX;
+        h->hud_kept_lost += o->n - k;
+        memcpy(h->menu_kept, o->quad, k * sizeof o->quad[0]);
+        h->menu_kept_n = k;
+    }
+    /* la lista se dibuja del final al principio: primero el HUD conservado, encima el menu */
+    memcpy(o->quad, h->menu_kept, h->menu_kept_n * sizeof o->quad[0]);
+    k = h->hud_kept_n;
+    if (h->menu_kept_n + k > OVERLAY_MAX)
+        k = OVERLAY_MAX - h->menu_kept_n;
+    memcpy(&o->quad[h->menu_kept_n], h->hud_kept, k * sizeof o->quad[0]);
+    o->n = h->menu_kept_n + k;
+    /* y el mundo tal como se quedo */
+    if (h->views_n == 0u && h->views_kept_n > 0u) {
+        memcpy(h->view, h->views_kept, h->views_kept_n * sizeof h->view[0]);
+        h->views_n = h->views_kept_n;
+    }
+}
+
 /* Frontera de frame del juego: se cuenta, se aplica la entrada y se vuelca el estado.
  * La referencia hace estas tres cosas en su frame_top, y por eso aqui tambien. */
 void host_frame_top(GameHost *h, Cpu *c)
@@ -149,8 +237,19 @@ void host_frame_top(GameHost *h, Cpu *c)
     /* El HUD de carrera, en el mismo punto que la referencia (al empezar frame_top): de
      * las tablas grabadas en el frame se tira la del mundo y la lista se da la vuelta. */
     h->otags_frame = 0;
-    if (h->mode == HOST_RACE && ps1_r32(c, SIM_PAUSED) == 0u)
+    h->paused = h->mode == HOST_RACE && ps1_r32(c, SIM_PAUSED) != 0u;
+    if (h->mode == HOST_RACE && !h->paused)
         overlay_race_compose(h);
+    hold_cameras(h, c);
+    /* el flare del sol: en pausa, si el juego no lo pinta, el del ultimo frame (como la
+     * referencia, que lo vuelca asi) */
+    if (h->paused && h->sky_quads_n == 0u) {
+        memcpy(h->sky_quad, h->sky_kept, h->sky_kept_n * sizeof h->sky_quad[0]);
+        h->sky_quads_n = h->sky_kept_n;
+    } else {
+        memcpy(h->sky_kept, h->sky_quad, h->sky_quads_n * sizeof h->sky_quad[0]);
+        h->sky_kept_n = h->sky_quads_n;
+    }
     /* en el mismo punto que la referencia (frame.rs, antes de su volcado): cargar una
      * partida vuelve a fijar las banderas, asi que se ponen en cada frame */
     if (h->mode == HOST_FRONTEND)
@@ -195,10 +294,12 @@ void host_frame_top(GameHost *h, Cpu *c)
     overlay_dump_frame(h);
     view_dump_frame(h);
 #endif
+    pausa_presenta(h);
     host_build_textures(h);
     if (h->on_draw != NULL)
         h->on_draw(h);
     overlay_reset(&h->overlay);
+    h->hud_cmds_n = 0;
     h->sroom_n = 0;
     h->sroom_floor_n = 0;
     /* Las vistas de carrera tambien son de UN frame: el renderer ya las ha consumido

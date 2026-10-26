@@ -262,7 +262,7 @@ int view_dump_open(GameHost *h, const char *path)
 void view_dump_frame(GameHost *h)
 {
     FILE *f = h->view_dump;
-    uint32_t i, k;
+    uint32_t i, k, no;
 
     if (f == NULL)
         return;
@@ -286,9 +286,11 @@ void view_dump_frame(GameHost *h)
         }
     }
     /* Los objetos del escenario van detras de las vistas: el port los graba una vez por
-     * frame, no por vista, que en un jugador es lo mismo. */
-    putv32(f, h->objects_n);
-    for (i = 0; i < h->objects_n; i++) {
+     * frame, no por vista, que en un jugador es lo mismo. Sin vistas (en pausa) no hay:
+     * la referencia los toma de la primera vista. */
+    no = h->views_n > 0u ? h->objects_n : 0u;
+    putv32(f, no);
+    for (i = 0; i < no; i++) {
         const ObjectDraw *o = &h->objects[i];
 
         putv16(f, o->model);

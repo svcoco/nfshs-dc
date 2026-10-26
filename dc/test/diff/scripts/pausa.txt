@@ -1,0 +1,31 @@
+# Una carrera con PAUSA (M2c): into_race.txt, y en el frame 700 START abre el menu de
+# pausa; en el 1000, START lo cierra y CROSS vuelve a acelerar.
+#
+# En pausa la referencia atiende Font_TextXY y los cuatro ayudantes del HUD (el original no
+# corre), congela las camaras (hold_cameras, que escribe en la RAM) y conserva el flare del
+# sol. El juego pinta el menu solo cuando cambia: 28 comandos en los 300 frames de pausa.
+# Tras cerrarlo hay un frame (el 1003) que no pinta nada.
+0   -
+20  UP
+26  -
+36  UP
+42  -
+60  CROSS
+66  -
+110 CROSS
+116 -
+170 CROSS
+176 -
+230 CROSS
+236 -
+290 CROSS
+296 -
+350 CROSS
+356 -
+420 CROSS
+
+700 START
+706 -
+1000 START
+1006 CROSS
+#end 1200

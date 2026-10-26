@@ -149,9 +149,12 @@ pendiente es el **M7**. El pulido final va en **M8**.
 **Objetivos descartables de M9 (decisión de Jorge, 2026-10-26).** M9 admite objetivos que se
 **desechan** si la arquitectura o la plataforma no lo permiten, o si el rendimiento se resiente
 considerablemente; se estudian, se miden y decide Jorge. Hoy son:
-- **Salida en 720p.** Punto de partida medido (`docs/resolucion.md`): la salida de vídeo del
-  Dreamcast va con la temporización de 480 líneas (858 relojes × 525 líneas) y 640 píxeles
-  activos; ningún modo de KOS pasa de ahí.
+- **Salida en 720p.** Punto de partida medido (`docs/resolucion.md`): los modos de KOS van
+  con la temporización de 480 líneas (858 relojes × 525 líneas) y 640 píxeles activos. Pero
+  **hay homebrew que llega a 720p** (referencias de Jorge, sin investigar todavía):
+  [Dreamcast: Video Output Notes](https://consolemods.org/wiki/Dreamcast:Video_Output_Notes#yellow)
+  y los modos de vídeo de [DreamHAL](https://github.com/sega-dreamcast/dreamhal#supported-dreamcast-video-modes).
+- **Widescreen** (16:9).
 - **Resolución interna 3×.** Punto de partida medido (`docs/resolucion.md`): el port ya
   rasteriza el 3D a 640×480 (el «2×» de un emulador de PS1); por encima, el PVR solo
   supermuestrea 2× en horizontal (FSAA), no en vertical, y sus texturas llegan a 1 024
@@ -422,7 +425,8 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
   - **FMV (M3):** STR/MDEC.
 - **Abiertas:**
   - **M9:** factor de escala de las texturas (2× como base), método y formato.
-  - **Objetivos descartables de M9:** salida en 720p y resolución interna 3× (ver §4).
+  - **Objetivos descartables de M9:** salida en 720p, resolución interna 3× y widescreen
+    (ver §4).
     *(Todo tiene hito desde el 2026-10-26: FMV es el M3, los dos jugadores van con los
     controles en M5, el pulido final en M8 y los packs de texturas en M9.)*
   - *(cerrada 2026-10-23: el arranque con BIOS real funciona desde un **CDI** con

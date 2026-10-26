@@ -29,7 +29,7 @@ Por eso el plan las separa en el tiempo:
 - **M8** incluye además el pulido final.
 - **M9** mejora el código y los assets actuales (texturas escaladas), admite packs de
   texturas externos y reúne **objetivos descartables** (salida en 720p, resolución interna
-  3×): se estudian y se desechan si la plataforma no los permite o cuestan demasiado.
+  3×, widescreen): se estudian y se desechan si la plataforma no los permite o cuestan demasiado.
 
 El coste de este orden es que se tarda más en ver algo en pantalla. El beneficio quedó
 demostrado en M1a, y está documentado abajo.

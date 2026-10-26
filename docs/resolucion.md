@@ -80,5 +80,8 @@ tiempos del PVR.
 
 La decisión es de Jorge.
 
-**Después (2026-10-26):** Jorge añade a M9, como objetivos descartables, la **salida en 720p**
-y una **resolución interna 3×**. Este documento es su punto de partida.
+**Después (2026-10-26):** Jorge añade a M9, como objetivos descartables, la **salida en 720p**,
+una **resolución interna 3×** y el **widescreen**. Este documento es su punto de partida. Lo
+de arriba se limita a los modos de KOS: para 720p hay homebrew que lo consigue (referencias de
+Jorge, sin investigar: [consolemods](https://consolemods.org/wiki/Dreamcast:Video_Output_Notes#yellow)
+y [DreamHAL](https://github.com/sega-dreamcast/dreamhal#supported-dreamcast-video-modes)).

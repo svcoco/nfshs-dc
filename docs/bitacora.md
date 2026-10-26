@@ -880,8 +880,9 @@ incompleta— los encontró el oráculo, no la lectura del código.
   optimización, M9 enhancements con los packs de texturas. En los `docs/hitos/` anteriores,
   «M3» como optimización es el M8 y como audio el M4, y «M4» como escalado de texturas es el
   M9. El pulido final va en M8. **M9 admite objetivos descartables** (se desechan si la
-  plataforma no lo permite o el rendimiento se resiente mucho): salida en 720p y resolución
-  interna 3×, con las restricciones de partida ya medidas en `docs/resolucion.md`.
+  plataforma no lo permite o el rendimiento se resiente mucho): salida en 720p, resolución
+  interna 3× y widescreen. Puntos de partida en `docs/resolucion.md` y, para 720p, dos
+  referencias de homebrew que aporta Jorge (en §4 de CLAUDE.md), sin investigar.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.
 - **Autor de nfshs-rs:** contacto sobre licencia y posible colaboración.
 - **Resolución: 640×480 y FSAA horizontal** (investigado el 2026-10-25, `docs/resolucion.md`).

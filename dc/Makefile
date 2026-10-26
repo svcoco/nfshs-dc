@@ -36,7 +36,7 @@ export TMPDIR
 export TMP  := $(TMPDIR)
 export TEMP := $(TMPDIR)
 
-.PHONY: help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size dc-bench-mdec bake bake-coches bake-movies disc diff clean
+.PHONY: help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size dc-bench-mdec bake bake-coches disc diff clean
 
 help:
 	@echo "Analisis y generacion (Python, funcionan ya):"
@@ -216,22 +216,12 @@ bake-coches:
 	@for c in $(CARS_TRAFFIC); do $(NFSHS) bake-car $$c $(BAKED)/$$c.CAR --rival 2>&1 | grep -v INFO || exit 1; done
 	@for c in $(CARS_POLICE); do $(NFSHS) bake-car $$c $(BAKED)/$$c.CAR 2>&1 | grep -v INFO || exit 1; done
 
-# Las peliculas (M3): MOVIES/*.XA con los sectores enteros (video + audio XA), leidas de la
-# imagen del disco, porque una copia ISO normal pierde el audio (docs/hitos/M3.md). Van a
-# baked/FMV y no a baked/MOVIES: mkdisc.sh excluye todo lo que se llame MOVIES.
-# (el nombre lleva espacios: make no los lleva bien en listas, asi que va entre comillas)
-IMAGE ?= $(ROOT)/gamedata/Need for Speed - High Stakes (USA).bin
-
-bake-movies:
-	@test -f "$(IMAGE)" || { echo "no encuentro la imagen: IMAGE=<ruta del .bin>"; exit 1; }
-	$(PYTHON) -I tools/bake/movies.py "$(IMAGE)" $(BAKED)/FMV
-
 # Cuanto cuesta el MDEC en SH-4 (M3). Mete 30 frames reales en el ELF (en build/, no se
-# versiona) y saca los tiempos a pantalla; se arranca con Flycast.
+# versiona) y saca los tiempos a pantalla; se arranca con Flycast. Las peliculas tienen que
+# estar con sus sectores enteros (tools/extract_iso.py, docs/hitos/M3.md).
 dc-bench-mdec: dc-check
-	@test -d $(BAKED)/FMV || { echo "antes: make bake-movies"; exit 1; }
 	@mkdir -p $(DCBUILD)/bench $(BUILD)/m3 $(TMPDIR)
-	$(PYTHON) -I test/bench/mkframes.py $(BAKED)/FMV $(ROOT)/gamedata $(BUILD)/m3/mdec_frames.h
+	$(PYTHON) -I test/bench/mkframes.py $(ROOT)/gamedata/MOVIES $(ROOT)/gamedata $(BUILD)/m3/mdec_frames.h
 	$(KOS_CC_W) $(DCFLAGS) -O2 -Isrc/host -I$(BUILD)/m3 test/bench/mdec_bench.c src/host/mdec.c -o $(DCBUILD)/bench/mdec.elf -lm
 	@echo "listo: dc/$(DCBUILD)/bench/mdec.elf -- arrancalo con Flycast"
 

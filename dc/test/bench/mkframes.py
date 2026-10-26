@@ -2,7 +2,7 @@
 
 Son datos del disco, asi que la cabecera va a build/ y no se versiona.
 
-Uso: python -I dc/test/bench/mkframes.py <MOVIES_dir> <gamedata_dir> <salida.h>
+Uso: python -I dc/test/bench/mkframes.py <gamedata/MOVIES> <gamedata> <salida.h>
 """
 import os
 import struct

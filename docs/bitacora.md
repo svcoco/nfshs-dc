@@ -22,7 +22,8 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
 | **M2c** Coches, objetos y efectos | **Criterio cumplido en emulador** (2026-10-26): una carrera completa idéntica a la referencia en 40 000 frames; showroom, pausa, policía y noche; 30–43 fps |
 | **M2** (a, b y c) | **Cerrado en emulador (2026-10-26)** |
-| M3 FMV · M4 Audio · M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables | Sin empezar; **M3 es el siguiente** (numeración del 2026-10-26) |
+| **M3** FMV | **En curso**: las películas a pantalla completa se ven y suenan en Flycast a sus 15 fps; falta el video wall (`docs/hitos/M3.md`) |
+| M4 Audio · M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables | Sin empezar (numeración del 2026-10-26) |
 
 **Lo que hay hoy (M2 cerrado en emulador):** un CDI que arranca en Dreamcast con la BIOS
 real, lee sus datos del disco y dibuja con el PVR tanto el **front end** (~60 fps, completo

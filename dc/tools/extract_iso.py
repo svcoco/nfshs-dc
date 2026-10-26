@@ -11,6 +11,11 @@ bake volvera a leer el disco, asi que este codigo se reutiliza.
     uso: python -I dc/tools/extract_iso.py [IMAGEN] [DESTINO] [--list] [--force]
 
 Por omision la imagen es el unico .bin de gamedata/ y el destino, gamedata/.
+
+Las peliculas (MOVIES/*.XA) son la excepcion: llevan video en Mode 2 Form 1 y audio XA en
+Form 2 (2 324 bytes utiles), asi que se copian con los SECTORES ENTEROS (subcabecera de 8
+bytes + 2 328 = 2 336 por sector), como `nfshs extract`. Con solo los 2 048 de datos el
+video queda entero pero el audio pierde 2 de cada 18 grupos (medido, docs/hitos/M3.md).
 """
 import os
 import struct
@@ -36,6 +41,11 @@ class Image:
             raise SystemExit(f'sector {lba} fuera de la imagen ({self.sectors})')
         self.f.seek(lba * RAW + DATA_OFF)
         return self.f.read(DATA)
+
+    def raw(self, lba):
+        """El sector desde la subcabecera: 2 336 bytes (los .XA)."""
+        self.f.seek(lba * RAW + 16)
+        return self.f.read(RAW - 16)
 
     def read(self, lba, length):
         out = bytearray()
@@ -124,12 +134,19 @@ def main(argv):
     for path, lba, size in sorted(files):
         out = os.path.join(dest, path.replace('/', os.sep))
         os.makedirs(os.path.dirname(out), exist_ok=True)
+        xa = path.upper().endswith('.XA')
+        n = (size + DATA - 1) // DATA
+        want = n * (RAW - 16) if xa else size
         if os.path.exists(out) and '--force' not in opts:
-            if os.path.getsize(out) == size:
+            if os.path.getsize(out) == want:
                 skipped += 1
                 continue
         with open(out, 'wb') as fh:
-            fh.write(img.read(lba, size))
+            if xa:
+                for i in range(n):
+                    fh.write(img.raw(lba + i))
+            else:
+                fh.write(img.read(lba, size))
         written += 1
     print(f'escritos: {written}   ya estaban: {skipped}   destino: {dest}')
     print('\n(--list para ver el contenido sin escribir, --force para reescribir)')

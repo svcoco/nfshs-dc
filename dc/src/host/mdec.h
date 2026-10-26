@@ -38,7 +38,7 @@ void mdec_frame_yuv420(const uint8_t *bs, uint32_t len, int w, int h, uint8_t *m
 
 /* ---------------------------------------------------------------- STR/XA
 
- * Un sector de pelicula tal como lo deja dc/tools/bake/movies.py: subcabecera de 8
+ * Un sector de pelicula tal como lo deja dc/tools/extract_iso.py: subcabecera de 8
  * bytes + 2 328. Los de video llevan 0x0160 y trozos de 2 016 bytes del frame; los de
  * audio, 18 grupos de 128 bytes de XA ADPCM. */
 #define STR_SECTOR      2336

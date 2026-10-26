@@ -4,10 +4,9 @@
 # Hace falta el entorno de KallistiOS (source /opt/toolchains/dc/kos/environ.sh) y
 # xorriso (pacman -S xorriso). Lo demas (makeip, scramble, sh-elf-objcopy) lo trae KOS.
 #
-# El disco lleva el binario y los datos del juego. NO lleva la imagen original del CD
-# (es de donde se extrajo todo) ni las copias de MOVIES/ del directorio de datos, que no
-# tienen el audio: las peliculas van con sus sectores enteros en BAKED/FMV (M3,
-# make -C dc bake-movies).
+# El disco lleva el binario y los datos del juego, peliculas incluidas (MOVIES/, con los
+# sectores enteros: dc/tools/extract_iso.py, M3). NO lleva la imagen original del CD, que
+# es de donde se extrajo todo.
 #
 #   mkdisc.sh --elf dc/build/dc/nfshs.elf --data gamedata --out dc/build/dc/disc
 #   mkdisc.sh ... --format gdi    la otra disposicion (ver abajo)
@@ -88,7 +87,7 @@ echo "+ ISO (extents desde el LBA $LBA)"
 # OJO: en xorriso los -m van ANTES de las rutas; detras no filtran nada y el disco se
 # lleva la imagen original del CD entera (lo aprendimos generando 1,3 GB en vez de 552).
 set -- -as mkisofs -C "0,$LBA" -G "$TMP/IP.BIN" -R -l \
-       -m "Need for Speed*" -m "MOVIES" -o "$TMP/datos.iso" \
+       -m "Need for Speed*" -o "$TMP/datos.iso" \
        -graft-points "/1ST_READ.BIN=$TMP/1ST_READ.BIN"
 [ -n "$SCRIPT" ] && set -- "$@" "/SCRIPT.TXT=$SCRIPT"
 # --video vga|ntsc|pal: fuerza el modo en vez de dejarlo a la deteccion del cable.

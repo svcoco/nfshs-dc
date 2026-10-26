@@ -1,9 +1,9 @@
 /* Las peliculas a pantalla completa en Dreamcast (M3): Movie_Play.
  *
- * El archivo es MOVIES/<nombre> con los sectores enteros (dc/tools/bake/movies.py), en el
- * disco bajo /cd/BAKED/FMV (no MOVIES: mkdisc.sh excluye todo lo que se llame asi, porque
- * las copias de MOVIES/ de gamedata no tienen el audio). Se lee por delante del video lo
- * justo para que el audio no se quede sin muestras; los frames se decodifican con el MDEC en C (host/mdec.c) a
+ * El archivo es MOVIES/<nombre> de los datos del juego, con los sectores enteros
+ * (dc/tools/extract_iso.py): se lee tal cual, sin hornear, y eso deja abierto leerlo algun
+ * dia del disco original (M9). Se lee por delante del video lo justo para que el audio no
+ * se quede sin muestras; los frames se decodifican con el MDEC en C (host/mdec.c) a
  * macrobloques YUV420 que el CONVERSOR YUV DEL PVR pasa a una textura YUV422, y esa
  * textura se dibuja a pantalla completa. El audio XA va al AICA por snd_stream.
  *
@@ -55,6 +55,9 @@ typedef struct {
 } Peli;
 
 static Peli *s_p;                       /* para el callback del audio */
+static uint32_t s_vacio;                /* veces que el AICA pidio y no habia muestras */
+/* tiempo por fase (us), para el resumen: lectura del disco, MDEC, conversor YUV, dibujo */
+static uint64_t s_t_lee, s_t_mdec, s_t_yuv, s_t_dibuja;
 static int   s_snd_listo;
 
 /* ---- disco ---- */
@@ -64,7 +67,10 @@ static const uint8_t *sector(Peli *p)
     if (p->lee_at == p->lee_n) {
         if (p->eof)
             return NULL;
+        uint64_t t = timer_us_gettime64();
+
         p->lee_n = (uint32_t)fread(p->lee, STR_SECTOR, LEE, p->f);
+        s_t_lee += timer_us_gettime64() - t;
         p->lee_at = 0;
         if (p->lee_n < LEE)
             p->eof = 1;
@@ -126,6 +132,7 @@ static void *audio_cb(snd_stream_hnd_t hnd, int bytes, int *got)
 
     (void)hnd;
     if (p == NULL || p->a_n == 0u) {
+        s_vacio++;
         *got = 0;
         return NULL;
     }
@@ -149,15 +156,15 @@ static void *audio_cb(snd_stream_hnd_t hnd, int bytes, int *got)
  * YUV422 sin twiddle de TEX de ancho. */
 static void yuv_sube(pvr_ptr_t tex, const uint8_t *mbs, uint32_t mbw, uint32_t mbh)
 {
-    uint32_t n = mbw * mbh, espera = 0;
+    uint32_t n = mbw * mbh;
 
     PVR_SET(PVR_YUV_ADDR, ((uint32_t)tex) & 0xFFFFFFu);
     PVR_SET(PVR_YUV_CFG, (0u << 24) | ((mbh - 1u) << 8) | (mbw - 1u));
     (void)PVR_GET(PVR_YUV_CFG);
     sq_cpy((void *)PVR_TA_YUV_CONV, mbs, n * MDEC_YUV_MB);
-    /* hasta que el PVR los haya convertido todos (ya lo estara: es mas rapido que el SQ) */
-    while (PVR_GET(PVR_YUV_STAT) < n && ++espera < 1000000u)
-        ;
+    /* Sin esperar a PVR_YUV_STAT, como el ejemplo de KOS: el conversor va mas rapido que el
+     * SQ que lo alimenta. Medido: Flycast deja ese registro SIEMPRE en 0, y esperarlo con
+     * un tope gastaba 25-30 ms por frame. En consola se comprueba en M7. */
 }
 
 static void dibuja(pvr_ptr_t tex, uint32_t w, uint32_t h)
@@ -222,27 +229,42 @@ uint16_t movie_play(GameHost *h, const char *name)
     pvr_ptr_t tex[2] = { NULL, NULL };
     snd_stream_hnd_t snd = SND_STREAM_INVALID;
     uint16_t sujeto, corta = 0;
-    uint32_t sectores, frames, k;
+    uint32_t sectores, frames, k = 0;
     long tam;
     float fps;
-    uint64_t t0;
+    uint64_t t0 = 0;
+    uint32_t tarde = 0;                 /* frames que salieron mas de un frame tarde */
 
     /* con un guion de entrada manda el guion, y los guiones cuentan con que no hay video */
     if (h->pad_steps_n != 0u)
         return 0;
-    snprintf(ruta, sizeof ruta, "/cd/BAKED/FMV/%s", name);
+    snprintf(ruta, sizeof ruta, "%s/MOVIES/%s", h->gamedata, name);
     p = calloc(1, sizeof *p);
     if (p == NULL)
         return 0;
     p->f = fopen(ruta, "rb");
     if (p->f == NULL) {
-        printf("pelicula %s: no esta en el disco (make -C dc bake-movies)\n", name);
+        printf("pelicula %s: no esta en el disco\n", name);
         free(p);
         return 0;
     }
     fseek(p->f, 0, SEEK_END);
     tam = ftell(p->f);
     fseek(p->f, 0, SEEK_SET);
+    /* una copia de solo 2 048 bytes por sector no tiene subcabecera (que va repetida: los
+     * bytes 0-3 iguales a los 4-7) ni el audio entero: se avisa y no se reproduce */
+    {
+        uint8_t sub[8];
+
+        if (tam % STR_SECTOR != 0 || fread(sub, 1, 8, p->f) != 8u || memcmp(sub, sub + 4, 4) != 0) {
+            printf("pelicula %s: copia sin sectores enteros; vuelve a extraer con "
+                   "dc/tools/extract_iso.py\n", name);
+            fclose(p->f);
+            free(p);
+            return 0;
+        }
+        fseek(p->f, 0, SEEK_SET);
+    }
     sectores = (uint32_t)(tam / STR_SECTOR);
     frames = cuenta_frames(p->f, sectores);
     fps = frames && sectores ? 150.0f * (float)frames / (float)sectores : 15.0f;
@@ -279,6 +301,8 @@ uint16_t movie_play(GameHost *h, const char *name)
         snd_stream_start(snd, p->dmx.rate, 1);
 
     sujeto = dc_read_pad();
+    s_vacio = 0;
+    s_t_lee = s_t_mdec = s_t_yuv = s_t_dibuja = 0;
     t0 = timer_us_gettime64();
     for (k = 0;; k++) {
         uint32_t w = p->dmx.width, hh = p->dmx.height;
@@ -290,7 +314,12 @@ uint16_t movie_play(GameHost *h, const char *name)
         if (p->cola_n == 0u)
             break;
         c = &p->cola[p->cola_ini];
-        mdec_frame_yuv420(c->data, c->len, (int)w, (int)hh, mbs);
+        {
+            uint64_t t = timer_us_gettime64();
+
+            mdec_frame_yuv420(c->data, c->len, (int)w, (int)hh, mbs);
+            s_t_mdec += timer_us_gettime64() - t;
+        }
         p->cola_ini = (p->cola_ini + 1u) % COLA;
         p->cola_n--;
         /* hasta que le toque: el audio, la lectura y el mando no esperan */
@@ -305,12 +334,22 @@ uint16_t movie_play(GameHost *h, const char *name)
             if (snd != SND_STREAM_INVALID)
                 snd_stream_poll(snd);
             llena(p);
-            if (timer_us_gettime64() >= toca)
+            if (timer_us_gettime64() >= toca) {
+                if (timer_us_gettime64() - toca > (uint64_t)(1000000.0f / fps))
+                    tarde++;
                 break;
+            }
             thd_pass();
         }
-        yuv_sube(tex[k & 1u], mbs, mbw, mbh);
-        dibuja(tex[k & 1u], w, hh);
+        {
+            uint64_t t = timer_us_gettime64(), t2;
+
+            yuv_sube(tex[k & 1u], mbs, mbw, mbh);
+            t2 = timer_us_gettime64();
+            s_t_yuv += t2 - t;
+            dibuja(tex[k & 1u], w, hh);
+            s_t_dibuja += timer_us_gettime64() - t2;
+        }
     }
     /* el ultimo frame se queda en pantalla lo que dura, y el audio que quede suena */
     {
@@ -336,7 +375,18 @@ fin:
     free(p->lee);
     fclose(p->f);
     free(p);
-    if (corta)
-        printf("pelicula %s: cortada en el frame %u (botones 0x%04x)\n", name, (unsigned)k, corta);
+    if (t0 != 0u) {
+        uint64_t us = timer_us_gettime64() - t0;
+
+        printf("pelicula %s: %u frames en %u.%02u s (%u.%02u fps), %u tarde, audio vacio %u%s\n",
+               name, (unsigned)k, (unsigned)(us / 1000000u), (unsigned)(us / 10000u % 100u),
+               (unsigned)(us ? (uint64_t)k * 1000000u / us : 0u),
+               (unsigned)(us ? (uint64_t)k * 100000000u / us % 100u : 0u),
+               (unsigned)tarde, (unsigned)s_vacio, corta ? " (cortada)" : "");
+        if (k > 0u)
+            printf("  por frame (us): disco %u  mdec %u  yuv %u  dibujo %u\n",
+                   (unsigned)(s_t_lee / k), (unsigned)(s_t_mdec / k),
+                   (unsigned)(s_t_yuv / k), (unsigned)(s_t_dibuja / k));
+    }
     return corta;
 }

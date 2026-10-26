@@ -445,6 +445,11 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
   - **Parche local a KallistiOS:** `fs_iso9660.c` solo lee el área de baja densidad y el
     port necesita la de alta (552 MB de datos no caben en los 92 MB de la baja). El
     parche está en `dc/tools/kos-patches/`; habría que proponerlo aguas arriba.
+  - **Driver ARM del AICA de KOS (M3, 2026-10-26):** con el de nuestro KOS (`8e704086`) no
+    suena nada en Flycast 2.6: el timer del ARM no arranca desde el commit `8690c6dd`
+    (2026-06-10). El port carga el driver de justo antes (`dc/src/platform/dc/aica.c`, sacado
+    del historial de KOS por el Makefile). Falta saber si es fallo de Flycast o de KOS y si
+    en consola hace falta (M7); habría que avisar aguas arriba.
   - *(cerrada 2026-10-18: el objetivo de fps es 30 sostenidos, ver §3. No se mide el
     fps del original.)*
   - **Autor de nfshs-rs:** contacto sobre la licencia y una posible colaboración.

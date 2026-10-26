@@ -156,7 +156,11 @@ dc-size: dc-check $(GEN)/parts.mk
 DC_HOST_SRCS := $(filter-out src/host/dump.c,$(HOST_SRCS))
 # test_main.c es el arranque del ELF de PRUEBAS (dc-test), no el del juego.
 DC_PLAT_SRCS := $(filter-out src/platform/dc/test_main.c,$(wildcard src/platform/dc/*.c))
-DC_SRCS      := $(PS1RT_SRCS) $(RENDER_SRCS) $(DC_HOST_SRCS) $(HLE_TABLE) $(DC_PLAT_SRCS)
+# El driver ARM del AICA de antes del 2026-06-10, sacado del historial de KOS: el actual no
+# arranca su timer en Flycast y no suena nada (src/platform/dc/aica.c, docs/hitos/M3.md).
+AICA_DRV_COMMIT := 8690c6dd^
+AICA_DRV_C      := $(DCBUILD)/aica/aica_drv.c
+DC_SRCS      := $(PS1RT_SRCS) $(RENDER_SRCS) $(DC_HOST_SRCS) $(HLE_TABLE) $(DC_PLAT_SRCS) $(AICA_DRV_C)
 DC_OBJS      := $(patsubst %.c,$(DCBUILD)/o/%.o,$(DC_SRCS))
 
 dc: $(DCBUILD)/nfshs.elf
@@ -175,6 +179,11 @@ $(DCBUILD)/o/%.o: %.c
 # El decodificador de video va a -O2 aunque el resto vaya a -Os: 28 ms por frame de la
 # intro frente a 44 (docs/hitos/M3.md, seccion 4).
 $(DCBUILD)/o/src/host/mdec.o: DCFLAGS += -O2
+
+$(AICA_DRV_C):
+	@mkdir -p $(dir $@)
+	git -C $(KOS_BASE) show $(AICA_DRV_COMMIT):kernel/arch/dreamcast/sound/arm/stream.drv.prebuilt > $(DCBUILD)/aica/stream.drv
+	$(KOS_BASE)/utils/bin2c/bin2c $(DCBUILD)/aica/stream.drv $@ aica_drv_viejo
 
 # El C generado no se recompila aqui: lo hace dc-gen, que son 71 unidades y tarda.
 dc-gen: dc-check $(GEN)/parts.mk

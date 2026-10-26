@@ -28,6 +28,7 @@
 #include "host.h"
 #include "mdec.h"
 #include "movie.h"
+#include "aica.h"
 
 #define LEE        16u                  /* sectores por lectura del disco */
 #define COLA       16u                  /* frames comprimidos por delante (~1 s) */
@@ -55,10 +56,10 @@ typedef struct {
 } Peli;
 
 static Peli *s_p;                       /* para el callback del audio */
-static uint32_t s_vacio;                /* veces que el AICA pidio y no habia muestras */
+static uint32_t s_vacio;                /* veces que el AICA pidio y no habia muestras (antes del final) */
+static uint32_t s_llamadas, s_bytes;    /* llamadas del AICA pidiendo datos y bytes dados */
 /* tiempo por fase (us), para el resumen: lectura del disco, MDEC, conversor YUV, dibujo */
 static uint64_t s_t_lee, s_t_mdec, s_t_yuv, s_t_dibuja;
-static int   s_snd_listo;
 
 /* ---- disco ---- */
 
@@ -131,8 +132,11 @@ static void *audio_cb(snd_stream_hnd_t hnd, int bytes, int *got)
     uint32_t pares = (uint32_t)bytes / 4u, hasta_fin;
 
     (void)hnd;
+    s_llamadas++;
     if (p == NULL || p->a_n == 0u) {
-        s_vacio++;
+        /* al final del archivo es normal: el audio acaba medio segundo antes que el video */
+        if (p != NULL && !p->eof)
+            s_vacio++;
         *got = 0;
         return NULL;
     }
@@ -142,6 +146,7 @@ static void *audio_cb(snd_stream_hnd_t hnd, int bytes, int *got)
     if (pares > hasta_fin)
         pares = hasta_fin;
     *got = (int)(pares * 4u);
+    s_bytes += pares * 4u;
     {
         void *r = &p->anillo[2u * p->a_lee];
         p->a_lee = (p->a_lee + pares) % AUDIO_MAX;
@@ -291,14 +296,14 @@ uint16_t movie_play(GameHost *h, const char *name)
            (unsigned)frames, p->dmx.width, p->dmx.height, (double)fps,
            p->dmx.stereo ? "estereo" : "mono", (unsigned)p->dmx.rate);
 
-    if (!s_snd_listo) {
-        snd_stream_init();
-        s_snd_listo = 1;
-    }
     s_p = p;
-    snd = snd_stream_alloc(audio_cb, SND_STREAM_BUFFER_MAX / 4);
-    if (snd != SND_STREAM_INVALID)
-        snd_stream_start(snd, p->dmx.rate, 1);
+    s_bytes = 0;
+    s_llamadas = 0;
+    if (aica_listo()) {
+        snd = snd_stream_alloc(audio_cb, SND_STREAM_BUFFER_MAX / 4);
+        if (snd != SND_STREAM_INVALID)
+            snd_stream_start(snd, p->dmx.rate, 1);
+    }
 
     sujeto = dc_read_pad();
     s_vacio = 0;
@@ -387,6 +392,9 @@ fin:
             printf("  por frame (us): disco %u  mdec %u  yuv %u  dibujo %u\n",
                    (unsigned)(s_t_lee / k), (unsigned)(s_t_mdec / k),
                    (unsigned)(s_t_yuv / k), (unsigned)(s_t_dibuja / k));
+        printf("  audio: %u llamadas del AICA, %u bytes (%u.%02u s)\n", (unsigned)s_llamadas,
+               (unsigned)s_bytes, (unsigned)(s_bytes / 4u / 37800u),
+               (unsigned)(s_bytes / 4u % 37800u * 100u / 37800u));
     }
     return corta;
 }

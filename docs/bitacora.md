@@ -875,6 +875,9 @@ incompleta— los encontró el oráculo, no la lectura del código.
 
 - **Probar en una consola real (M7).** El CDI es grabable y arranca con la BIOS real en
   emulador, pero nadie lo ha quemado. Hasta entonces los fps son de Flycast.
+- **El CDI no cabe en un CD-R de 80 minutos** desde que lleva las películas (M3): 725 MB
+  frente a ~703. Es la **primera tarea de M7** (decisión de Jorge, 2026-10-26); hasta
+  entonces no se dedica esfuerzo al tamaño. En Flycast no importa.
 - **El bit STP de PS1 no cabe en ARGB1555.** PS1 marca por texel los que se mezclan en
   las primitivas semitransparentes; ARGB1555 tiene **un solo bit** de alfa. Hoy se
   resuelve por modo de mezcla del cuadro entero, no por texel.

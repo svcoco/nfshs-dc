@@ -22,7 +22,8 @@ Por eso el plan las separa en el tiempo:
 - **M4 a M6** completan el middleware que falta: audio, controles (con los dos jugadores) y
   guardado con la VMU.
 - **M7** lleva el port a una **consola real** (CD-R, 480i y 480p): hasta ahí todo se ha
-  validado en emulador, y es la primera vez que hay cifras del hardware de verdad.
+  validado en emulador, y es la primera vez que hay cifras del hardware de verdad. Empieza
+  por que el CDI quepa en un CD-R de 80 minutos (con las películas de M3 se pasa).
 - **M8** es el único hito donde el rendimiento es el criterio. Va después del middleware y
   de la consola (decisiones de Jorge, 2026-10-26): se optimiza el port completo, midiendo
   en el hardware real y no en Flycast.

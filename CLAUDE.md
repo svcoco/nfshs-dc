@@ -137,7 +137,7 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 | M4 | Middleware de audio: SPU → AICA (ADPCM de PS1 convertido al hornear) | Música, motor y efectos en el front end y en carrera |
 | M5 | Middleware de IO: controles (mando de Dreamcast, analógicos, gatillos, vibración) y 2 jugadores | Front end y carrera jugables con el mando de Dreamcast, también a pantalla partida con dos mandos |
 | M6 | Middleware de IO: guardado y VMU (memory card de PS1 → VMU) | Guardar y cargar la partida en la VMU |
-| M7 | Prueba en consola real: el CDI quemado en CD-R, vídeo en 480i (tele) y 480p (VGA) | Arranca en una Dreamcast real; front end legible y carrera jugable en 480i y 480p; fps y costes del PVR medidos en consola |
+| M7 | Prueba en consola real: el CDI quemado en CD-R, vídeo en 480i (tele) y 480p (VGA). **Primera tarea: que el CDI quepa en un CD-R de 80 min** (725 MB con las películas de M3, el límite ronda 703; decisión de Jorge, 2026-10-26: no se optimiza antes) | Arranca en una Dreamcast real; front end legible y carrera jugable en 480i y 480p; fps y costes del PVR medidos en consola |
 | M8 | Revisión, optimización (codegen, SH-4 a mano en hooks, FTRV, LOD) y pulido final | **30 fps sostenidos** en carrera como mínimo **en consola**, sin tope por arriba (60 es el objetivo ideal); el port pulido de punta a punta |
 | M9 "Enhancements" | Mejoras del código y de los assets actuales (escalado de texturas horneado en el PC, mejoras de la referencia como opción) y packs de texturas externos. Más **objetivos descartables** (ver abajo) | Texturas de pista, coches y HUD escaladas dentro del presupuesto de VRAM, con respaldo a las originales; un pack de texturas distribuido aparte se carga por nombre |
 

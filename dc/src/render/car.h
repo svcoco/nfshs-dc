@@ -67,6 +67,7 @@ void car_free(CarModel *m);
 #define CAR_PASS_SUBTRACT 1   /* solo esas: la sombra de los pasos de rueda, que resta */
 #define CAR_PASS_ENV_A    2   /* el reflejo, mapa A (sobre los mapas de la pista) */
 #define CAR_PASS_ENV_B    3   /* el reflejo, mapa B: desplazado, en los poligonos 0x3F3 */
+#define CAR_PASS_ENV_SR   4   /* el mapa A del showroom (de la VRAM); ver car_draw */
 
 /* Dibuja un coche. `m` es su modelo y `d` lo que el juego decidio de el este frame.
  *
@@ -78,7 +79,16 @@ void car_free(CarModel *m);
  * v = v0 + desplazamiento + z, dentro de la ventana de textura de 128 x 64 del mapa. Las
  * UV salen en la pagina de 256 x 256 de los mapas (bake-refl). Se acercan 0,01 m (A) o
  * 0,02 m (B) a la camara, para quedar sobre la carroceria. Las normales son las que el
- * juego tiene en memoria si el numero de vertices cuadra con el GEO; si no, las del GEO. */
+ * juego tiene en memoria si el numero de vertices cuadra con el GEO; si no, las del GEO.
+ *
+ * El showroom (CAR_PASS_ENV_SR) usa el mapa A como la referencia (game/fe.rs): sus
+ * coordenadas no dan la vuelta sino que se recortan al mapa, u = u0 + (64 + x en 0..127) y
+ * v = v0 + (|z| hasta 64). Las UV salen igual, en la pagina de 256 x 256: el que llama las
+ * lleva a donde tenga la textura. Los vertices son EXACTAMENTE los de la carroceria (sin
+ * acercarlos a la camara), para probarlos con profundidad igual: donde dos paneles se
+ * solapan, el reflejo del de debajo tambien pasaria una prueba de "mas cerca" y se sumaria
+ * dos veces (puntos claros en las aristas). La PS1 no lo sufre porque el panel de encima
+ * se pinta despues y tapa al otro con su reflejo. */
 void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView *view,
               int pasada, float sw, float sh, TrackEmit emit, void *user, TrackStats *st);
 

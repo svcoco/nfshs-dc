@@ -133,6 +133,8 @@ static void pista_carga(const char *nombre)
 static int s_modo;
 static float s_zmul = 1.0f;   /* acerca lo dibujado a la camara; ver los efectos */
 static float s_zadd;
+/* lleva las UV a otra textura (el reflejo del showroom, ver showroom_reflejos) */
+static float s_umul = 1.0f, s_uadd, s_vmul = 1.0f, s_vadd;
 /* Fase del dibujo del mundo. Solo el cielo cambia de contexto sobre la marcha (sus
  * cuadros son unos planos y otros con textura); la pista y los coches lo fijan antes y
  * el sumidero no lo toca. */
@@ -183,8 +185,8 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
         pv.x = v[i].x;
         pv.y = v[i].y;
         pv.z = v[i].z * s_zmul + s_zadd;
-        pv.u = v[i].u;
-        pv.v = v[i].v;
+        pv.u = v[i].u * s_umul + s_uadd;
+        pv.v = v[i].v * s_vmul + s_vadd;
         pv.argb = v[i].argb;
         pvr_prim(&pv, sizeof(pv));
     }
@@ -1107,6 +1109,27 @@ static int showroom_hay(const GameHost *h)
     return 0;
 }
 
+/* La vista y el coche de un ShowroomCar: la camara y la proyeccion del GTE del juego, y el
+ * coche espejado si es el reflejo. */
+static void showroom_vista(const GameHost *h, const ShowroomCar *s, RaceView *rv, CarDraw *d)
+{
+    uint32_t j;
+
+    memset(rv, 0, sizeof *rv);
+    for (j = 0; j < 3u; j++)
+        rv->camera_pos[j] = s->cam_pos[j];
+    for (j = 0; j < 9u; j++)
+        rv->camera_rot[j] = s->cam_rot[j];
+    rv->projection = s->h;
+    rv->rect[2] = (int16_t)h->display[2];
+    rv->rect[3] = (int16_t)h->display[3];
+    rv->centre_on = 1;
+    rv->centre[0] = s->ofx;
+    rv->centre[1] = s->ofy;
+    *d = s->d;
+    d->mirror = s->mirrored;
+}
+
 static void showroom_coches(GameHost *h)
 {
     static RaceView rv;
@@ -1120,7 +1143,7 @@ static void showroom_coches(GameHost *h)
         pvr_poly_hdr_t hdr;
         TrackStats cst;
         pvr_ptr_t tx;
-        uint32_t k, j;
+        uint32_t k;
 
         if (q->kind != OVL_SR_CAR || (uint16_t)q->pts[0][0] >= SROOM_MAX)
             continue;
@@ -1131,19 +1154,7 @@ static void showroom_coches(GameHost *h)
         tx = coche_textura(k, s->d.paint);
         if (tx == NULL)
             continue;
-        memset(&rv, 0, sizeof rv);
-        for (j = 0; j < 3u; j++)
-            rv.camera_pos[j] = s->cam_pos[j];
-        for (j = 0; j < 9u; j++)
-            rv.camera_rot[j] = s->cam_rot[j];
-        rv.projection = s->h;
-        rv.rect[2] = (int16_t)h->display[2];
-        rv.rect[3] = (int16_t)h->display[3];
-        rv.centre_on = 1;
-        rv.centre[0] = s->ofx;
-        rv.centre[1] = s->ofy;
-        d = s->d;
-        d.mirror = s->mirrored;
+        showroom_vista(h, s, &rv, &d);
 
         pvr_poly_cxt_txr(&cxt, PVR_LIST_PT_POLY,
                          PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
@@ -1159,6 +1170,68 @@ static void showroom_coches(GameHost *h)
                  pista_emite, NULL, &cst);
         s_tri_coches += cst.quads_out;
     }
+    s_zmul = 1.0f;
+    s_zadd = 0.0f;
+}
+
+/* El mapa de reflejo sobre la carroceria de los coches del showroom (los de `espejo`: el
+ * reflejo en el suelo o el coche). Es el mapa A del juego, que en el showroom esta en la
+ * VRAM de PS1 (lo pide host_build_textures) y no en la pagina de la pista; se suma, como
+ * en la referencia, y se prueba contra la profundidad del coche sin escribirla. Va en la
+ * lista translucida: el del reflejo antes del suelo, que lo tapa, y el del coche despues. */
+static void showroom_reflejos(GameHost *h, int espejo)
+{
+    static RaceView rv;
+    uint32_t i;
+
+    for (i = 0; i < h->overlay.n; i++) {
+        const OverlayQuad *q = &h->overlay.quad[i];
+        const ShowroomCar *s;
+        const TexEntry *e;
+        CarDraw d;
+        pvr_poly_cxt_t cxt;
+        pvr_poly_hdr_t hdr;
+        TrackStats cst;
+        uint32_t k;
+
+        if (q->kind != OVL_SR_CAR || (uint16_t)q->pts[0][0] >= SROOM_MAX)
+            continue;
+        s = &h->sroom[(uint16_t)q->pts[0][0]];
+        if ((s->mirrored != 0) != (espejo != 0) || car_env_abr(&s->d, CAR_PASS_ENV_SR) < 0)
+            continue;
+        e = tex_find(&h->texcache, (uint16_t)(s->d.env_a[1] >> 16), (uint16_t)(s->d.env_a[0] >> 16));
+        k = coche_modelo(s->d.code);
+        if (e == NULL || k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL)
+            continue;
+        showroom_vista(h, s, &rv, &d);
+
+        pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
+                         PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED, e->w, e->h,
+                         (pvr_ptr_t)((uint8_t *)tex_vram + e->offset * 2u), PVR_FILTER_NONE);
+        cxt.blend.src = PVR_BLEND_ONE;
+        cxt.blend.dst = PVR_BLEND_ONE;
+        /* solo sobre el panel que se ve: mismos vertices que la carroceria (CAR_PASS_ENV_SR) */
+        cxt.depth.comparison = PVR_DEPTHCMP_EQUAL;
+        cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+        cxt.gen.culling = PVR_CULLING_NONE;
+        pvr_poly_compile(&hdr, &cxt);
+        pvr_prim(&hdr, sizeof(hdr));
+        /* car_draw da las UV en la pagina de 256 x 256: a la textura de la cache */
+        s_umul = 256.0f / (float)e->w;
+        s_uadd = -(float)e->u0 / (float)e->w;
+        s_vmul = 256.0f / (float)e->h;
+        s_vadd = -(float)e->v0 / (float)e->h;
+        s_fase = FASE_RESTO;
+        s_zmul = s->mirrored ? Z_REFLEJO : 1.0f;
+        s_zadd = s->mirrored ? Z_FONDO : 0.0f;
+        car_draw(&s_coches[k].modelo, &d, &rv, CAR_PASS_ENV_SR, 640.0f, 480.0f,
+                 pista_emite, NULL, &cst);
+        s_tri_reflejo += cst.quads_out;
+    }
+    s_umul = 1.0f;
+    s_uadd = 0.0f;
+    s_vmul = 1.0f;
+    s_vadd = 0.0f;
     s_zmul = 1.0f;
     s_zadd = 0.0f;
 }
@@ -1234,7 +1307,9 @@ void render_frame(GameHost *h)
             /* el primer coche en orden de dibujo: el suelo justo antes, y desde aqui el 2D va
              * encima de todo */
             if (prueba) {
+                showroom_reflejos(h, 1);
                 showroom_suelo(h, &clip, sx, sy);
+                showroom_reflejos(h, 0);
                 prueba = 0;
             }
             continue;

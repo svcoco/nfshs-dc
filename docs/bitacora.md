@@ -382,7 +382,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
 | 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **Hecho en emulador** (2026-10-25); la lluvia, comparada con el original en DuckStation |
-| 7 | El showroom del front end | **En curso**: grabado con oráculo, dibujado, con las 64 pinturas y los 39 coches horneados; faltan el mapa de reflejo y la policía |
+| 7 | El showroom del front end | **En curso**: grabado con oráculo, dibujado con su mapa de reflejo, con las 64 pinturas y los 39 coches horneados; faltan las sombras de los pasos de rueda y la policía |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -499,8 +499,20 @@ cambia la pintura del coche (rojo, amarillo, blanco, plata, gris…) y «CAR» r
 (SLK, Z3…). `make bake-coches` hornea los 18 de carrera (versión H) y los 21 de tráfico en 20 s.
 Antes todos los coches salían con la pintura 0; ahora cada uno con la suya (`CarDraw.paint`).
 
-**Falta:** el mapa de reflejo sobre la carrocería del coche del showroom (sale de la VRAM), las
-sombras de los pasos de rueda en el showroom y la policía (su librea depende de la pista).
+**El mapa de reflejo sobre la carrocería** (2026-10-26). En el showroom el mapa A del juego no
+está en la página de la pista sino en la **VRAM de PS1** (página `0x3E`, 4 bits, 128 × 65
+téxeles desde u 0, v 128 en todo `race_long`): lo sirve la caché de texturas del 2D y se suma
+sobre la carrocería, con las coordenadas recortadas al mapa como la referencia. **Una
+diferencia a propósito:** la referencia acerca el reflejo 1 cm a la cámara y lo prueba con
+«más cerca»; donde dos paneles se solapan (el capó bajo la aleta) el reflejo del de debajo
+también pasa y se suma dos veces, y en Flycast salía una **línea de puntos claros** en las
+aristas. En la PS1 no pasa porque el panel de encima se pinta después y lo tapa. Aquí el
+reflejo usa los mismos vértices que la carrocería y la prueba es de **profundidad igual**:
+solo suma sobre el panel que se ve. Visto en Flycast: brillos en el capó y el parabrisas que
+cambian al girar el coche, y sin la línea de puntos.
+
+**Falta:** las sombras de los pasos de rueda en el showroom y la policía (su librea depende de
+la pista).
 
 ### Paso 6: los efectos (hecho en emulador)
 

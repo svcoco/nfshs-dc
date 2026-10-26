@@ -622,6 +622,23 @@ void host_build_textures(GameHost *h)
     necesita(h, h->sky_quad, h->sky_quads_n);
     necesita(h, h->weather_quad, h->weather_quads_n);
     necesita(h, h->sroom_floor, h->sroom_floor_n);
+    /* y el mapa A del reflejo de los coches del showroom: 128 x 65 texeles desde su esquina,
+     * como lo lee la referencia (FeScene::build) */
+    for (i = 0; i < h->sroom_n && i < SROOM_MAX; i++) {
+        const CarDraw *d = &h->sroom[i].d;
+        uint16_t u0 = (uint16_t)(d->env_a[0] & 0xFFu), v0 = (uint16_t)((d->env_a[0] >> 8) & 0xFFu);
+        uint16_t u1 = (uint16_t)(u0 + 127u > 255u ? 255u : u0 + 127u);
+        uint16_t v1 = (uint16_t)(v0 + 64u > 255u ? 255u : v0 + 64u);
+        uint16_t uv[4][2];
+
+        if (!d->env_ok || d->env_a[0] == 0u)
+            continue;
+        uv[0][0] = u0; uv[0][1] = v0;
+        uv[1][0] = u1; uv[1][1] = v0;
+        uv[2][0] = u0; uv[2][1] = v1;
+        uv[3][0] = u1; uv[3][1] = v1;
+        tex_need(&h->texcache, (uint16_t)(d->env_a[1] >> 16), (uint16_t)(d->env_a[0] >> 16), uv);
+    }
     tex_build(&h->texcache, h->vram, h->tex_buf, h->tex_cap);
 }
 

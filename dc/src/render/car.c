@@ -199,7 +199,7 @@ static void norm3(float v[3])
 
 int car_env_abr(const struct CarDraw *d, int pasada)
 {
-    const uint32_t *map = pasada == CAR_PASS_ENV_A ? d->env_a : d->env_b;
+    const uint32_t *map = pasada == CAR_PASS_ENV_B ? d->env_b : d->env_a;
 
     if (!d->env_ok || map[0] == 0u)
         return -1;
@@ -222,8 +222,9 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
               int pasada, float sw, float sh, TrackEmit emit, void *user, TrackStats *st)
 {
     int solo_resta = pasada == CAR_PASS_SUBTRACT;
-    int reflejo = pasada == CAR_PASS_ENV_A || pasada == CAR_PASS_ENV_B;
-    const uint32_t *map = pasada == CAR_PASS_ENV_A ? d->env_a : d->env_b;
+    int showroom = pasada == CAR_PASS_ENV_SR;
+    int reflejo = pasada == CAR_PASS_ENV_A || pasada == CAR_PASS_ENV_B || showroom;
+    const uint32_t *map = pasada == CAR_PASS_ENV_B ? d->env_b : d->env_a;
     uint8_t u0 = 0, v0 = 0, despl = 0;
     float ga = 0.0f, gs = 0.0f;
     uint32_t env_argb = 0;
@@ -405,7 +406,8 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                 cr[0] = e1[1] * e2[2] - e1[2] * e2[1];
                 cr[1] = e1[2] * e2[0] - e1[0] * e2[2];
                 cr[2] = e1[0] * e2[1] - e1[1] * e2[0];
-                if (-(cr[0] * tc[0] + cr[1] * tc[1] + cr[2] * tc[2]) <= 0.0f)
+                /* (en el reflejo del showroom la y espejada invierte el sentido de giro) */
+                if ((d->mirror ? 1.0f : -1.0f) * (cr[0] * tc[0] + cr[1] * tc[1] + cr[2] * tc[2]) <= 0.0f)
                     continue;
                 for (k = 0; k < 3u; k++) {
                     const uint8_t *c3 = r + 4u + 8u * k;
@@ -420,12 +422,21 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                         for (j = 0; j < 3u; j++)
                             n[j] = (float)(int16_t)crd16(c3 + 2u + 2u * j);
                     }
-                    if (pasada == CAR_PASS_ENV_A) {
+                    if (pasada == CAR_PASS_ENV_A || showroom) {
                         int x = (int)(ga * n[0] + gs * n[2]);
                         int z = (int)(-gs * n[0] + ga * n[2]);
 
-                        u = (uint8_t)(u0 + 64u + (uint8_t)x);
-                        v = (uint8_t)(v0 + (uint8_t)(z < 0 ? -z : z));
+                        if (showroom) {
+                            int ur = 64 + x, vr = z < 0 ? -z : z;
+
+                            ur = ur < 0 ? 0 : ur > 127 ? 127 : ur;
+                            vr = vr > 64 ? 64 : vr;
+                            u = (uint8_t)(u0 + (uint32_t)ur);
+                            v = (uint8_t)(v0 + (uint32_t)vr);
+                        } else {
+                            u = (uint8_t)(u0 + 64u + (uint8_t)x);
+                            v = (uint8_t)(v0 + (uint8_t)(z < 0 ? -z : z));
+                        }
                         tira = 0.01f;
                     } else {
                         u = (uint8_t)(u0 + 64u + (uint8_t)(int)n[1]);
@@ -437,6 +448,9 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                     tri[k].u = ((float)u + 0.5f) / 256.0f;
                     tri[k].v = ((float)v + 0.5f) / 256.0f;
                     tri[k].argb = env_argb;
+                    /* el showroom se queda sobre la carroceria (ver CAR_PASS_ENV_SR) */
+                    if (showroom)
+                        continue;
                     /* un pelo hacia la camara, sobre la carroceria que cubre */
                     for (j = 0; j < 3u; j++)
                         hacia[j] = vw.cam[j] - wld[k][j];
@@ -446,8 +460,9 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                             wld[k][j] += hacia[j] / dist * tira;
                 }
             }
-            /* las partes que van por encima, un poco hacia la camara (ver SESGO) */
-            if (pasada == CAR_PASS_BODY && SESGO[pi] < 0) {
+            /* las partes que van por encima, un poco hacia la camara (ver SESGO); tambien el
+             * reflejo del showroom, que tiene que caer justo sobre ellas */
+            if ((pasada == CAR_PASS_BODY || showroom) && SESGO[pi] < 0) {
                 float tira = (float)(-SESGO[pi]) * 0.003f;
 
                 for (k = 0; k < 3u; k++) {

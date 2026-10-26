@@ -53,7 +53,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | 4 | **Horneado y dibujo de los coches** | **Hecho (2026-10-24)**: los coches se ven; 30-40 fps, y el coste **no es dibujarlos** |
 | 5 | **El HUD** | **Hecho (2026-10-24)**: 4 769 frames de carrera con la lista 2D identica a la referencia, HUD incluido |
 | 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | **Hecho en emulador (2026-10-25)**: todos los efectos con oraculo, salvo la imagen; la lluvia, comparada con el original en DuckStation |
-| 7 | **El showroom del front end**: el coche de seleccion, concesionario y garaje | **En curso (2026-10-25)**: grabado con oraculo y dibujado con el PVR |
+| 7 | **El showroom del front end**: el coche de seleccion, concesionario y garaje | **En curso (2026-10-26)**: grabado con oraculo, dibujado con el PVR, pinturas y mapa de reflejo; faltan las sombras de los pasos de rueda y la policia |
 
 Los pasos 1 y 3 van primero **porque tienen oraculo**, igual que la lista 2D de M2a y la
 vista de M2b: la referencia graba exactamente lo mismo, asi que se comparan campo a campo
@@ -508,5 +508,24 @@ justifican (`car-pal-stats`, `car-pal-tuples`):
 - Visto en Flycast: «COLOR» cambia la pintura y «CAR» recorre los coches. En el arnes, el
   guion de prueba pasa por 10 coches, todos horneados.
 
-**Falta:** el mapa de reflejo de la carroceria en el showroom (de la VRAM), las sombras de los
-pasos de rueda en el showroom y la policia (su librea depende de la pista).
+### 4. El mapa de reflejo de la carroceria (2026-10-26)
+
+- El mapa A del showroom esta en la **VRAM de PS1**, no en la pagina de reflejos de la pista:
+  en `race_long`, siempre pagina `0x3E` (4 bits, mezcla por suma), paleta `0x7A28`, desde
+  u 0, v 128. `host_build_textures` pide sus 128 x 65 texeles a la cache del 2D.
+- `CAR_PASS_ENV_SR` en `car_draw`: las coordenadas del mapa A recortadas al mapa
+  (`u = 64 + x` en 0..127, `v = |z|` hasta 64), como `Showroom::geometry` de la referencia;
+  el sumidero las lleva de la pagina de 256 x 256 a la entrada de la cache.
+- Se dibuja en la lista translucida, sumando: el del reflejo en el suelo **antes** del
+  suelo (que lo tapa) y el del coche despues.
+- **Diferencia a proposito con la referencia:** alli el reflejo se acerca 1 cm a la camara y
+  se prueba con "mas cerca". Donde dos paneles se solapan, el reflejo del de debajo tambien
+  pasa y se suma dos veces: en Flycast salia una linea de puntos claros en las aristas del
+  capo y del lateral. Aqui los vertices son exactamente los de la carroceria (el mismo
+  sesgo por parte, sin acercarlos) y la prueba es de **profundidad igual**. Tambien se
+  descartan los poligonos que no miran a la camara, como `DrawC_Prim` (con el sentido
+  invertido en el coche espejado).
+- Visto en Flycast: brillos en el capo y el parabrisas que se mueven al girar el coche.
+
+**Falta:** las sombras de los pasos de rueda en el showroom y la policia (su librea depende
+de la pista).

@@ -7,7 +7,7 @@ descartaron no se guardan aquí.
 Se actualiza al cerrar cada paso. El detalle largo vive en `docs/hitos/`; esto es el
 resumen que permite retomar el proyecto sin releerlo todo.
 
-**Última entrada: 2026-10-25.**
+**Última entrada: 2026-10-26** (cierre de M2 en emulador).
 
 ---
 
@@ -24,9 +24,10 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M2** (a, b y c) | **Cerrado en emulador (2026-10-26)** |
 | M3 FMV · M4 Audio · M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables | Sin empezar; **M3 es el siguiente** (numeración del 2026-10-26) |
 
-**Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
-datos del disco y dibuja con el PVR tanto el **front end** (~60 fps, completo y legible)
-como la **carrera**: pista, cielo, objetos del escenario, **coches** y **HUD** —cronómetro,
+**Lo que hay hoy (M2 cerrado en emulador):** un CDI que arranca en Dreamcast con la BIOS
+real, lee sus datos del disco y dibuja con el PVR tanto el **front end** (~60 fps, completo
+y legible, con el coche del showroom, sus pinturas y su reflejo) como una **carrera completa**
+—de la salida a la meta, las estadísticas y la repetición, con pausa—: pista, cielo, objetos del escenario, **coches** y **HUD** —cronómetro,
 velocidad, marcha, tacómetro con aguja y mapa—, con las texturas y el color de vértice del
 original. En carrera da **30–43 fps** en Flycast; el coste no está en dibujar sino en
 **grabar los coches** (código real del juego cada frame), que es trabajo de M8. Del paso 6
@@ -138,7 +139,8 @@ Primer hito **con imagen**. Criterio: front end navegable y legible en 480p y 48
 | 4 | Dibujo 2D en el PVR | **Hecho**, el front end se ve en Dreamcast |
 | 5 | Ayudantes del HUD | **No hacen falta para el front end** (ver abajo) |
 
-Cerrado en emulador; el criterio de salida pide verlo en una tele en 480i.
+Cerrado en emulador; verlo en una tele en 480i (el resto del criterio) pasa a M7, la prueba en
+consola real.
 
 ### Paso 1: la grabación
 
@@ -371,9 +373,12 @@ Dos fallos que solo se ven con el mundo delante:
 
 ---
 
-## M2c — Coches, objetos y efectos (en curso)
+## M2c — Coches, objetos y efectos (cerrado en emulador 2026-10-26)
 
-El hito que convierte un paseo por un escenario en una carrera.
+El hito que convierte un paseo por un escenario en una carrera. **Criterio cumplido**: una
+carrera completa de un jugador (`carrera_completa.txt`, 40 000 frames idénticos a la
+referencia en RAM, 2D y vista). Con él queda **cerrado M2** (a, b y c) en emulador; lo que
+falta probar en una Dreamcast es el M7.
 
 | # | Paso | Estado |
 |---|---|---|

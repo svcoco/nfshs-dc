@@ -26,8 +26,10 @@ Por eso el plan las separa en el tiempo:
 - **M8** es el único hito donde el rendimiento es el criterio. Va después del middleware y
   de la consola (decisiones de Jorge, 2026-10-26): se optimiza el port completo, midiendo
   en el hardware real y no en Flycast.
-- **M9** mejora el código y los assets actuales (texturas escaladas) y admite packs de
-  texturas externos.
+- **M8** incluye además el pulido final.
+- **M9** mejora el código y los assets actuales (texturas escaladas), admite packs de
+  texturas externos y reúne **objetivos descartables** (salida en 720p, resolución interna
+  3×): se estudian y se desechan si la plataforma no los permite o cuestan demasiado.
 
 El coste de este orden es que se tarda más en ver algo en pantalla. El beneficio quedó
 demostrado en M1a, y está documentado abajo.

@@ -79,3 +79,6 @@ tiempos del PVR.
    emulador. Si cabe en el presupuesto del PVR, puede ir encendido por omisión o como opción.
 
 La decisión es de Jorge.
+
+**Después (2026-10-26):** Jorge añade a M9, como objetivos descartables, la **salida en 720p**
+y una **resolución interna 3×**. Este documento es su punto de partida.

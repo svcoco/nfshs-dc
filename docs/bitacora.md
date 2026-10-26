@@ -22,7 +22,7 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
 | **M2c** Coches, objetos y efectos | **Criterio cumplido en emulador** (2026-10-26): una carrera completa idéntica a la referencia en 40 000 frames; showroom, pausa, policía y noche; 30–43 fps |
 | **M2** (a, b y c) | **Cerrado en emulador (2026-10-26)** |
-| M3 FMV · M4 Audio · M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización · M9 Enhancements y packs de texturas | Sin empezar; **M3 es el siguiente** (numeración del 2026-10-26) |
+| M3 FMV · M4 Audio · M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables | Sin empezar; **M3 es el siguiente** (numeración del 2026-10-26) |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
 datos del disco y dibuja con el PVR tanto el **front end** (~60 fps, completo y legible)
@@ -879,7 +879,9 @@ incompleta— los encontró el oráculo, no la lectura del código.
   y 2 jugadores, M6 guardado y VMU, **M7 prueba en consola real (480i y 480p)**, M8
   optimización, M9 enhancements con los packs de texturas. En los `docs/hitos/` anteriores,
   «M3» como optimización es el M8 y como audio el M4, y «M4» como escalado de texturas es el
-  M9. **Sin hito:** el pulido final.
+  M9. El pulido final va en M8. **M9 admite objetivos descartables** (se desechan si la
+  plataforma no lo permite o el rendimiento se resiente mucho): salida en 720p y resolución
+  interna 3×, con las restricciones de partida ya medidas en `docs/resolucion.md`.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.
 - **Autor de nfshs-rs:** contacto sobre licencia y posible colaboración.
 - **Resolución: 640×480 y FSAA horizontal** (investigado el 2026-10-25, `docs/resolucion.md`).

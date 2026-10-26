@@ -138,13 +138,24 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 | M5 | Middleware de IO: controles (mando de Dreamcast, analógicos, gatillos, vibración) y 2 jugadores | Front end y carrera jugables con el mando de Dreamcast, también a pantalla partida con dos mandos |
 | M6 | Middleware de IO: guardado y VMU (memory card de PS1 → VMU) | Guardar y cargar la partida en la VMU |
 | M7 | Prueba en consola real: el CDI quemado en CD-R, vídeo en 480i (tele) y 480p (VGA) | Arranca en una Dreamcast real; front end legible y carrera jugable en 480i y 480p; fps y costes del PVR medidos en consola |
-| M8 | Revisión y optimización (codegen, SH-4 a mano en hooks, FTRV, LOD) | **30 fps sostenidos** en carrera como mínimo **en consola**, sin tope por arriba (60 es el objetivo ideal) |
-| M9 "Enhancements" | Mejoras del código y de los assets actuales (escalado de texturas horneado en el PC, mejoras de la referencia como opción) y packs de texturas externos | Texturas de pista, coches y HUD escaladas dentro del presupuesto de VRAM, con respaldo a las originales; un pack de texturas distribuido aparte se carga por nombre |
+| M8 | Revisión, optimización (codegen, SH-4 a mano en hooks, FTRV, LOD) y pulido final | **30 fps sostenidos** en carrera como mínimo **en consola**, sin tope por arriba (60 es el objetivo ideal); el port pulido de punta a punta |
+| M9 "Enhancements" | Mejoras del código y de los assets actuales (escalado de texturas horneado en el PC, mejoras de la referencia como opción) y packs de texturas externos. Más **objetivos descartables** (ver abajo) | Texturas de pista, coches y HUD escaladas dentro del presupuesto de VRAM, con respaldo a las originales; un pack de texturas distribuido aparte se carga por nombre |
 
 Numeración vigente desde el **2026-10-26 (decisiones de Jorge)**. En los `docs/hitos/` de
 antes de esa fecha: «M3» como optimización es el **M8** de ahora, y como audio el **M4**;
 «M4» como escalado de texturas es el **M9**; la prueba en consola que M1b y M2a dejaron
-pendiente es el **M7**. Solo queda **sin hito asignado** el pulido final.
+pendiente es el **M7**. El pulido final va en **M8**.
+
+**Objetivos descartables de M9 (decisión de Jorge, 2026-10-26).** M9 admite objetivos que se
+**desechan** si la arquitectura o la plataforma no lo permiten, o si el rendimiento se resiente
+considerablemente; se estudian, se miden y decide Jorge. Hoy son:
+- **Salida en 720p.** Punto de partida medido (`docs/resolucion.md`): la salida de vídeo del
+  Dreamcast va con la temporización de 480 líneas (858 relojes × 525 líneas) y 640 píxeles
+  activos; ningún modo de KOS pasa de ahí.
+- **Resolución interna 3×.** Punto de partida medido (`docs/resolucion.md`): el port ya
+  rasteriza el 3D a 640×480 (el «2×» de un emulador de PS1); por encima, el PVR solo
+  supermuestrea 2× en horizontal (FSAA), no en vertical, y sus texturas llegan a 1 024
+  téxeles.
 
 ## 5. Arquitectura objetivo
 
@@ -411,8 +422,9 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
   - **FMV (M3):** STR/MDEC.
 - **Abiertas:**
   - **M9:** factor de escala de las texturas (2× como base), método y formato.
-  - **Sin hito asignado** tras la renumeración del 2026-10-26: el pulido final. *(FMV es el
-    M3, los dos jugadores van con los controles en M5 y los packs de texturas en M9.)*
+  - **Objetivos descartables de M9:** salida en 720p y resolución interna 3× (ver §4).
+    *(Todo tiene hito desde el 2026-10-26: FMV es el M3, los dos jugadores van con los
+    controles en M5, el pulido final en M8 y los packs de texturas en M9.)*
   - *(cerrada 2026-10-23: el arranque con BIOS real funciona desde un **CDI** con
     disposición MIL-CD, que genera `dc/tools/mkdisc/mkdisc.sh` por omisión. El GDI solo
     arrancaba con REIOS.)*

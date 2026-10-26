@@ -17,19 +17,19 @@ resumen que permite retomar el proyecto sin releerlo todo.
 |---|---|
 | **M0** Viabilidad | Cerrado (2026-10-18) |
 | **M1a** Backend C + `ps1rt` en C, en x86 | Cerrado (2026-10-18) |
-| **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); la prueba en consola es el M6 |
-| **M2a** El front end en pantalla | Cerrado en emulador; leerlo en una tele en 480i pasa a M6 |
+| **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); la prueba en consola es el M7 |
+| **M2a** El front end en pantalla | Cerrado en emulador; leerlo en una tele en 480i pasa a M7 |
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
 | **M2c** Coches, objetos y efectos | **Criterio cumplido en emulador** (2026-10-26): una carrera completa idéntica a la referencia en 40 000 frames; showroom, pausa, policía y noche; 30–43 fps |
 | **M2** (a, b y c) | **Cerrado en emulador (2026-10-26)** |
-| M3 Audio · M4 Controles · M5 Guardado y VMU · M6 Consola real · M7 Optimización · M8 Enhancements | Sin empezar; **M3 es el siguiente** (numeración del 2026-10-26) |
+| M3 FMV · M4 Audio · M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización · M9 Enhancements y packs de texturas | Sin empezar; **M3 es el siguiente** (numeración del 2026-10-26) |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
 datos del disco y dibuja con el PVR tanto el **front end** (~60 fps, completo y legible)
 como la **carrera**: pista, cielo, objetos del escenario, **coches** y **HUD** —cronómetro,
 velocidad, marcha, tacómetro con aguja y mapa—, con las texturas y el color de vértice del
 original. En carrera da **30–43 fps** en Flycast; el coste no está en dibujar sino en
-**grabar los coches** (código real del juego cada frame), que es trabajo de M7. Del paso 6
+**grabar los coches** (código real del juego cada frame), que es trabajo de M8. Del paso 6
 de M2c (los efectos) ya se dibujan las **sombras** de los coches, las **líneas pintadas** de
 la carretera, las **marcas de neumático**, los **destellos** de las farolas, los **halos** de
 faros y frenos, el **humo**, el **flare del sol**, el **clima** (lluvia de día y de noche) y los
@@ -347,7 +347,7 @@ abre** y la plataforma carga `/cd/BAKED/<NOMBRE>.TRK`.
 
 Dibujar la pista cuesta del orden de medio frame. Sigue por encima del mínimo de 30 fps
 sostenidos, y **todavía sin FTRV**: la transformación va en C con `float` normal. Esa
-optimización es de M7 y ahora hay con qué medirla.
+optimización es de M8 y ahora hay con qué medirla.
 
 ### Paso 4: el cielo
 
@@ -444,7 +444,7 @@ de VRAM por coche).
 
 **Dibujar los coches no cuesta casi nada; lo que cuesta es grabarlos.** Con el dibujo
 apagado el ritmo es el mismo, así que la caída de ~60 a 30–40 fps la produce el paso 3,
-que corre código real del juego cada frame. Es trabajo de M7.
+que corre código real del juego cada frame. Es trabajo de M8.
 
 ### Paso 9: una carrera completa, y la noche (hecho en emulador, 2026-10-26)
 
@@ -868,18 +868,18 @@ incompleta— los encontró el oráculo, no la lectura del código.
 
 ## Abierto
 
-- **Probar en una consola real (M6).** El CDI es grabable y arranca con la BIOS real en
+- **Probar en una consola real (M7).** El CDI es grabable y arranca con la BIOS real en
   emulador, pero nadie lo ha quemado. Hasta entonces los fps son de Flycast.
 - **El bit STP de PS1 no cabe en ARGB1555.** PS1 marca por texel los que se mezclan en
   las primitivas semitransparentes; ARGB1555 tiene **un solo bit** de alfa. Hoy se
   resuelve por modo de mezcla del cuadro entero, no por texel.
-- **Leer el front end en 480i (M6).** Está probado el modo, no la legibilidad en una tele.
-- **M8:** factor de escala de las texturas, método y formato.
-- **Hitos renumerados (2026-10-26, decisiones de Jorge):** M3 audio, M4 controles, M5
-  guardado y VMU, **M6 prueba en consola real (480i y 480p)**, M7 optimización, M8
-  enhancements. En los `docs/hitos/` anteriores, «M3» como optimización es el M7 y «M4» el
-  M8. **Sin hito:** FMV, 2P, packs de texturas externos y el pulido final.
-- **Alcance:** si la primera versión incluye 2P y FMV.
+- **Leer el front end en 480i (M7).** Está probado el modo, no la legibilidad en una tele.
+- **M9:** factor de escala de las texturas, método y formato.
+- **Hitos renumerados (2026-10-26, decisiones de Jorge):** M3 FMV, M4 audio, M5 controles
+  y 2 jugadores, M6 guardado y VMU, **M7 prueba en consola real (480i y 480p)**, M8
+  optimización, M9 enhancements con los packs de texturas. En los `docs/hitos/` anteriores,
+  «M3» como optimización es el M8 y como audio el M4, y «M4» como escalado de texturas es el
+  M9. **Sin hito:** el pulido final.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.
 - **Autor de nfshs-rs:** contacto sobre licencia y posible colaboración.
 - **Resolución: 640×480 y FSAA horizontal** (investigado el 2026-10-25, `docs/resolucion.md`).
@@ -887,7 +887,7 @@ incompleta— los encontró el oráculo, no la lectura del código.
   activos, y el 3D del port ya se rasteriza a 640×480 desde la geometría (el «2×» de un
   emulador de PS1). Por encima, solo el FSAA horizontal del PVR (1 280×480 promediado):
   probado en Flycast sin commit, coste sin medir. Pendiente de decisión de Jorge: se mide en
-  M6 con una consola y se decide en M7.
+  M7 con una consola y se decide en M8.
 - **RAM de los coches.** Cada `.CAR` de carrera ocupa ~410 KB en RAM mientras está en la caché
   (6 modelos: ~2,5 MB) porque guarda los índices para poder cambiar de pintura. Sin medir con
   una carrera de 8 coches distintos más tráfico; si aprieta, los índices se pueden releer del CD

@@ -203,7 +203,7 @@ Si falla, los registros de cada componente estan en
 > no hay que tocar `environ.sh` ni nada. KOS compila igual.
 
 Lo que pierdes saltandotelo es solo poder **recompilar el firmware del AICA**. Para este
-port no hace falta: el audio de M3 va por la API de sonido de KOS, que corre sobre ese
+port no hace falta: el audio de M4 va por la API de sonido de KOS, que corre sobre ese
 mismo driver de serie. Si algun dia hiciera falta, este paso se puede hacer despues sin
 rehacer nada.
 

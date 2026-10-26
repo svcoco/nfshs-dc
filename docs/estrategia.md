@@ -18,13 +18,16 @@ Por eso el plan las separa en el tiempo:
 - **M1b** responde «¿compila y arranca en SH-4?» con la traducción **ya demostrada
   correcta**, así que cualquier divergencia nueva es del cambio de arquitectura.
 - **M2** añade el renderer, que es trabajo nuevo y no una traducción.
-- **M3 a M5** completan el middleware que falta: audio, controles, y guardado con la VMU.
-- **M6** lleva el port a una **consola real** (CD-R, 480i y 480p): hasta ahí todo se ha
+- **M3** pone los vídeos (FMV), que hoy se saltan.
+- **M4 a M6** completan el middleware que falta: audio, controles (con los dos jugadores) y
+  guardado con la VMU.
+- **M7** lleva el port a una **consola real** (CD-R, 480i y 480p): hasta ahí todo se ha
   validado en emulador, y es la primera vez que hay cifras del hardware de verdad.
-- **M7** es el único hito donde el rendimiento es el criterio. Va después del middleware y
+- **M8** es el único hito donde el rendimiento es el criterio. Va después del middleware y
   de la consola (decisiones de Jorge, 2026-10-26): se optimiza el port completo, midiendo
   en el hardware real y no en Flycast.
-- **M8** mejora el código y los assets actuales (texturas escaladas).
+- **M9** mejora el código y los assets actuales (texturas escaladas) y admite packs de
+  texturas externos.
 
 El coste de este orden es que se tarda más en ver algo en pantalla. El beneficio quedó
 demostrado en M1a, y está documentado abajo.
@@ -129,7 +132,7 @@ ancho). Para comparar hay que neutralizarlas **en los dos lados**. Pero `unlock_
 enseñó que no se puede juzgar una de ellas sin medirla: parecía cosmética y resultó que
 **da acceso a carreras**. La regla que queda: cada mejora de la referencia se porta detrás
 de una opción apagada por omisión, y si va a estar en el Dreamcast es una decisión de
-producto de M8, no de implementación.
+producto de M9, no de implementación.
 
 ## Lo que se aprendió en M1b (cerrado en Flycast, 2026-10-23)
 
@@ -184,7 +187,7 @@ Detalle y cifras en `docs/hitos/M2a.md`.
 
 **M2b esta cerrado en emulador**: la carrera se dibuja —pista, cielo y objetos— a 60 fps,
 y todavia **sin FTRV** (la transformacion va en C con `float`), asi que esa optimizacion
-sigue entera disponible para M3.
+sigue entera disponible para M8.
 
 **M2c va por el paso 5 de 6** (objetos, coches y HUD, todo validado). Su patron es el mismo que ya funciono en M2a y M2b, y
 merece quedar escrito porque es la forma de trabajar del proyecto: **lo que tiene oraculo
@@ -194,7 +197,7 @@ decision. Esa anotacion **se compara contra la referencia** campo a campo (o en 
 palabra a palabra, para los coches) dentro de `make diff`, sin encender un Dreamcast.
 Solo despues se dibuja, que es la parte que hay que mirar con los ojos.
 
-Dos cosas que M2c ensenaron y que valen para M3:
+Dos cosas que M2c ensenaron y que valen para M8:
 
 - **El coste de la carrera esta en grabar, no en dibujar.** Con el dibujo de coches
   apagado el ritmo es el mismo (media 28,6 contra 28,0 fps): la caida de ~60 a 30-40 fps
@@ -241,4 +244,4 @@ Detalle y cifras en `docs/hitos/M2b.md` y `docs/hitos/M2c.md`.
   del showroom estaban en la lista de pendientes; medido, el juego no las pide ahí.
 
 Lo que no se ha hecho en ningún momento es medir en una Dreamcast: todas las cifras de
-fps son de Flycast. Por eso la consola real (M6) va antes de optimizar (M7).
+fps son de Flycast. Por eso la consola real (M7) va antes de optimizar (M8).

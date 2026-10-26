@@ -59,7 +59,7 @@ Las primitivas crudas que hay que parsear son el juego estandar de la GPU de PS1
 
 Estado (2026-10-23): **los cinco pasos cerrados**. Falta el criterio de salida del hito,
 que es mirar el front end en 480i en una tele. **Decision de Jorge (2026-10-26):** esa
-prueba pasa a M6 (consola real, 480i y 480p) y M2 se cierra en emulador.
+prueba pasa a M7 (consola real, 480i y 480p) y M2 se cierra en emulador.
 
 El paso 1 va primero porque es **codigo portable y tiene oraculo**: la referencia produce
 la misma lista, asi que se puede comparar igual que se compara la RAM, sin tocar un

@@ -720,6 +720,12 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **Alcance:** si la primera versión incluye 2P y FMV.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.
 - **Autor de nfshs-rs:** contacto sobre licencia y posible colaboración.
+- **Resolución: 640×480 y FSAA horizontal** (investigado el 2026-10-25, `docs/resolucion.md`).
+  El Dreamcast ya usa la temporización de 720×480 (858 relojes × 525 líneas) con 640 píxeles
+  activos, y el 3D del port ya se rasteriza a 640×480 desde la geometría (el «2×» de un
+  emulador de PS1). Por encima, solo el FSAA horizontal del PVR (1 280×480 promediado):
+  probado en Flycast sin commit, coste sin medir. Pendiente de decisión de Jorge, a evaluar en
+  M3 con una consola.
 - **El coste en fps del paso 6 está sin medir.** Destellos, humo, clima y reflejos
   añaden rutinas del juego por frame y pases del PVR; no se ha separado su coste.
 - **Coste de las inversiones del PVR sin medir en consola.** Cada frame con efectos añade

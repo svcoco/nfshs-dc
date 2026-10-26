@@ -18,7 +18,7 @@ Por eso el plan las separa en el tiempo:
 - **M1b** responde «¿compila y arranca en SH-4?» con la traducción **ya demostrada
   correcta**, así que cualquier divergencia nueva es del cambio de arquitectura.
 - **M2** añade el renderer, que es trabajo nuevo y no una traducción.
-- **M3** pone los vídeos (FMV), que hoy se saltan.
+- **M3** pone los vídeos (FMV). **Cerrado en emulador (2026-10-26).**
 - **M4 a M6** completan el middleware que falta: audio, controles (con los dos jugadores) y
   guardado con la VMU.
 - **M7** lleva el port a una **consola real** (CD-R, 480i y 480p): hasta ahí todo se ha
@@ -249,3 +249,17 @@ Detalle y cifras en `docs/hitos/M2b.md` y `docs/hitos/M2c.md`.
 
 Lo que no se ha hecho en ningún momento es medir en una Dreamcast: todas las cifras de
 fps son de Flycast. Por eso la consola real (M7) va antes de optimizar (M8).
+
+## Lo que se aprendió en M3 (cerrado en emulador, 2026-10-26)
+
+- **Un dato que no se puede leer esconde un fallo.** Las copias de `MOVIES` sin audio hacían
+  que la referencia no pudiera reproducirlas, y por eso el test diferencial pasaba sin
+  saltarse las películas. Al arreglar el dato salió el fallo del instrumento.
+- **Lo que no suena no es siempre el código propio.** El driver ARM del AICA del KOS
+  instalado no arranca en Flycast: un tono aislado, sin el juego, lo demostró en minutos.
+- **Medir por partes antes de optimizar.** El menú a 25 fps no era el decodificador (2 ms)
+  ni la lectura del disco, sino el intérprete y la caché de texturas; un contador por
+  dirección del intérprete dio las dos funciones exactas.
+- **Quitar un stub despierta código que no corría.** Con el video wall de verdad el juego
+  compone el mosaico; el coste nuevo era del juego, y el que era nuestro (intérprete,
+  texturas) se pudo quitar.

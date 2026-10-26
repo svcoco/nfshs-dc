@@ -7,7 +7,7 @@ descartaron no se guardan aquí.
 Se actualiza al cerrar cada paso. El detalle largo vive en `docs/hitos/`; esto es el
 resumen que permite retomar el proyecto sin releerlo todo.
 
-**Última entrada: 2026-10-26** (cierre de M2 en emulador).
+**Última entrada: 2026-10-26** (cierre de M3 en emulador).
 
 ---
 
@@ -22,10 +22,14 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
 | **M2c** Coches, objetos y efectos | **Criterio cumplido en emulador** (2026-10-26): una carrera completa idéntica a la referencia en 40 000 frames; showroom, pausa, policía y noche; 30–43 fps |
 | **M2** (a, b y c) | **Cerrado en emulador (2026-10-26)** |
-| **M3** FMV | **En curso**: las películas a pantalla completa se ven y suenan en Flycast a sus 15 fps; falta el video wall (`docs/hitos/M3.md`) |
+| **M3** FMV | **Cerrado en emulador (2026-10-26)**: películas con sonido a sus 15 fps y video wall idéntico a la referencia; menús a ~40 fps |
 | M4 Audio · M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables | Sin empezar (numeración del 2026-10-26) |
 
-**Lo que hay hoy (M2 cerrado en emulador):** un CDI que arranca en Dreamcast con la BIOS
+**Lo que hay hoy (M3 cerrado en emulador):** lo de M2, más los **vídeos**: la intro, el
+logo y las demos de atracción a pantalla completa, con sonido y a sus 15 fps (Start las
+salta), y el **video wall** de los menús (el mosaico de «game setup», el mapa de cada pista).
+
+**Lo de M2:** un CDI que arranca en Dreamcast con la BIOS
 real, lee sus datos del disco y dibuja con el PVR tanto el **front end** (~60 fps, completo
 y legible, con el coche del showroom, sus pinturas y su reflejo) como una **carrera completa**
 —de la salida a la meta, las estadísticas y la repetición, con pausa—: pista, cielo, objetos del escenario, **coches** y **HUD** —cronómetro,
@@ -750,6 +754,44 @@ Por el camino apareció que **la referencia no era determinista**: buscaba el en
 dibujo por desplazamiento en un `HashMap` de semilla aleatoria. Se arregló en los dos
 lados buscando por la dirección del paquete.
 
+## M3 — FMV (cerrado en emulador 2026-10-26)
+
+Detalle en `docs/hitos/M3.md`.
+
+- **Dos caminos:** `Movie_Play` (5 películas `.XA`, 256×240 a 15 fps con audio XA estéreo a
+  37 800 Hz, 3 min 11 s) y los `VIDEO_*` del front end (31 clips `.DCT`, 160×128 y 80×80, sin
+  audio, que el juego dibuja como texturas desde la VRAM).
+- **Decisiones de Jorge:** el bitstream original se decodifica en el SH-4 (sin recodificar)
+  y el color lo convierte el **conversor YUV del PVR**; el audio de las películas suena ya en
+  M3; durante una película el rendimiento no es criterio, solo conservar sus fps; las
+  películas se leen **de los datos del juego**, sin hornear (abre la puerta al disco
+  original de M9; en M8 se puede volver a un formato horneado).
+- **Decodificador en C** (`dc/src/host/mdec.c`), traducido de la referencia: con la IDCT
+  literal, las 5 películas y los 31 clips **idénticos byte a byte**, y el audio muestra a
+  muestra; con la IDCT rápida (la que se usa), diferencia máxima de 1 en el 0,0004 %.
+  En SH-4 (Flycast) un frame de la intro cuesta 28 ms de los 66,7.
+- **Películas** (`dc/src/platform/dc/movie.c`): lectura por delante, MDEC → YUV420 →
+  conversor YUV → textura a pantalla completa, audio por `snd_stream`. Intro: 1 358 frames en
+  90,64 s (14,98 fps), 0 tarde, 90,13 s de audio sin huecos. Jorge lo oye bien y sincronizado.
+- **Video wall** (`dc/src/host/video.c`), traducido de la referencia; deja de neutralizarse
+  en el test diferencial: `carrera_completa` sigue idéntica en 40 000 frames con él.
+- **Rendimiento del video wall:** de ~25 a **~40 fps** en el menú y ~43 en la selección de
+  pista, quitando el intérprete (el backend C genera dos funciones HLE que el host no
+  siempre atiende y una a la que solo se llega por puntero) y arreglando la caché de
+  texturas (reconvertir en el sitio y subir al PVR solo lo convertido).
+
+Trampas que costaron y conviene recordar:
+
+- **`gamedata/MOVIES` estaba incompleto:** el extractor copiaba 2 048 bytes por sector y el
+  audio XA (forma 2) no cabe. `extract_iso.py` copia ahora los `.XA` con los sectores enteros.
+  Y el test diferencial pasaba sin saltar las películas solo porque la referencia no podía
+  leer esas copias.
+- **El driver ARM del AICA de nuestro KOS no arranca en Flycast** (commit `8690c6dd`, junio
+  de 2026): no sonaba nada. Se carga el de justo antes, sacado del historial de KOS.
+- **Flycast deja `PVR_YUV_STAT` en 0:** esperarlo tiraba 25-30 ms por frame.
+- **Al cortar una película**, la pantalla a negro: si no, su último frame se queda quieto
+  durante la carga y parece colgado.
+
 ---
 
 ## Decisiones vigentes
@@ -895,6 +937,8 @@ incompleta— los encontró el oráculo, no la lectura del código.
   y, para 720p, dos referencias de homebrew que aporta Jorge (en §4 de CLAUDE.md), sin
   investigar.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.
+- **Driver ARM del AICA (M3):** si el de KOS actual suena en una consola, y avisar aguas
+  arriba (M7). Igual con `PVR_YUV_STAT` en hardware.
 - **Autor de nfshs-rs:** contacto sobre licencia y posible colaboración.
 - **Resolución: 640×480 y FSAA horizontal** (investigado el 2026-10-25, `docs/resolucion.md`).
   El Dreamcast ya usa la temporización de 720×480 (858 relojes × 525 líneas) con 640 píxeles

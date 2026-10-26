@@ -10,8 +10,8 @@ de forma nativa con el PowerVR**.
 Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación como en los
 mensajes. Los identificadores de código van en inglés.
 
-Última actualización: 2026-10-26. Estado: **M0, M1a y M2 cerrados (M1b y M2, en emulador);
-el trabajo actual es M3 (FMV).** M1b cumple su criterio
+Última actualización: 2026-10-26. Estado: **M0, M1a, M2 y M3 cerrados (M1b, M2 y M3, en
+emulador); el trabajo actual es M4 (audio).** M1b cumple su criterio
 funcional: el juego **arranca con la BIOS real** desde un CDI (`mkdisc.sh`, formato por
 omisión), el front end corre a 69–78 fps y la **carrera simula a 98–113 fps**, `ps1rt`
 pasa **227/227** en SH-4 y el código generado ocupa **3,43 MB** con `-Os` (sin overlays).
@@ -23,7 +23,10 @@ escenario— a **60 fps**. **M2c cumple su criterio en emulador (2026-10-26)**: 
 de los menús a la meta, las estadísticas, la repetición y de vuelta a los menús, sale
 **idéntica a la referencia en 40 000 frames** (RAM, 2D y vista). Coches, objetos, HUD,
 efectos, showroom, pausa y noche se dibujan en Dreamcast a 30-43 fps; la lluvia y la
-lluvia de noche se compararon además con el original en DuckStation.**
+lluvia de noche se compararon además con el original en DuckStation.** **M3 cierra en emulador
+(2026-10-26)**: las películas (intro, logo y demos) se ven y suenan a sus 15 fps, leídas de
+los datos del juego, y el video wall de los menús es idéntico a la referencia en 40 000
+frames, con los menús a ~40 fps.
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y
@@ -42,7 +45,7 @@ todo el trabajo del port va en la rama **`dc`**. El C vive en el árbol **`dc/`*
 3. Corre `python -I dc/tools/recomp/m0_stats.py`. Si los números no coinciden con la
    sección 6, para y avisa antes de seguir. (`codegen_metrics.py` da las cifras del
    dimensionado del backend C.)
-4. El trabajo actual es **M3** (FMV). M2 está cerrado en emulador (`docs/hitos/M2c.md`). Mantén la lista de tareas y deja
+4. El trabajo actual es **M4** (audio). M3 está cerrado en emulador (`docs/hitos/M3.md`). Mantén la lista de tareas y deja
    las cifras nuevas en `docs/hitos/`; cada hito tiene su archivo.
 
 ## 2. Qué es la recompilación estática (resumen)
@@ -133,7 +136,7 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 | M2a | Grabación en C + modos 480p/480i + 2D en PVR + espejo de VRAM y texturas | **Hecho en emulador (2026-10-23).** Front end navegable y legible, con los dos modos probados en Flycast; la lectura en una tele en 480i pasa a M7 (`docs/hitos/M2a.md`) |
 | M2b | Pista y cielo en PVR (transformación en SH-4, recorte por plano cercano) | **Hecho en emulador (2026-10-23).** La carrera se dibuja a **60 fps** con ~1 150 triángulos de pista y 104 de cielo. La transformación va en C con `float`, **sin FTRV**: esa optimización queda para M8 y ahora hay con qué medirla (`docs/hitos/M2b.md`) |
 | M2c | Coches, props y efectos | **Criterio cumplido en emulador (2026-10-26).** Carrera completa de un jugador idéntica a la referencia en 40 000 frames (`carrera_completa.txt`, con el piloto de pruebas de la referencia); showroom, pausa, policía y noche. 30-43 fps en Flycast (`docs/hitos/M2c.md`) |
-| M3 | FMV: los vídeos del juego (STR/MDEC de PS1) | Los vídeos de la intro y del juego se ven en Dreamcast |
+| M3 | FMV: los vídeos del juego (STR/MDEC de PS1) | **Hecho en emulador (2026-10-26).** Las 5 películas se ven y suenan en Flycast a sus 15 fps (MDEC en SH-4, conversor YUV del PVR, audio XA por el AICA), leídas de los datos del juego; Start las salta. El video wall de los menús, idéntico a la referencia en 40 000 frames; menús a ~40 fps (`docs/hitos/M3.md`) |
 | M4 | Middleware de audio: SPU → AICA (ADPCM de PS1 convertido al hornear) | Música, motor y efectos en el front end y en carrera |
 | M5 | Middleware de IO: controles (mando de Dreamcast, analógicos, gatillos, vibración) y 2 jugadores | Front end y carrera jugables con el mando de Dreamcast, también a pantalla partida con dos mandos |
 | M6 | Middleware de IO: guardado y VMU (memory card de PS1 → VMU) | Guardar y cargar la partida en la VMU |
@@ -432,7 +435,6 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
   - **VRAM del PVR:** hay riesgo de thrash, porque PS1 sube texturas y CLUTs de forma
     dinámica.
   - **Audio:** hay que mapear las subidas DMA del driver EA a las muestras convertidas.
-  - **FMV (M3):** STR/MDEC.
 - **Abiertas:**
   - **M9:** factor de escala de las texturas (2× como base), método y formato.
   - **Objetivos descartables de M9:** salida en 720p, resolución interna 3×, widescreen y

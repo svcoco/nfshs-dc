@@ -160,6 +160,17 @@ void car_free(CarModel *m)
 
 /* ---- el dibujo ---- */
 
+/* El sesgo con el que el original ordena cada parte en su tabla (R3DCar_ObjectInfo, byte 0;
+ * CAR_PART_BIAS de la referencia): negativo es "por encima de lo que la rodea" (matricula,
+ * faros, pilotos, calcomanias). La PS1 no tiene buffer de profundidad y ordena; aqui esas
+ * partes se acercan a la camara 0,003 m por unidad, como la referencia. Sin esto quedaban
+ * tapadas por la carroceria: no se veian los cristales de los faros ni la parrilla. */
+static const int8_t SESGO[57] = {
+    0, 0, 32, 48, -8, -16, -32, -32, -20, -16, -20, -16, -24, -24, -44, -44, -31, -31, -44, -30,
+    -30, -44, -30, -30, -44, -30, -30, -44, -24, -24, -44, -40, -12, -12, -44, 48, 40, 38, 38, 36,
+    36, 0, 0, -16, -16, -24, -24, 31, 31, 32, 32, 32, 32, 32, 32, 32, 32
+};
+
 /* El tono de la pista sobre el color del vertice. Los dos van con 128 como el 1,0 (el color
  * del horneado es 0x80 en lo neutro, y el PVR modula por color/255), asi que se duplica:
  * color * 2 * tono / 128, como la referencia (vertice 0,5 x tinte x 2 del shader). Antes no
@@ -427,6 +438,22 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                     tri[k].v = ((float)v + 0.5f) / 256.0f;
                     tri[k].argb = env_argb;
                     /* un pelo hacia la camara, sobre la carroceria que cubre */
+                    for (j = 0; j < 3u; j++)
+                        hacia[j] = vw.cam[j] - wld[k][j];
+                    dist = sqrtf(hacia[0] * hacia[0] + hacia[1] * hacia[1] + hacia[2] * hacia[2]);
+                    if (dist > 1e-4f)
+                        for (j = 0; j < 3u; j++)
+                            wld[k][j] += hacia[j] / dist * tira;
+                }
+            }
+            /* las partes que van por encima, un poco hacia la camara (ver SESGO) */
+            if (pasada == CAR_PASS_BODY && SESGO[pi] < 0) {
+                float tira = (float)(-SESGO[pi]) * 0.003f;
+
+                for (k = 0; k < 3u; k++) {
+                    float hacia[3], dist;
+                    uint32_t j;
+
                     for (j = 0; j < 3u; j++)
                         hacia[j] = vw.cam[j] - wld[k][j];
                     dist = sqrtf(hacia[0] * hacia[0] + hacia[1] * hacia[1] + hacia[2] * hacia[2]);

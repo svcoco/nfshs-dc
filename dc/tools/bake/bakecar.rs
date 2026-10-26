@@ -314,6 +314,8 @@ pub fn pal_stats(data: &assets::GameData, code: &str) -> Result<()> {
         let area: usize = psh.shapes.iter().filter(|s| s.kind != 0x41).map(|s| s.width as usize * s.height as usize).sum();
         println!("{n}: {} formas {kinds:x?}, {} paletas distintas, {} colores, filas de pintura {paint_rows}, area {area} texeles",
                  psh.shapes.len(), pals.len(), colours.len());
+        let nombres: Vec<String> = psh.shapes.iter().filter(|s| s.kind != 0x41).map(|s| format!("{}@{},{} {}x{}", s.name, s.vram.0, s.vram.1, s.width, s.height)).collect();
+        println!("    {}", nombres.join("  "));
     }
     Ok(())
 }

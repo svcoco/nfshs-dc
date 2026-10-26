@@ -119,7 +119,8 @@ typedef struct CarDraw {
      * Newton_CalcRealShadowCoordinates, relativas a la posicion del coche en x y z (la y
      * es la altura de mundo), y su color. Solo se dibuja con `shadow_on`, con el coche
      * visible (`env_ok`) y sin aparcar, que es lo que exige la referencia. */
-    uint8_t  shadow_on, env_ok, parked, pad_s;
+    uint8_t  shadow_on, env_ok, parked;
+    uint8_t  mirror;           /* showroom: el reflejo en el suelo (y espejada); 0 en carrera */
     int32_t  shadow[4][3];
     uint8_t  shadow_rgb[3];
     /* Los reflejos (DrawC_PrimStart, en el cache del coche): dos de los mapas de reflejo
@@ -207,6 +208,10 @@ typedef struct RaceView {
     uint16_t chunks_n;
     int16_t  chunk[VIEW_CHUNKS_MAX];     /* bloque de pista; negativo = hueco */
     uint16_t detail[VIEW_CHUNKS_MAX];    /* nivel de detalle que pide el juego */
+    /* El centro de la proyeccion en la pantalla de PS1 (16.16), si no es el del rectangulo:
+     * el showroom lo fija con OFX/OFY del GTE. */
+    uint8_t  centre_on;
+    int32_t  centre[2];
 } RaceView;
 
 typedef struct GameHost {

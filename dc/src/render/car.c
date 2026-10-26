@@ -146,10 +146,13 @@ void car_free(CarModel *m)
 
 /* ---- el dibujo ---- */
 
-/* El tono de la pista sobre el color del vertice, con 128 como el 1,0. */
+/* El tono de la pista sobre el color del vertice. Los dos van con 128 como el 1,0 (el color
+ * del horneado es 0x80 en lo neutro, y el PVR modula por color/255), asi que se duplica:
+ * color * 2 * tono / 128, como la referencia (vertice 0,5 x tinte x 2 del shader). Antes no
+ * se duplicaba y los coches salian a la mitad de brillo. */
 static uint32_t tinta(uint32_t canal, uint32_t tono)
 {
-    uint32_t v = canal * tono / 128u;
+    uint32_t v = canal * tono / 64u;
 
     return v > 255u ? 255u : v;
 }
@@ -268,7 +271,7 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
         float lift = (float)d->dimension[1] / 65536.0f;
 
         pos[0] = -(float)d->pos[0] / 65536.0f - up[0] * lift;
-        pos[1] = (float)d->pos[1] / 65536.0f - up[1] * lift;
+        pos[1] = (d->mirror ? -1.0f : 1.0f) * (float)d->pos[1] / 65536.0f - up[1] * lift;
         pos[2] = (float)d->pos[2] / 65536.0f - up[2] * lift;
     }
 
@@ -277,6 +280,8 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
         uint32_t r = d->light & 0xFFu, g = (d->light >> 8) & 0xFFu, b = (d->light >> 16) & 0xFFu;
 
         tono = (r + g + b) / 3u;
+        if (tono < 24u)
+            tono = 24u;            /* car_light de la referencia */
         if (tono > 255u)
             tono = 255u;
     }
@@ -346,6 +351,10 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                 wld[k][0] = pos[0] + ejes[0][0] * q[0] + ejes[1][0] * q[1] + ejes[2][0] * q[2];
                 wld[k][1] = pos[1] + ejes[0][1] * q[0] + ejes[1][1] * q[1] + ejes[2][1] * q[2];
                 wld[k][2] = pos[2] + ejes[0][2] * q[0] + ejes[1][2] * q[1] + ejes[2][2] * q[2];
+                /* el reflejo del showroom: como la referencia, la altura del coche negada y
+                 * despues la y del mundo espejada (el suelo esta en y = 0) */
+                if (d->mirror)
+                    wld[k][1] = -wld[k][1];
 
                 memcpy(&c, &v[5], sizeof c);
                 tri[k].u = v[3];

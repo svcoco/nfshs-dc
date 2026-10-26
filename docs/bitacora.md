@@ -382,6 +382,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
 | 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **Hecho en emulador** (2026-10-25); la lluvia, comparada con el original en DuckStation |
+| 7 | El showroom del front end | **En curso**: grabado con oráculo y dibujado; faltan el mapa de reflejo y hornear todos los coches |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -441,6 +442,44 @@ de VRAM por coche).
 **Dibujar los coches no cuesta casi nada; lo que cuesta es grabarlos.** Con el dibujo
 apagado el ritmo es el mismo, así que la caída de ~60 a 30–40 fps la produce el paso 3,
 que corre código real del juego cada frame. Es trabajo de M3.
+
+### Paso 7: el showroom del front end (en curso)
+
+El coche de la selección, del concesionario y del garaje no se pintaba: del showroom solo
+estaba portada la **mecánica** (lo que el original escribe en memoria y en el GTE). Ahora se
+graba como la referencia —el coche y su reflejo con pose, partes, cámara y proyección del
+GTE; los halos; la sombra; y el suelo, con el anillo, sus luces que giran y el foco— y se
+dibuja con el PVR.
+
+**Con oráculo:** el volcado de la lista 2D (versión 2) incluye el showroom: **92 coches y 46
+suelos idénticos** en `race_long`, **1 000 y 646** en `lluvia`. Eran los «138 comandos que el
+port no produce todavía».
+
+**La deuda de «dos cuadros de menos» de los menús quedó resuelta**, y no era del showroom:
+eran los dos cuadros del vídeo de la pista que gira en la pantalla de pista
+(`tScreenTrackSelect::DrawVideoWall`), que la referencia graba y el port no. Portado: la lista
+2D sale **idéntica entera** (370 703 cuadros en `race_long`, 935 968 en `lluvia`).
+
+**Dibujo.** Los coches del showroom son 3D con profundidad y van en la lista punch-through,
+antes que la translúcida; el orden de la referencia (2D de debajo, reflejo, suelo, coche, 2D
+de encima) se consigue con la **profundidad**: el reflejo comprimido a una franja lejana, el
+2D de debajo a la profundidad del fondo con `GEQUAL` (solo donde no hay coche), el suelo por
+encima del reflejo y por debajo del coche, y el resto sin prueba. Proyecta con la distancia
+y el centro del GTE del juego. Visto en Flycast: coche, reflejo, plataforma y halos, como en
+el original en DuckStation.
+
+**Dos fallos de brillo que venían de antes, encontrados al compararlo con DuckStation:**
+- **El 2D sin textura salía al doble de brillo.** El «0x80 es el 1,0» vale solo con textura;
+  sin ella la PS1 pinta el color del vértice tal cual. Afectaba a los cuadros planos del
+  front end, a los destellos, al foco y a la lluvia. Las «manchas blancas» de la cuenta atrás
+  eran esto, no su aspecto original.
+- **Los coches salían a la mitad de brillo**, en carrera desde el paso 4: el color del
+  vértice horneado es 0x80 en lo neutro y el PVR modula por color/255, así que hay que
+  doblarlo. Además, la luz lleva el mínimo de 24 de la referencia.
+
+**Falta:** el mapa de reflejo sobre la carrocería del coche del showroom (sale de la VRAM), las
+sombras de los pasos de rueda en el showroom, y el punto 3 (hornear los ~22 coches; la
+decisión de la pintura es de Jorge).
 
 ### Paso 6: los efectos (hecho en emulador)
 
@@ -712,10 +751,6 @@ incompleta— los encontró el oráculo, no la lectura del código.
   las primitivas semitransparentes; ARGB1555 tiene **un solo bit** de alfa. Hoy se
   resuelve por modo de mezcla del cuadro entero, no por texel.
 - **Leer el front end en 480i.** Está probado el modo, no la legibilidad en una tele.
-- **Dos cuadros de menos** en los menús: en los frames 126–130 de `race_long.txt` (239
-  contra 241 de la referencia) y en todos los que recorre `lluvia.txt` (296–1 160, de la
-  pantalla de pista al garaje). Los frames de carrera son idénticos. `front_end_120.txt`
-  no llega ahí.
 - **M4:** factor de escala de las texturas, método y formato.
 - **Alcance:** si la primera versión incluye 2P y FMV.
 - **Parche local a KallistiOS:** habría que proponerlo aguas arriba.
@@ -726,6 +761,10 @@ incompleta— los encontró el oráculo, no la lectura del código.
   emulador de PS1). Por encima, solo el FSAA horizontal del PVR (1 280×480 promediado):
   probado en Flycast sin commit, coste sin medir. Pendiente de decisión de Jorge, a evaluar en
   M3 con una consola.
+- **La pintura de los coches (decisión de Jorge).** El showroom deja elegir entre 16
+  colores y hoy cada color es un `.CAR` distinto: o un archivo por coche y color (~98 MB más
+  de disco) o texturas paletizadas del PVR (un `.CAR` por coche, menos disco y hasta 4× menos
+  VRAM, pero rehacer el formato). Claude propone la segunda.
 - **El coste en fps del paso 6 está sin medir.** Destellos, humo, clima y reflejos
   añaden rutinas del juego por frame y pases del PVR; no se ha separado su coste.
 - **Coste de las inversiones del PVR sin medir en consola.** Cada frame con efectos añade

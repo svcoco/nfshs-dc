@@ -132,6 +132,7 @@ static void pista_carga(const char *nombre)
 
 static int s_modo;
 static float s_zmul = 1.0f;   /* acerca lo dibujado a la camara; ver los efectos */
+static float s_zadd;
 /* Fase del dibujo del mundo. Solo el cielo cambia de contexto sobre la marcha (sus
  * cuadros son unos planos y otros con textura); la pista y los coches lo fijan antes y
  * el sumidero no lo toca. */
@@ -181,7 +182,7 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
             pv.flags = PVR_CMD_VERTEX_EOL;
         pv.x = v[i].x;
         pv.y = v[i].y;
-        pv.z = v[i].z * s_zmul;
+        pv.z = v[i].z * s_zmul + s_zadd;
         pv.u = v[i].u;
         pv.v = v[i].v;
         pv.argb = v[i].argb;
@@ -674,9 +675,12 @@ static uint32_t p2_argb(const P2 *p)
 
 static uint32_t color_de(const OverlayQuad *q, int k, int semi)
 {
-    /* el 0x80 de PS1 es el 1,0: se duplica y se satura */
-    uint32_t c = q->colours[k];
-    uint32_t r = (c & 0xFFu) * 2u, g = ((c >> 8) & 0xFFu) * 2u, b = ((c >> 16) & 0xFFu) * 2u;
+    /* Con textura, el 0x80 de PS1 es el 1,0: se duplica y se satura. SIN textura la PS1
+     * pinta el color del vertice tal cual (la referencia divide por 510 y no por 256), asi
+     * que no se duplica: antes salian al doble de brillo los cuadros planos, los destellos,
+     * el foco del showroom y la lluvia. */
+    uint32_t c = q->colours[k], m = q->has_tex ? 2u : 1u;
+    uint32_t r = (c & 0xFFu) * m, g = ((c >> 8) & 0xFFu) * m, b = ((c >> 16) & 0xFFu) * m;
 
     if (r > 255u) r = 255u;
     if (g > 255u) g = 255u;
@@ -888,11 +892,233 @@ static void clima_dibuja(GameHost *h, float sx, float sy)
     inversion(bx0, by0, bx1, by1);
 }
 
+/* Un cuadro del 2D (front end, HUD, suelo del showroom) en la lista translucida. */
+static void dibuja_2d(GameHost *h, const OverlayQuad *q, const Rect *clip, float sx, float sy,
+                      float z, int prueba)
+{
+    const TexEntry *e;
+    pvr_poly_cxt_t cxt;
+    pvr_poly_hdr_t hdr;
+    pvr_vertex_t v;
+    float px[4], py[4], pu[4], pv[4];
+    int k, alineado, npol;
+    P2 pol[16];
+
+    e = q->has_tex ? tex_find(&h->texcache, q->tex.tpage, q->tex.clut) : NULL;
+    if (q->has_tex && e == NULL)
+        return;
+
+    for (k = 0; k < 4; k++) {
+        px[k] = (float)q->pts[k][0] * sx;
+        py[k] = (float)q->pts[k][1] * sy;
+        if (e != NULL) {
+            pu[k] = ((float)q->tex.uv[k][0] - (float)e->u0) / (float)e->w;
+            pv[k] = ((float)q->tex.uv[k][1] - (float)e->v0) / (float)e->h;
+        } else {
+            pu[k] = 0.0f;
+            pv[k] = 0.0f;
+        }
+    }
+
+    /* El poligono en orden de perimetro (la tira TL, TR, BL, BR da 0, 1, 3, 2). */
+    {
+        static const int per[4] = { 0, 1, 3, 2 };
+
+        for (k = 0; k < 4; k++) {
+            uint32_t c = color_de(q, per[k], q->semi);
+
+            pol[k].x = px[per[k]];
+            pol[k].y = py[per[k]];
+            pol[k].u = pu[per[k]];
+            pol[k].v = pv[per[k]];
+            pol[k].a = (float)(c >> 24);
+            pol[k].r = (float)((c >> 16) & 0xFFu);
+            pol[k].g = (float)((c >> 8) & 0xFFu);
+            pol[k].b = (float)(c & 0xFFu);
+        }
+        npol = 4;
+    }
+
+    /* recorte: los alineados por el camino corto, que mueve tambien los texeles */
+    alineado = (px[0] == px[2] && px[1] == px[3] &&
+                py[0] == py[1] && py[2] == py[3]);
+    if (!alineado) {
+        float bx0 = pol[0].x, bx1 = pol[0].x, by0 = pol[0].y, by1 = pol[0].y;
+
+        for (k = 1; k < 4; k++) {
+            if (pol[k].x < bx0) bx0 = pol[k].x;
+            if (pol[k].x > bx1) bx1 = pol[k].x;
+            if (pol[k].y < by0) by0 = pol[k].y;
+            if (pol[k].y > by1) by1 = pol[k].y;
+        }
+        if (bx1 < clip->x0 || bx0 > clip->x1 || by1 < clip->y0 || by0 > clip->y1)
+            return;                      /* entero fuera */
+        if (bx0 < clip->x0 || bx1 > clip->x1 || by0 < clip->y0 || by1 > clip->y1) {
+            npol = p2_recorta(pol, 4, clip);
+            if (npol < 3)
+                return;
+        }
+    }
+    if (alineado) {
+        if (!recorta(&px[0], &py[0], &px[1], &py[2],
+                     &pu[0], &pv[0], &pu[1], &pv[2], clip))
+            return;
+        px[2] = px[0]; px[3] = px[1];
+        py[1] = py[0]; py[3] = py[2];
+        pu[2] = pu[0]; pu[3] = pu[1];
+        pv[1] = pv[0]; pv[3] = pv[2];
+        {
+            static const int per[4] = { 0, 1, 3, 2 };
+
+            for (k = 0; k < 4; k++) {
+                pol[k].x = px[per[k]];
+                pol[k].y = py[per[k]];
+                pol[k].u = pu[per[k]];
+                pol[k].v = pv[per[k]];
+            }
+        }
+    }
+
+    if (e != NULL)
+        pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
+                         PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
+                         e->w, e->h,
+                         (pvr_ptr_t)((uint8_t *)tex_vram + e->offset * 2u),
+                         PVR_FILTER_NONE);
+    else
+        pvr_poly_cxt_col(&cxt, PVR_LIST_TR_POLY);
+    /* orden del pintor: sin escritura de profundidad; con `prueba`, solo donde no hay un
+     * coche del showroom delante (ver el showroom) */
+    cxt.depth.comparison = prueba ? PVR_DEPTHCMP_GEQUAL : PVR_DEPTHCMP_ALWAYS;
+    cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+    cxt.gen.culling = PVR_CULLING_NONE;
+    modo_mezcla(&cxt, q->semi, q->abr);
+    pvr_poly_compile(&hdr, &cxt);
+    pvr_prim(&hdr, sizeof(hdr));
+
+    /* El poligono va como tira en zigzag: p0, p1, p(n-1), p2, p(n-2)... que para un
+     * cuadro sin recortar es la tira TL, TR, BL, BR de siempre. */
+    v.flags = PVR_CMD_VERTEX;
+    v.z = z;
+    v.oargb = 0;
+    for (k = 0; k < npol; k++) {
+        int i = (k == 0) ? 0 : ((k & 1) ? (k + 1) / 2 : npol - k / 2);
+
+        if (k == npol - 1)
+            v.flags = PVR_CMD_VERTEX_EOL;
+        v.x = pol[i].x;
+        v.y = pol[i].y;
+        v.u = pol[i].u;
+        v.v = pol[i].v;
+        v.argb = p2_argb(&pol[i]);
+        pvr_prim(&v, sizeof(v));
+    }
+    s_quads++;
+    s_strips++;
+}
+
+/* ---- el showroom del front end (M2c paso 7) ----
+ *
+ * El coche de la pantalla de seleccion, su reflejo en el suelo y la plataforma, grabados por
+ * el host (host/showroom.c). La referencia (game/fe.rs) dibuja, en este orden: el 2D de
+ * debajo, el reflejo, el suelo, el coche y el 2D de encima. En el PVR los coches son 3D con
+ * profundidad y van en la lista punch-through, que se dibuja antes que la translucida; el
+ * orden se consigue con la PROFUNDIDAD:
+ *
+ *   - el reflejo se comprime a una franja lejana (Z_REFLEJO), por debajo del suelo;
+ *   - el 2D de debajo va a la profundidad del fondo con GEQUAL: solo pasa donde no hay coche;
+ *   - el suelo va a Z_SUELO con GEQUAL: tapa el reflejo y no el coche;
+ *   - el 2D de encima, sin prueba.
+ *
+ * Proyecta como el GTE del juego: su distancia H y su centro OFX/OFY (ver RaceView). */
+#define Z_SUELO   0.0005f
+#define Z_REFLEJO 0.0007f     /* 1/w del reflejo -> Z_FONDO + 1/w * Z_REFLEJO (< Z_SUELO) */
+
+static int showroom_hay(const GameHost *h)
+{
+    uint32_t i;
+
+    for (i = 0; i < h->overlay.n; i++)
+        if (h->overlay.quad[i].kind == OVL_SR_CAR)
+            return 1;
+    return 0;
+}
+
+static void showroom_coches(GameHost *h)
+{
+    static RaceView rv;
+    uint32_t i;
+
+    for (i = 0; i < h->overlay.n; i++) {
+        const OverlayQuad *q = &h->overlay.quad[i];
+        const ShowroomCar *s;
+        CarDraw d;
+        pvr_poly_cxt_t cxt;
+        pvr_poly_hdr_t hdr;
+        TrackStats cst;
+        uint32_t k, j;
+
+        if (q->kind != OVL_SR_CAR || (uint16_t)q->pts[0][0] >= SROOM_MAX)
+            continue;
+        s = &h->sroom[(uint16_t)q->pts[0][0]];
+        k = coche_modelo(s->d.code);
+        if (k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL || s_coches[k].atlas == NULL)
+            continue;
+        memset(&rv, 0, sizeof rv);
+        for (j = 0; j < 3u; j++)
+            rv.camera_pos[j] = s->cam_pos[j];
+        for (j = 0; j < 9u; j++)
+            rv.camera_rot[j] = s->cam_rot[j];
+        rv.projection = s->h;
+        rv.rect[2] = (int16_t)h->display[2];
+        rv.rect[3] = (int16_t)h->display[3];
+        rv.centre_on = 1;
+        rv.centre[0] = s->ofx;
+        rv.centre[1] = s->ofy;
+        d = s->d;
+        d.mirror = s->mirrored;
+
+        pvr_poly_cxt_txr(&cxt, PVR_LIST_PT_POLY,
+                         PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
+                         s_coches[k].modelo.atlas_w, s_coches[k].modelo.atlas_h,
+                         s_coches[k].atlas, PVR_FILTER_BILINEAR);
+        cxt.gen.culling = PVR_CULLING_NONE;
+        pvr_poly_compile(&hdr, &cxt);
+        pvr_prim(&hdr, sizeof(hdr));
+        s_fase = FASE_RESTO;
+        s_zmul = s->mirrored ? Z_REFLEJO : 1.0f;
+        s_zadd = s->mirrored ? Z_FONDO : 0.0f;
+        car_draw(&s_coches[k].modelo, &d, &rv, CAR_PASS_BODY, 640.0f, 480.0f,
+                 pista_emite, NULL, &cst);
+        s_tri_coches += cst.quads_out;
+    }
+    s_zmul = 1.0f;
+    s_zadd = 0.0f;
+}
+
+/* El suelo: los cuadros de todos los suelos del frame, cada uno al reves (como la referencia
+ * los coloca justo antes del coche), con la profundidad del suelo. */
+static void showroom_suelo(GameHost *h, const Rect *clip, float sx, float sy)
+{
+    uint32_t i, k;
+
+    for (i = 0; i < h->overlay.n; i++) {
+        const OverlayQuad *q = &h->overlay.quad[i];
+        uint32_t ini = (uint16_t)q->pts[0][0], n = (uint16_t)q->pts[0][1];
+
+        if (q->kind != OVL_SR_FLOOR || ini + n > SROOM_FLOOR_MAX)
+            continue;
+        for (k = n; k > 0u; k--)
+            dibuja_2d(h, &h->sroom_floor[ini + k - 1u], clip, sx, sy, Z_SUELO, 1);
+    }
+}
+
 void render_frame(GameHost *h)
 {
     float sx, sy, z = 1.0f;
     Rect clip;
     uint32_t i;
+    int hay_coche, prueba;
 
     if (h->display[2] == 0u || h->display[3] == 0u)
         return;
@@ -911,6 +1137,13 @@ void render_frame(GameHost *h)
     pvr_scene_begin();
     /* Primero el mundo, opaco y con Z; despues el overlay 2D encima. */
     pista_dibuja(h);
+    /* el showroom del front end: sus coches son 3D con profundidad */
+    hay_coche = h->views_n == 0u && showroom_hay(h);
+    if (hay_coche) {
+        pvr_list_begin(PVR_LIST_PT_POLY);
+        showroom_coches(h);
+        pvr_list_finish();
+    }
     pvr_list_begin(PVR_LIST_TR_POLY);
     /* el flare del sol: sobre el cielo y debajo del mundo */
     if (h->views_n != 0u)
@@ -925,18 +1158,30 @@ void render_frame(GameHost *h)
     /* y el clima, encima de todo el 3D y debajo del HUD */
     clima_dibuja(h, sx, sy);
 
+    /* con un coche del showroom, el 2D anterior a el va debajo (ver el showroom) */
+    prueba = hay_coche;
     for (i = h->overlay.n; i > 0u; i--) {
         const OverlayQuad *q = &h->overlay.quad[i - 1u];
-        const TexEntry *e;
-        pvr_poly_cxt_t cxt;
-        pvr_poly_hdr_t hdr;
-        pvr_vertex_t v;
-        float px[4], py[4], pu[4], pv[4];
-        int k, alineado, npol;
-        P2 pol[16];
 
-        if (q->kind == OVL_SR_CAR || q->kind == OVL_SR_FLOOR)
+        if (q->kind == OVL_SR_CAR) {
+            /* el primer coche en orden de dibujo: el suelo justo antes, y desde aqui el 2D va
+             * encima de todo */
+            if (prueba) {
+                showroom_suelo(h, &clip, sx, sy);
+                prueba = 0;
+            }
             continue;
+        }
+        if (q->kind == OVL_SR_FLOOR) {
+            /* sin coche, el suelo va en su sitio */
+            if (!hay_coche) {
+                uint32_t ini = (uint16_t)q->pts[0][0], n = (uint16_t)q->pts[0][1], k;
+
+                for (k = n; k > 0u && ini + n <= SROOM_FLOOR_MAX; k--)
+                    dibuja_2d(h, &h->sroom_floor[ini + k - 1u], &clip, sx, sy, z, 0);
+            }
+            continue;
+        }
         if (q->kind == OVL_CLIP) {
             clip.x0 = (float)q->pts[0][0] * sx;
             clip.y0 = (float)q->pts[0][1] * sy;
@@ -945,114 +1190,7 @@ void render_frame(GameHost *h)
             continue;
         }
 
-        e = q->has_tex ? tex_find(&h->texcache, q->tex.tpage, q->tex.clut) : NULL;
-        if (q->has_tex && e == NULL)
-            continue;
-
-        for (k = 0; k < 4; k++) {
-            px[k] = (float)q->pts[k][0] * sx;
-            py[k] = (float)q->pts[k][1] * sy;
-            if (e != NULL) {
-                pu[k] = ((float)q->tex.uv[k][0] - (float)e->u0) / (float)e->w;
-                pv[k] = ((float)q->tex.uv[k][1] - (float)e->v0) / (float)e->h;
-            } else {
-                pu[k] = 0.0f;
-                pv[k] = 0.0f;
-            }
-        }
-
-        /* El poligono en orden de perimetro (la tira TL, TR, BL, BR da 0, 1, 3, 2). */
-        {
-            static const int per[4] = { 0, 1, 3, 2 };
-
-            for (k = 0; k < 4; k++) {
-                uint32_t c = color_de(q, per[k], q->semi);
-
-                pol[k].x = px[per[k]];
-                pol[k].y = py[per[k]];
-                pol[k].u = pu[per[k]];
-                pol[k].v = pv[per[k]];
-                pol[k].a = (float)(c >> 24);
-                pol[k].r = (float)((c >> 16) & 0xFFu);
-                pol[k].g = (float)((c >> 8) & 0xFFu);
-                pol[k].b = (float)(c & 0xFFu);
-            }
-            npol = 4;
-        }
-
-        /* recorte: los alineados por el camino corto, que mueve tambien los texeles */
-        alineado = (px[0] == px[2] && px[1] == px[3] &&
-                    py[0] == py[1] && py[2] == py[3]);
-        if (!alineado) {
-            float bx0 = pol[0].x, bx1 = pol[0].x, by0 = pol[0].y, by1 = pol[0].y;
-
-            for (k = 1; k < 4; k++) {
-                if (pol[k].x < bx0) bx0 = pol[k].x;
-                if (pol[k].x > bx1) bx1 = pol[k].x;
-                if (pol[k].y < by0) by0 = pol[k].y;
-                if (pol[k].y > by1) by1 = pol[k].y;
-            }
-            if (bx1 < clip.x0 || bx0 > clip.x1 || by1 < clip.y0 || by0 > clip.y1)
-                continue;                      /* entero fuera */
-            if (bx0 < clip.x0 || bx1 > clip.x1 || by0 < clip.y0 || by1 > clip.y1) {
-                npol = p2_recorta(pol, 4, &clip);
-                if (npol < 3)
-                    continue;
-            }
-        }
-        if (alineado) {
-            if (!recorta(&px[0], &py[0], &px[1], &py[2],
-                         &pu[0], &pv[0], &pu[1], &pv[2], &clip))
-                continue;
-            px[2] = px[0]; px[3] = px[1];
-            py[1] = py[0]; py[3] = py[2];
-            pu[2] = pu[0]; pu[3] = pu[1];
-            pv[1] = pv[0]; pv[3] = pv[2];
-            {
-                static const int per[4] = { 0, 1, 3, 2 };
-
-                for (k = 0; k < 4; k++) {
-                    pol[k].x = px[per[k]];
-                    pol[k].y = py[per[k]];
-                    pol[k].u = pu[per[k]];
-                    pol[k].v = pv[per[k]];
-                }
-            }
-        }
-
-        if (e != NULL)
-            pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
-                             PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
-                             e->w, e->h,
-                             (pvr_ptr_t)((uint8_t *)tex_vram + e->offset * 2u),
-                             PVR_FILTER_NONE);
-        else
-            pvr_poly_cxt_col(&cxt, PVR_LIST_TR_POLY);
-        /* orden del pintor: sin test ni escritura de profundidad */
-        cxt.depth.comparison = PVR_DEPTHCMP_ALWAYS;
-        cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
-        cxt.gen.culling = PVR_CULLING_NONE;
-        modo_mezcla(&cxt, q->semi, q->abr);
-        pvr_poly_compile(&hdr, &cxt);
-        pvr_prim(&hdr, sizeof(hdr));
-
-        /* El poligono va como tira en zigzag: p0, p1, p(n-1), p2, p(n-2)... que para un
-         * cuadro sin recortar es la tira TL, TR, BL, BR de siempre. */
-        v.flags = PVR_CMD_VERTEX;
-        v.z = z;
-        v.oargb = 0;
-        for (k = 0; k < npol; k++) {
-            int i = (k == 0) ? 0 : ((k & 1) ? (k + 1) / 2 : npol - k / 2);
-
-            if (k == npol - 1)
-                v.flags = PVR_CMD_VERTEX_EOL;
-            v.x = pol[i].x;
-            v.y = pol[i].y;
-            v.u = pol[i].u;
-            v.v = pol[i].v;
-            v.argb = p2_argb(&pol[i]);
-            pvr_prim(&v, sizeof(v));
-        }
+        dibuja_2d(h, q, &clip, sx, sy, prueba ? Z_FONDO : z, prueba);
         z += 0.001f;
         s_quads++;
         s_strips++;

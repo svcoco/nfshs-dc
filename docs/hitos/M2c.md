@@ -53,6 +53,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | 4 | **Horneado y dibujo de los coches** | **Hecho (2026-10-24)**: los coches se ven; 30-40 fps, y el coste **no es dibujarlos** |
 | 5 | **El HUD** | **Hecho (2026-10-24)**: 4 769 frames de carrera con la lista 2D identica a la referencia, HUD incluido |
 | 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | **Hecho en emulador (2026-10-25)**: todos los efectos con oraculo, salvo la imagen; la lluvia, comparada con el original en DuckStation |
+| 7 | **El showroom del front end**: el coche de seleccion, concesionario y garaje | **En curso (2026-10-25)**: grabado con oraculo y dibujado con el PVR |
 
 Los pasos 1 y 3 van primero **porque tienen oraculo**, igual que la lista 2D de M2a y la
 vista de M2b: la referencia graba exactamente lo mismo, asi que se comparan campo a campo
@@ -441,3 +442,49 @@ Un primer intento forzaba el clima escribiendo `GameSetup_tData`. El juego activ
 lluvia sobre la pista **seca** y sin sus texturas, y salían trazos que cruzaban la pantalla y
 gotas como cuadros oscuros, que parecían dudas sobre la GPU de PS1. Eran artefactos del
 forzado, que se retiró.
+
+## 11. Paso 7 (en curso): el showroom del front end (2026-10-25)
+
+Del showroom solo estaba portada la mecanica: el coche no se pintaba. Plan acordado con Jorge:
+(1) grabarlo como la referencia, (2) dibujarlo con el PVR, (3) hornear todos los coches que
+puede ensenar (la decision de la pintura, pendiente).
+
+### 1. Grabacion
+
+| Que | Rutina | Como se graba |
+|---|---|---|
+| coche y reflejo | `R3DCar_InsertCarFacetMenuII` (0x800B3428), dos veces | `ShowroomCar`: pose, partes, camara, H/OFX/OFY del GTE, nivel de luz, reflejo; el modelo, el de `DrawCar` (0x8003AC64) |
+| halos | la misma, con la carroceria saltada | sus paquetes, detras del coche |
+| sombra | `DrawC_ShadowPrimClip` | aparte, hasta que la recoge el suelo |
+| suelo | `R3DCar_Showroom` (0x800B3850) | `ShowroomFloor`: la sombra, el anillo (32 cuadros, con las luces que giran segun el contador de ticks) y el foco (abanico desde el nivel de luz) |
+
+En la lista 2D van como **marcadores** que apuntan a tablas del host, asi la lista de
+cuadros no cambia. Volcado de la lista 2D **version 2**, en los dos lados:
+
+| Oraculo | `race_long` | `lluvia` |
+|---|---|---|
+| coches del showroom | 92 identicos | 1 000 identicos |
+| suelos | 46 identicos | 646 identicos |
+| lista 2D completa | 370 703 cuadros identicos | 935 968 identicos |
+
+La lista 2D sale identica entera por primera vez: la "deuda de dos cuadros" era
+`tScreenTrackSelect::DrawVideoWall` (los dos cuadros del video de la pista que gira, que la
+referencia graba al llamarla desde `DrawBackground`), portada ahora.
+
+### 2. Dibujo
+
+- Los coches van en la lista **punch-through**, con su profundidad; el orden de la referencia
+  (2D de debajo, reflejo, suelo, coche, 2D de encima) se hace con la profundidad: reflejo en
+  una franja lejana (`Z_FONDO + 1/w x 0,0007`), 2D de debajo a `Z_FONDO` con `GEQUAL`, suelo a
+  `0,0005` con `GEQUAL`, y el resto sin prueba.
+- Proyeccion con la distancia y el centro del GTE (`RaceView.centre`); el reflejo con la
+  altura negada y la y espejada, como la referencia (`CarDraw.mirror`).
+- Visto en Flycast: coche, reflejo, plataforma con su foco y halos de los pilotos.
+
+Al compararlo con DuckStation aparecieron **dos fallos de brillo anteriores**: el 2D sin
+textura salia al doble (el 0x80 = 1,0 solo vale con textura) y los coches a la mitad (el color
+neutro del horneado es 0x80 y el PVR modula por color/255). Corregidos; tambien el minimo de
+luz 24 de la referencia.
+
+**Falta:** el mapa de reflejo de la carroceria en el showroom (de la VRAM), las sombras de los
+pasos de rueda en el showroom y hornear los ~22 coches.

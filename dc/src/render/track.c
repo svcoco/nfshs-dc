@@ -188,6 +188,10 @@ void view_init(View *vw, const struct RaceView *v, float sw, float sh)
     vw->ky = sh / ph;
     vw->ox = sw * 0.5f;
     vw->oy = sh * 0.5f;
+    if (v->centre_on) {
+        vw->ox = (float)v->centre[0] / 65536.0f * vw->kx;
+        vw->oy = (float)v->centre[1] / 65536.0f * vw->ky;
+    }
 }
 
 static void proyecta(const View *vw, const Cv *c, TrackVert *o)

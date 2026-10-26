@@ -30,7 +30,7 @@ int car_load(CarModel *m, const char *path)
 {
     FILE *f;
     long size;
-    uint32_t off_parts, off_verts, atlas_off, env_off, i;
+    uint32_t off_parts, off_verts, atlas_off, env_off, series_n, i;
 
     memset(m, 0, sizeof(*m));
     f = fopen(path, "rb");
@@ -54,7 +54,7 @@ int car_load(CarModel *m, const char *path)
     fclose(f);
     m->size = (uint32_t)size;
 
-    if (size <= 40 || memcmp(m->raw, "NFSC", 4) != 0 || crd32(m->raw + 4) != 2u) {
+    if (size <= 44 || memcmp(m->raw, "NFSC", 4) != 0 || crd32(m->raw + 4) != 3u) {
         car_free(m);
         return 0;
     }
@@ -66,11 +66,12 @@ int car_load(CarModel *m, const char *path)
     for (i = 0; i < 3u; i++)
         m->half_extents[i] = crdf(m->raw + 24u + 4u * i);
     env_off = crd32(m->raw + 36u);
+    series_n = crd32(m->raw + 40u);
 
-    off_parts = 40u;   /* la cabecera: 4+4+2+2+2+2+4+4+12+4 */
+    off_parts = 44u;   /* la cabecera: 4+4+2+2+2+2+4+4+12+4+4 */
     off_verts = off_parts + (uint32_t)m->parts * 24u;
-    if (off_verts + m->verts * 24u != atlas_off ||
-        atlas_off + (uint32_t)m->atlas_w * m->atlas_h * 2u != env_off ||
+    if (off_verts + m->verts * 24u != atlas_off || series_n == 0u || series_n > 65536u ||
+        atlas_off + (uint32_t)m->atlas_w * m->atlas_h * 2u + series_n * 128u != env_off ||
         env_off + (uint32_t)m->parts * 8u > m->size) {
         car_free(m);
         return 0;
@@ -117,7 +118,9 @@ int car_load(CarModel *m, const char *path)
         }
     }
     m->vert = (const float *)(const void *)(m->raw + off_verts);
-    m->atlas = (const uint16_t *)(const void *)(m->raw + atlas_off);
+    m->indices = (const uint16_t *)(const void *)(m->raw + atlas_off);
+    m->series = m->indices + (uint32_t)m->atlas_w * m->atlas_h;
+    m->series_n = series_n;
     return 1;
 }
 
@@ -135,6 +138,17 @@ int car_refl_load(uint16_t *texels, const char *path)
     fclose(f);
     /* el archivo es little-endian, como el SH-4 y el x86 */
     return ok;
+}
+
+void car_paint(const CarModel *m, uint8_t paint, uint16_t *out)
+{
+    uint32_t n = (uint32_t)m->atlas_w * m->atlas_h, i, p = paint & 63u;
+
+    for (i = 0; i < n; i++) {
+        uint32_t s = m->indices[i];
+
+        out[i] = s < m->series_n ? m->series[s * 64u + p] : 0u;
+    }
 }
 
 void car_free(CarModel *m)

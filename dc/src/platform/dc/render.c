@@ -196,17 +196,29 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
  * Cada modelo trae su propio atlas (512x256, un cuarto de megabyte), asi que hay una
  * cache pequena: los que caben a la vez en una vista. Se cargan la primera vez que su
  * codigo aparece y se quedan; el guion de una carrera no usa muchos mas.
+ *
+ * La textura va aparte, por PINTURA (M2c paso 7): el .CAR trae los indices y los colores de
+ * las 64 pinturas, y la textura de una pintura se expande al pedirla y se sube al PVR. Cada
+ * modelo guarda hasta PINTURAS texturas, para que dos coches iguales con distinta pintura no
+ * se pisen; cambiar de color en el showroom es expandir otra.
  */
 #define CARS_CACHE 6u
+#define PINTURAS   4u
 
 static struct {
     CarModel  modelo;
-    pvr_ptr_t atlas;
+    struct { pvr_ptr_t vram; uint8_t paint; uint32_t uso; } tex[PINTURAS];
+    uint32_t  ntex;
+    uint32_t  uso;            /* para expulsar el menos usado cuando la cache se llena */
 } s_coches[CARS_CACHE];
+static uint16_t s_pintado[512u * 256u] __attribute__((aligned(32)));
+static uint32_t s_uso;
+static uint64_t s_expansiones;
 static uint32_t s_coches_n;
 static uint64_t s_tri_coches;
 
 uint64_t render_car_tris(void) { return s_tri_coches; }
+uint64_t render_car_paints(void) { return s_expansiones; }
 static uint64_t s_tri_efectos;
 uint64_t render_fx_tris(void)  { return s_tri_efectos; }
 
@@ -218,10 +230,28 @@ static uint32_t coche_modelo(const char *code)
     CarModel *m;
 
     for (i = 0; i < s_coches_n; i++)
-        if (strncmp(s_coches[i].modelo.code, code, 8) == 0)
+        if (strncmp(s_coches[i].modelo.code, code, 8) == 0) {
+            s_coches[i].uso = ++s_uso;
             return i;
-    if (s_coches_n >= CARS_CACHE)
-        return 0xFFFFFFFFu;
+        }
+    if (s_coches_n >= CARS_CACHE) {
+        /* llena: fuera el menos usado, con sus texturas (el showroom recorre coches) */
+        uint32_t j, k = 0;
+
+        for (j = 1; j < CARS_CACHE; j++)
+            if (s_coches[j].uso < s_coches[k].uso)
+                k = j;
+        for (j = 0; j < s_coches[k].ntex; j++)
+            pvr_mem_free(s_coches[k].tex[j].vram);
+        s_coches[k].ntex = 0;
+        car_free(&s_coches[k].modelo);
+        /* se carga en ese hueco: se intercambia con el ultimo para reutilizar el codigo */
+        s_coches_n--;
+        if (k != s_coches_n)
+            s_coches[k] = s_coches[s_coches_n];
+        memset(&s_coches[s_coches_n], 0, sizeof s_coches[s_coches_n]);
+    }
+    s_coches[s_coches_n].uso = ++s_uso;
 
     m = &s_coches[s_coches_n].modelo;
     snprintf(ruta, sizeof ruta, "/cd/BAKED/%s.CAR", code);
@@ -230,24 +260,52 @@ static uint32_t coche_modelo(const char *code)
         /* se anota igualmente, con el codigo puesto, para no reintentarlo cada frame */
         memset(m, 0, sizeof(*m));
         strncpy(m->code, code, sizeof m->code - 1u);
-        s_coches[s_coches_n].atlas = NULL;
+        s_coches[s_coches_n].ntex = 0;
         return s_coches_n++;
     }
     strncpy(m->code, code, sizeof m->code - 1u);
-    s_coches[s_coches_n].atlas =
-        pvr_mem_malloc((uint32_t)m->atlas_w * m->atlas_h * 2u);
-    if (s_coches[s_coches_n].atlas == NULL) {
-        printf("coche %s: no cabe su atlas en la VRAM del PVR\n", code);
-        car_free(m);
-        strncpy(m->code, code, sizeof m->code - 1u);
-        return s_coches_n++;
-    }
-    pvr_txr_load((void *)m->atlas, s_coches[s_coches_n].atlas,
-                 (uint32_t)m->atlas_w * m->atlas_h * 2u);
-    printf("coche %s: %u partes, %u triangulos, atlas %ux%u\n", code,
+    s_coches[s_coches_n].ntex = 0;
+    printf("coche %s: %u partes, %u triangulos, atlas %ux%u, %u series de color\n", code,
            (unsigned)m->parts, (unsigned)(m->verts / 3u),
-           (unsigned)m->atlas_w, (unsigned)m->atlas_h);
+           (unsigned)m->atlas_w, (unsigned)m->atlas_h, (unsigned)m->series_n);
     return s_coches_n++;
+}
+
+/* La textura del modelo `k` con la pintura `paint`, subida al PVR; NULL si no se pudo. */
+static pvr_ptr_t coche_textura(uint32_t k, uint8_t paint)
+{
+    CarModel *m = &s_coches[k].modelo;
+    uint32_t i, j, bytes;
+
+    if (m->raw == NULL || (uint32_t)m->atlas_w * m->atlas_h > 512u * 256u)
+        return NULL;
+    paint &= 63u;
+    for (i = 0; i < s_coches[k].ntex; i++)
+        if (s_coches[k].tex[i].paint == paint) {
+            s_coches[k].tex[i].uso = ++s_uso;
+            return s_coches[k].tex[i].vram;
+        }
+    bytes = (uint32_t)m->atlas_w * m->atlas_h * 2u;
+    if (s_coches[k].ntex < PINTURAS) {
+        i = s_coches[k].ntex;
+        s_coches[k].tex[i].vram = pvr_mem_malloc(bytes);
+        if (s_coches[k].tex[i].vram == NULL) {
+            printf("coche %s: no cabe otra textura en la VRAM del PVR\n", m->code);
+            return NULL;
+        }
+        s_coches[k].ntex++;
+    } else {
+        /* la menos usada ultimamente */
+        for (i = 0, j = 1; j < PINTURAS; j++)
+            if (s_coches[k].tex[j].uso < s_coches[k].tex[i].uso)
+                i = j;
+    }
+    car_paint(m, paint, s_pintado);
+    pvr_txr_load(s_pintado, s_coches[k].tex[i].vram, bytes);
+    s_coches[k].tex[i].paint = paint;
+    s_coches[k].tex[i].uso = ++s_uso;
+    s_expansiones++;
+    return s_coches[k].tex[i].vram;
 }
 
 static void coches_dibuja(GameHost *h)
@@ -259,6 +317,7 @@ static void coches_dibuja(GameHost *h)
         pvr_poly_cxt_t cxt;
         pvr_poly_hdr_t hdr;
         TrackStats cst;
+        pvr_ptr_t tx;
         uint32_t k;
 
         if (d->code[0] == 0)
@@ -266,11 +325,14 @@ static void coches_dibuja(GameHost *h)
         k = coche_modelo(d->code);
         if (k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL)
             continue;
+        tx = coche_textura(k, d->paint);
+        if (tx == NULL)
+            continue;
         /* cada coche tiene su atlas, asi que toca contexto nuevo */
         pvr_poly_cxt_txr(&cxt, PVR_LIST_PT_POLY,
                          PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
                          s_coches[k].modelo.atlas_w, s_coches[k].modelo.atlas_h,
-                         s_coches[k].atlas, PVR_FILTER_BILINEAR);
+                         tx, PVR_FILTER_BILINEAR);
         cxt.gen.culling = PVR_CULLING_NONE;
         pvr_poly_compile(&hdr, &cxt);
         pvr_prim(&hdr, sizeof(hdr));
@@ -362,9 +424,10 @@ static void efectos_recorre(GameHost *h, TrackEmit emit, int dibuja)
 
         /* y la de los pasos de rueda, que son partes del propio coche y su atlas */
         k = coche_modelo(d->code);
-        if (k != 0xFFFFFFFFu && s_coches[k].modelo.raw != NULL && s_coches[k].atlas != NULL) {
+        if (k != 0xFFFFFFFFu && s_coches[k].modelo.raw != NULL &&
+            coche_textura(k, d->paint) != NULL) {
             if (dibuja)
-                efecto_ctx(s_coches[k].atlas, s_coches[k].modelo.atlas_w,
+                efecto_ctx(coche_textura(k, d->paint), s_coches[k].modelo.atlas_w,
                            s_coches[k].modelo.atlas_h);
             car_draw(&s_coches[k].modelo, d, &h->view[0], CAR_PASS_SUBTRACT, 640.0f, 480.0f,
                      emit, NULL, &est);
@@ -1056,13 +1119,17 @@ static void showroom_coches(GameHost *h)
         pvr_poly_cxt_t cxt;
         pvr_poly_hdr_t hdr;
         TrackStats cst;
+        pvr_ptr_t tx;
         uint32_t k, j;
 
         if (q->kind != OVL_SR_CAR || (uint16_t)q->pts[0][0] >= SROOM_MAX)
             continue;
         s = &h->sroom[(uint16_t)q->pts[0][0]];
         k = coche_modelo(s->d.code);
-        if (k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL || s_coches[k].atlas == NULL)
+        if (k == 0xFFFFFFFFu || s_coches[k].modelo.raw == NULL)
+            continue;
+        tx = coche_textura(k, s->d.paint);
+        if (tx == NULL)
             continue;
         memset(&rv, 0, sizeof rv);
         for (j = 0; j < 3u; j++)
@@ -1081,7 +1148,7 @@ static void showroom_coches(GameHost *h)
         pvr_poly_cxt_txr(&cxt, PVR_LIST_PT_POLY,
                          PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
                          s_coches[k].modelo.atlas_w, s_coches[k].modelo.atlas_h,
-                         s_coches[k].atlas, PVR_FILTER_BILINEAR);
+                         tx, PVR_FILTER_BILINEAR);
         cxt.gen.culling = PVR_CULLING_NONE;
         pvr_poly_compile(&hdr, &cxt);
         pvr_prim(&hdr, sizeof(hdr));

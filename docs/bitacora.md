@@ -382,7 +382,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 4 | Horneado y dibujo de los coches | **Hecho**; el coste no es dibujarlos |
 | 5 | El HUD | **Hecho**, 4 769 frames idénticos |
 | 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **Hecho en emulador** (2026-10-25); la lluvia, comparada con el original en DuckStation |
-| 7 | El showroom del front end | **En curso**: grabado con oráculo y dibujado; faltan el mapa de reflejo y hornear todos los coches |
+| 7 | El showroom del front end | **En curso**: grabado con oráculo, dibujado, con las 64 pinturas y los 39 coches horneados; faltan el mapa de reflejo y la policía |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -477,9 +477,30 @@ el original en DuckStation.
   vértice horneado es 0x80 en lo neutro y el PVR modula por color/255, así que hay que
   doblarlo. Además, la luz lleva el mínimo de 24 de la referencia.
 
+**La pintura: paleta en el disco, textura normal en la VRAM (decisión de Jorge).** Medido
+antes de decidir: las texturas de coche de PS1 son de 4 bits con paletas de 16 colores, así que
+una versión paletizada se vería **igual**; y la memoria de paletas del PVR (1 024 entradas)
+solo da para un coche con texturas de 4 bits o cuatro con 8 bits, y en carrera hay hasta ocho.
+Así que el `.CAR` (versión 3) guarda, por téxel, el índice de su **serie de colores** en las 64
+pinturas (el color 0–15 y dos banderas de paleta de cada coche), y la tabla de esas series; al
+cargar el coche, el SH-4 expande la textura con la pintura que toca (preparar una textura, no
+dibujar) y la sube al PVR. Por construcción es exactamente lo que da el cargador de la
+referencia para esa pintura. 431–575 series por coche de carrera, ~70 por coche de tráfico:
+índices de 16 bits.
+
+| | Disco por coche | 39 coches |
+|---|---|---|
+| un `.CAR` por pintura (64) | 64 × ~280 KB | ~700 MB |
+| índices + series (versión 3) | ~410 KB (carrera), ~284 KB (tráfico) | **14 MB** |
+
+Cada modelo guarda hasta 4 texturas pintadas en VRAM (dos coches iguales con distinta pintura
+no se pisan) y la caché de modelos expulsa el menos usado. **Visto en Flycast:** el menú «COLOR»
+cambia la pintura del coche (rojo, amarillo, blanco, plata, gris…) y «CAR» recorre los coches
+(SLK, Z3…). `make bake-coches` hornea los 18 de carrera (versión H) y los 21 de tráfico en 20 s.
+Antes todos los coches salían con la pintura 0; ahora cada uno con la suya (`CarDraw.paint`).
+
 **Falta:** el mapa de reflejo sobre la carrocería del coche del showroom (sale de la VRAM), las
-sombras de los pasos de rueda en el showroom, y el punto 3 (hornear los ~22 coches; la
-decisión de la pintura es de Jorge).
+sombras de los pasos de rueda en el showroom y la policía (su librea depende de la pista).
 
 ### Paso 6: los efectos (hecho en emulador)
 
@@ -761,10 +782,10 @@ incompleta— los encontró el oráculo, no la lectura del código.
   emulador de PS1). Por encima, solo el FSAA horizontal del PVR (1 280×480 promediado):
   probado en Flycast sin commit, coste sin medir. Pendiente de decisión de Jorge, a evaluar en
   M3 con una consola.
-- **La pintura de los coches (decisión de Jorge).** El showroom deja elegir entre 16
-  colores y hoy cada color es un `.CAR` distinto: o un archivo por coche y color (~98 MB más
-  de disco) o texturas paletizadas del PVR (un `.CAR` por coche, menos disco y hasta 4× menos
-  VRAM, pero rehacer el formato). Claude propone la segunda.
+- **RAM de los coches.** Cada `.CAR` de carrera ocupa ~410 KB en RAM mientras está en la caché
+  (6 modelos: ~2,5 MB) porque guarda los índices para poder cambiar de pintura. Sin medir con
+  una carrera de 8 coches distintos más tráfico; si aprieta, los índices se pueden releer del CD
+  solo al cambiar de pintura.
 - **El coste en fps del paso 6 está sin medir.** Destellos, humo, clima y reflejos
   añaden rutinas del juego por frame y pases del PVR; no se ha separado su coste.
 - **Coste de las inversiones del PVR sin medir en consola.** Cada frame con efectos añade

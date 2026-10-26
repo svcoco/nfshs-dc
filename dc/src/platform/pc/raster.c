@@ -477,6 +477,7 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
         }
     }
     uint32_t coches_tri = 0, efectos_tri = 0, marcas_tri = 0, marcas_det = 0, reflejo_tri = 0;
+    static uint16_t pintado[512 * 256];   /* la textura del coche con su pintura */
     static const uint16_t *s_refl;
     FILE *f;
 
@@ -541,7 +542,8 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
                 }
                 strncpy(modelo.code, d->code, sizeof modelo.code - 1u);
             }
-            P.atlas = modelo.atlas; P.aw = modelo.atlas_w; P.ah = modelo.atlas_h;
+            car_paint(&modelo, d->paint, pintado);
+            P.atlas = pintado; P.aw = modelo.atlas_w; P.ah = modelo.atlas_h;
             car_draw(&modelo, d, &vista, 0, (float)w, (float)hh, emite, &P, &cst);
             coches_tri += cst.quads_out;
         }
@@ -612,7 +614,8 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
             car_shadow(track, d, &vista, (float)w, (float)hh, emite, &P, &est);
             efectos_tri += est.quads_out;
             if (strncmp(modelo.code, d->code, sizeof modelo.code) == 0 && modelo.raw != NULL) {
-                P.atlas = modelo.atlas; P.aw = modelo.atlas_w; P.ah = modelo.atlas_h;
+                car_paint(&modelo, d->paint, pintado);
+                P.atlas = pintado; P.aw = modelo.atlas_w; P.ah = modelo.atlas_h;
                 car_draw(&modelo, d, &vista, CAR_PASS_SUBTRACT, (float)w, (float)hh, emite, &P, &est);
                 efectos_tri += est.quads_out;
                 /* y el mapa B del reflejo, que resta */

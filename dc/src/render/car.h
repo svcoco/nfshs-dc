@@ -44,13 +44,21 @@ typedef struct {
     char            code[8];
     CarPart        *part;
     const float    *vert;        /* 6 floats por vertice: x y z u v, y el color en el 6 */
-    const uint16_t *atlas;
+    const uint16_t *indices;     /* atlas_w * atlas_h: la serie de color de cada texel */
+    const uint16_t *series;      /* series_n * 64: el color ARGB1555 de cada serie por pintura */
+    uint32_t        series_n;
     uint16_t        parts, atlas_w, atlas_h;
     uint32_t        verts;
     float           half_extents[3];
 } CarModel;
 
 int  car_load(CarModel *m, const char *path);
+
+/* La textura del coche con una pintura (CarState::colour, 0..63) en `out`, que tiene sitio para
+ * atlas_w * atlas_h texeles ARGB1555. Es preparar una textura al cargar el coche o al cambiar
+ * de pintura, no dibujar: el resultado es el que da el cargador de la referencia con esa
+ * pintura (ver bakecar.rs, version 3). */
+void car_paint(const CarModel *m, uint8_t paint, uint16_t *out);
 void car_free(CarModel *m);
 
 /* Las pasadas de un coche. Cada una va con su propia mezcla, asi que el que llama pone el

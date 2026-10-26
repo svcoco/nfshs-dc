@@ -36,7 +36,7 @@ export TMPDIR
 export TMP  := $(TMPDIR)
 export TEMP := $(TMPDIR)
 
-.PHONY: help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size bake disc diff clean
+.PHONY: help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size bake bake-coches disc diff clean
 
 help:
 	@echo "Analisis y generacion (Python, funcionan ya):"
@@ -194,6 +194,20 @@ bake:
 	@test -x "$(NFSHS)" || test -x "$(NFSHS).exe" || 	  { echo "falta la referencia: cargo build --release en la raiz"; exit 1; }
 	@mkdir -p $(BAKED)
 	@for g in $(ROOT)/gamedata/$(if $(TRACK),$(TRACK),*).GRP; do 	  n=$$(basename $$g .GRP); 	  psh=$(ROOT)/gamedata/$${n}0.PSH; 	  test -f $$psh || psh=$$(ls $(ROOT)/gamedata/$${n}*.PSH 2>/dev/null | head -1); 	  test -f "$$psh" || { echo "$$n: sin PSH, me lo salto"; continue; }; 	  $(NFSHS) bake-track $$g $$psh $(BAKED)/$$n.TRK 2>&1 | grep -v INFO || exit 1; 	done
+	@for r in $(ROOT)/gamedata/ZTR*R.PSH; do 	  n=$$(basename $$r R.PSH); num=$${n#ZTR}; 	  $(NFSHS) bake-refl $$((10#$$num)) $(BAKED)/$${n}R.RFL 2>&1 | grep -v INFO || exit 1; 	done
+
+# Los coches (M2c pasos 4 y 7): un .CAR por modelo con las 64 pinturas (paleta en el disco,
+# textura normal en la VRAM). Los de carrera con su version de mas detalle (H), que es la
+# que ensena el showroom; los de trafico solo tienen la S. La policia queda fuera: su librea
+# depende de la pista y el cargador la resuelve en tiempo de ejecucion.
+CARS_RACE    := MSLK BMWZ CMRO TRAM ADB7 JXKR BMWM CORV F550 P993 F375 DIAB MCLK MCF1 X993 XCF1 BNS1 BNS2
+CARS_TRAFFIC := ARMY BEEP BMW5 CBUS CHOP COMC CUCA F500 GUAT LOGT MERC PKUP RIAT SAND SBUS TAXI TBUS TON1 TON2 VAN WOLW
+
+bake-coches:
+	@test -x "$(NFSHS)" || test -x "$(NFSHS).exe" || { echo "falta la referencia: cargo build --release en la raiz"; exit 1; }
+	@mkdir -p $(BAKED)
+	@for c in $(CARS_RACE); do $(NFSHS) bake-car $$c $(BAKED)/$$c.CAR 2>&1 | grep -v INFO || exit 1; done
+	@for c in $(CARS_TRAFFIC); do $(NFSHS) bake-car $$c $(BAKED)/$$c.CAR --rival 2>&1 | grep -v INFO || exit 1; done
 
 disc:
 	@echo "Pendiente: M2." && exit 1

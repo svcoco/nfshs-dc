@@ -121,6 +121,7 @@ typedef struct CarDraw {
      * visible (`env_ok`) y sin aparcar, que es lo que exige la referencia. */
     uint8_t  shadow_on, env_ok, parked;
     uint8_t  mirror;           /* showroom: el reflejo en el suelo (y espejada); 0 en carrera */
+    uint8_t  paint;            /* la pintura, como CarState::colour: color 0..15 y dos banderas */
     int32_t  shadow[4][3];
     uint8_t  shadow_rgb[3];
     /* Los reflejos (DrawC_PrimStart, en el cache del coche): dos de los mapas de reflejo

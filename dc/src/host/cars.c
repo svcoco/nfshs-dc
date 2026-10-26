@@ -161,6 +161,7 @@ static int car_hook(Cpu *c, uint32_t addr)
         for (i = 0; i < 9u; i++)
             d->orient[i] = (int32_t)ps1_r32(c, car + 0xF0u + 4u * i);
         d->light = light;
+        d->paint = (uint8_t)((ps1_r16(c, car + 0x840u) & 15u) | ((ps1_r8(c, car + 0x8B3u) & 3u) << 4));
         for (i = 0; i < 4u; i++) {
             d->env_a[i] = ps1_r32(c, ADDR_CAR_CACHE + 100u + 4u * i);
             d->env_b[i] = ps1_r32(c, ADDR_CAR_CACHE + 116u + 4u * i);

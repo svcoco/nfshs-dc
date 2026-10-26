@@ -18,12 +18,14 @@
 //! # Format (little-endian)
 //!
 //! ```text
-//! header  "NFSC", u32 version=2, u16 parts, u16 atlas_w, u16 atlas_h, u16 pad,
-//!         u32 verts, u32 atlas_offset, f32 half_extents[3], u32 env_offset (40 bytes)
+//! header  "NFSC", u32 version=3, u16 parts, u16 atlas_w, u16 atlas_h, u16 pad,
+//!         u32 verts, u32 atlas_offset, f32 half_extents[3], u32 env_offset,
+//!         u32 series (44 bytes)
 //! parts   parts * 24 bytes: u32 vert_off, u32 vert_n (a multiple of 3), u8 wheel
 //!         (0xFF none), u8 subtract, u16 pad, f32 hub[3]
 //! verts   verts * 24 bytes: f32 x, y, z, f32 u, v, u32 argb
-//! atlas   atlas_size * atlas_size ARGB1555 texels
+//! atlas   atlas_w * atlas_h u16 indices, then `series` * 64 ARGB1555 colours: per index
+//!         its colour with each of the 64 paints (series-major)
 //! env     parts * 8 bytes: u32 tris (0: the part is not reflection-mapped), u32 the GEO
 //!         part's vertex count; then, for each reflection-mapped part in order, per
 //!         triangle 28 bytes: u16 polygon flags, u16 pad, and per corner u16 its GEO
@@ -34,6 +36,15 @@
 //! 6): the normals pick the texels of the track's reflection maps, the flags say which
 //! polygons also take map B, and the GEO vertex lets the port use the normals the game
 //! itself has in memory instead, as the reference does when the counts match.
+//!
+//! # The paint (version 3)
+//!
+//! A car's paint is `CarState::colour`: the colour 0..15 and the car's two palette flags, 64
+//! values. Instead of a file per paint, the car is loaded with each of the 64 and every texel
+//! keeps the series of colours it takes; texels with the same series share an index. The port
+//! expands the texture for the paint it needs when it loads the car (the SH-4 prepares a
+//! texture once, it does not draw), so the result is exactly what `load_car` gives for that
+//! paint. Measured: 431 to 575 series per car, so the indices are 16-bit.
 use anyhow::{Result, bail};
 
 use crate::assets;
@@ -51,8 +62,36 @@ fn putf(o: &mut Vec<u8>, v: f32) {
 }
 
 /// `colour` is the paint as `R3DCar_Instantiate3DCar` reads it (see `CarState::colour`).
-pub fn bake(data: &assets::GameData, code: &str, player: bool, colour: u8,
+/// The car's two texture pages cropped side by side (512x256) as ARGB1555, for one paint.
+fn paginas(data: &assets::GameData, code: &str, player: bool, paint: u8)
+           -> Result<(Vec<u16>, Vec<assets::Rect>)> {
+    const PAGE: u32 = 256;
+    let mut atlas = assets::Atlas::new(1024);
+    let car = assets::load_car(data, &mut atlas, code, player, false, None, paint)?;
+    let mut out = vec![0u16; (2 * PAGE * PAGE) as usize];
+    for (i, r) in car.page_rects.iter().enumerate() {
+        if r.w == 0 {
+            continue;
+        }
+        for y in 0..PAGE {
+            for x in 0..PAGE {
+                let o = (((r.y + y) * atlas.size + r.x + x) * 4) as usize;
+                let px = &atlas.rgba[o..o + 4];
+                // alpha 0 is the PS1's colour 0: not drawn
+                out[(y * 2 * PAGE + i as u32 * PAGE + x) as usize] = if px[3] < 128 {
+                    0
+                } else {
+                    0x8000 | ((px[0] as u16 >> 3) << 10) | ((px[1] as u16 >> 3) << 5) | (px[2] as u16 >> 3)
+                };
+            }
+        }
+    }
+    Ok((out, car.page_rects.to_vec()))
+}
+
+pub fn bake(data: &assets::GameData, code: &str, player: bool,
             out: &std::path::Path) -> Result<()> {
+    let colour = 0u8;
     // `load_car` packs into a square shelf atlas, and a car's two 256x256 pages plus the
     // loader's white texel do not fit in 512 **by one row**; it warns and drops a page
     // without failing, que es peor. Asi que se carga en uno holgado y despues se recorta
@@ -68,19 +107,6 @@ pub fn bake(data: &assets::GameData, code: &str, player: bool, colour: u8,
     for (i, r) in car.page_rects.iter().enumerate() {
         if r.w != 0 && (r.w != PAGE || r.h != PAGE) {
             bail!("{code}: la pagina {i} mide {}x{}, esperaba {PAGE}x{PAGE}", r.w, r.h);
-        }
-    }
-    // el recorte: cada pagina a su mitad
-    let mut rgba = vec![0u8; (aw * ah * 4) as usize];
-    for (i, r) in car.page_rects.iter().enumerate() {
-        if r.w == 0 {
-            continue;
-        }
-        for y in 0..PAGE {
-            let src = (((r.y + y) * atlas.size + r.x) * 4) as usize;
-            let dst = ((y * aw + i as u32 * PAGE) * 4) as usize;
-            rgba[dst..dst + (PAGE * 4) as usize]
-                .copy_from_slice(&atlas.rgba[src..src + (PAGE * 4) as usize]);
         }
     }
     // y las UV, de la posicion que tenian en el atlas grande a la del recorte
@@ -126,15 +152,43 @@ pub fn bake(data: &assets::GameData, code: &str, player: bool, colour: u8,
         n_verts += p.verts.len() as u32;
     }
 
-    // the atlas, RGBA8 -> ARGB1555 (alpha 0 is the PS1's colour 0: not drawn)
-    let mut texels = Vec::with_capacity((aw * ah * 2) as usize);
-    for px in rgba.chunks_exact(4) {
-        let c: u16 = if px[3] < 128 {
-            0
-        } else {
-            0x8000 | ((px[0] as u16 >> 3) << 10) | ((px[1] as u16 >> 3) << 5) | (px[2] as u16 >> 3)
+    // the atlas: per texel the index of its colour series over the 64 paints
+    let mut series: Vec<Vec<u16>> = vec![Vec::with_capacity(64); (aw * ah) as usize];
+    for paint in 0..64u8 {
+        let (texels, rects) = paginas(data, code, player, paint)?;
+        if rects.iter().zip(&car.page_rects).any(|(a, b)| (a.x, a.y, a.w, a.h) != (b.x, b.y, b.w, b.h)) {
+            bail!("{code}: la pintura {paint} coloca las paginas en otro sitio (las UV no valdrian)");
+        }
+        for (s, c) in series.iter_mut().zip(texels) {
+            s.push(c);
+        }
+    }
+    let mut index_of: std::collections::HashMap<Vec<u16>, u16> = std::collections::HashMap::new();
+    let mut table: Vec<Vec<u16>> = Vec::new();
+    let mut indices: Vec<u16> = Vec::with_capacity(series.len());
+    for s in series {
+        let k = match index_of.get(&s) {
+            Some(&k) => k,
+            None => {
+                if table.len() >= 65536 {
+                    bail!("{code}: mas de 65 536 series de color");
+                }
+                let k = table.len() as u16;
+                index_of.insert(s.clone(), k);
+                table.push(s);
+                k
+            }
         };
-        texels.extend_from_slice(&c.to_le_bytes());
+        indices.push(k);
+    }
+    let mut texels = Vec::with_capacity(indices.len() * 2 + table.len() * 128);
+    for k in &indices {
+        texels.extend_from_slice(&k.to_le_bytes());
+    }
+    for s in &table {
+        for c in s {
+            texels.extend_from_slice(&c.to_le_bytes());
+        }
     }
 
     // the reflection-mapped parts (DrawC_Prim's environment path)
@@ -164,18 +218,19 @@ pub fn bake(data: &assets::GameData, code: &str, player: bool, colour: u8,
 
     let mut o = Vec::new();
     o.extend_from_slice(b"NFSC");
-    put32(&mut o, 2);
+    put32(&mut o, 3);
     put16(&mut o, car.parts.len() as u16);
     put16(&mut o, aw as u16);
     put16(&mut o, ah as u16);
     put16(&mut o, 0);
     put32(&mut o, n_verts);
-    let atlas_off = 40 + parts.len() as u32 + verts.len() as u32;
+    let atlas_off = 44 + parts.len() as u32 + verts.len() as u32;
     put32(&mut o, atlas_off);
     for k in 0..3 {
         putf(&mut o, car.half_extents[k]);
     }
     put32(&mut o, atlas_off + texels.len() as u32);
+    put32(&mut o, table.len() as u32);
     o.extend_from_slice(&parts);
     o.extend_from_slice(&verts);
     o.extend_from_slice(&texels);
@@ -184,6 +239,7 @@ pub fn bake(data: &assets::GameData, code: &str, player: bool, colour: u8,
 
     let ruedas = car.parts.iter().filter(|p| p.wheel.is_some()).count();
     let reflejo: usize = car.parts.iter().filter_map(|p| p.env.as_ref()).map(|(_, f)| f.len()).sum();
+    println!("  pintura: {} series de color para las 64 pinturas", table.len());
     println!("  reflejo: {reflejo} triangulos en {} partes",
              car.parts.iter().filter(|p| p.env.is_some()).count());
     println!(
@@ -226,5 +282,74 @@ pub fn bake_reflections(data: &assets::GameData, track_no: u32, out: &std::path:
     }
     std::fs::write(out, &o)?;
     println!("{}: mapas de reflejo 256x256, {opacos} texeles con color", out.display());
+    Ok(())
+}
+
+/// car-pal-stats CODE: how a car's textures would fit as PVR palettised textures (measuring
+/// before deciding the paint format): per texture sheet, its shapes by kind, how many distinct
+/// palettes they use and how many colours there are in all.
+pub fn pal_stats(data: &assets::GameData, code: &str) -> Result<()> {
+    use crate::formats::{psh::Psh, viv::Viv};
+    let viv = Viv::parse(&data.read(&format!("ZZZ{code}H.VIV"))?)?;
+    for (n, d) in &viv.entries {
+        let n = n.to_ascii_lowercase();
+        if !n.ends_with(".psh") {
+            continue;
+        }
+        let psh = Psh::parse(d)?;
+        let mut kinds = std::collections::BTreeMap::<u8, usize>::new();
+        let mut pals = std::collections::BTreeSet::<Vec<u16>>::new();
+        let mut colours = std::collections::BTreeSet::<u16>::new();
+        let mut paint_rows = 0usize;
+        for (i, s) in psh.shapes.iter().enumerate() {
+            *kinds.entry(s.kind).or_default() += 1;
+            if s.kind == 0x40 || s.kind == 0x7B {
+                pals.insert(s.palette.clone());
+                colours.extend(s.palette.iter().copied());
+            }
+            if s.kind == 0x41 && s.width == 1 && s.height == 1 && i > 0 && psh.shapes[i - 1].kind == 0x40 {
+                paint_rows = paint_rows.max(s.palette.len() / 16);
+            }
+        }
+        let area: usize = psh.shapes.iter().filter(|s| s.kind != 0x41).map(|s| s.width as usize * s.height as usize).sum();
+        println!("{n}: {} formas {kinds:x?}, {} paletas distintas, {} colores, filas de pintura {paint_rows}, area {area} texeles",
+                 psh.shapes.len(), pals.len(), colours.len());
+    }
+    Ok(())
+}
+
+/// car-pal-tuples CODE: loads the car with each of the 64 paints (colour 0..15 and the two
+/// palette flags) and counts the distinct colour series per texel of the cropped atlas: how
+/// many indices the disc format needs.
+pub fn pal_tuples(data: &assets::GameData, code: &str) -> Result<()> {
+    let mut series: Vec<Vec<u16>> = Vec::new();
+    for paint in 0..64u8 {
+        let mut atlas = assets::Atlas::new(1024);
+        let car = assets::load_car(data, &mut atlas, code, true, false, None, paint)?;
+        let mut page = vec![0u16; 512 * 256];
+        for (i, r) in car.page_rects.iter().enumerate() {
+            if r.w == 0 {
+                continue;
+            }
+            for y in 0..256u32 {
+                for x in 0..256u32 {
+                    let o = (((r.y + y) * atlas.size + r.x + x) * 4) as usize;
+                    let px = &atlas.rgba[o..o + 4];
+                    let c = if px[3] < 128 { 0 } else { 0x8000 | ((px[0] as u16 >> 3) << 10) | ((px[1] as u16 >> 3) << 5) | (px[2] as u16 >> 3) };
+                    page[(y * 512 + i as u32 * 256 + x) as usize] = c;
+                }
+            }
+        }
+        if series.is_empty() {
+            series = vec![Vec::with_capacity(64); page.len()];
+        }
+        for (s, c) in series.iter_mut().zip(page) {
+            s.push(c);
+        }
+    }
+    let total: std::collections::HashSet<&Vec<u16>> = series.iter().collect();
+    let left: std::collections::HashSet<&Vec<u16>> = series.iter().enumerate().filter(|(i, _)| i % 512 < 256).map(|(_, s)| s).collect();
+    let right: std::collections::HashSet<&Vec<u16>> = series.iter().enumerate().filter(|(i, _)| i % 512 >= 256).map(|(_, s)| s).collect();
+    println!("{code}: {} series distintas en el atlas (pagina 0: {}, pagina 1: {})", total.len(), left.len(), right.len());
     Ok(())
 }

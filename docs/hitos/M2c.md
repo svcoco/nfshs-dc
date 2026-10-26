@@ -486,5 +486,27 @@ textura salia al doble (el 0x80 = 1,0 solo vale con textura) y los coches a la m
 neutro del horneado es 0x80 y el PVR modula por color/255). Corregidos; tambien el minimo de
 luz 24 de la referencia.
 
+### 3. La pintura y todos los coches
+
+Decision de Jorge: **paleta en el disco, textura normal en la VRAM**. Medidas que la
+justifican (`car-pal-stats`, `car-pal-tuples`):
+
+| | MSLK | F550 | DIAB | MCF1 |
+|---|---|---|---|---|
+| paletas en la pagina de carroceria | 27 | 32 | 31 | — |
+| series de color en las 64 pinturas | 431 | 497 | 503 | 575 |
+
+- Una version paletizada en el PVR se veria igual (las texturas ya son de 4 bits con colores de
+  15 bits) y la memoria de paletas (1 024 entradas) no da para los 8 coches de una carrera.
+- **`.CAR` version 3:** por texel el indice (16 bits) de su serie de colores en las 64
+  pinturas, y la tabla de series. El SH-4 expande la textura de la pintura pedida al cargar
+  (`car_paint`) y la sube; es exactamente lo que da `load_car` con esa pintura. El horneado
+  comprueba que la geometria y las UV no cambian entre pinturas.
+- Caché de Dreamcast: modelo por codigo (6, expulsa el menos usado) y hasta 4 texturas
+  pintadas por modelo.
+- `make bake-coches`: 18 de carrera (H) y 21 de trafico, 14 MB, 20 s.
+- Visto en Flycast: «COLOR» cambia la pintura y «CAR» recorre los coches. En el arnes, el
+  guion de prueba pasa por 10 coches, todos horneados.
+
 **Falta:** el mapa de reflejo de la carroceria en el showroom (de la VRAM), las sombras de los
-pasos de rueda en el showroom y hornear los ~22 coches.
+pasos de rueda en el showroom y la policia (su librea depende de la pista).

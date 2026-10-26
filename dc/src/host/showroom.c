@@ -377,6 +377,7 @@ int host_showroom_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
             }
             s->colour = (uint8_t)((ps1_r16(c, a0 + 0x840u) & 15u) |
                                   ((ps1_r8(c, a0 + 0x8B3u) & 3u) << 4));
+            d->paint = s->colour;
             s->mirrored = (uint8_t)((ps1_r32(c, 0x8013E608u) & 0x80u) != 0u);
             s->level = level;
             for (i = 0; i < 3u; i++)

@@ -43,6 +43,10 @@ typedef struct {
     uint16_t u0, v0;          /* esquina del rectangulo CONVERTIDO */
     uint16_t w, h;            /* su tamano, potencia de dos */
     uint32_t offset;          /* donde empieza en el buffer de texeles del llamante */
+    uint32_t cap;             /* texeles reservados en `offset` (0: ninguno). Si lo que hay
+                               * que convertir cabe, se reconvierte ahi mismo (M3: el video
+                               * wall reescribe la VRAM 15 veces por segundo, y reservar
+                               * sitio nuevo cada vez llenaba el buffer y lo vaciaba entero) */
     /* El rectangulo que pide el frame en curso. Si cabe dentro del convertido, se
      * reutiliza tal cual; si no, se convierte de nuevo. El rectangulo del frame NO se
      * acumula entre frames: hacerlo crecia sin parar y acababa desbordando la cache. */
@@ -66,6 +70,9 @@ typedef struct {
     uint64_t expulsadas;      /* entradas reutilizadas por falta de sitio */
     uint32_t pico_texels;     /* el maximo de texeles vivos a la vez */
     uint64_t vaciados;        /* veces que se lleno y hubo que empezar de cero */
+    /* Texeles escritos desde la ultima subida a la plataforma, [sube_ini, sube_fin): la
+     * plataforma sube solo eso y llama a tex_subido. */
+    uint32_t sube_ini, sube_fin;
 } TexCache;
 
 void tex_reset(TexCache *tc);
@@ -80,6 +87,9 @@ void tex_need(TexCache *tc, uint16_t tpage, uint16_t clut, const uint16_t uv[4][
 /* Convierte lo que haga falta al buffer `dst`, de `cap` texeles. Devuelve cuantas
  * entradas convirtio. Llamar despues de todos los tex_need del frame. */
 uint32_t tex_build(TexCache *tc, const uint16_t *vram, uint16_t *dst, uint32_t cap);
+
+/* La plataforma ya subio [sube_ini, sube_fin). */
+void tex_subido(TexCache *tc);
 
 /* La entrada de esa pagina y paleta, o NULL. */
 const TexEntry *tex_find(const TexCache *tc, uint16_t tpage, uint16_t clut);

@@ -1279,10 +1279,18 @@ void render_frame(GameHost *h)
     sy = 480.0f / (float)h->display[3];
     clip.x0 = 0.0f; clip.y0 = 0.0f; clip.x1 = 640.0f; clip.y1 = 480.0f;
 
-    /* Las texturas solo se resuben cuando la cache ha convertido algo nuevo. Medido:
-     * 63 conversiones en todo el front end, o sea casi nunca. */
+    /* Las texturas solo se resuben cuando la cache ha convertido algo nuevo, y SOLO lo
+     * convertido. Subirlo todo (hasta 1 MB) valia mientras convertir era raro (63 veces en
+     * el front end); con el video wall de M3 la VRAM cambia 15 veces por segundo. Los
+     * extremos se alinean a 32 bytes para el store queue. */
     if (h->texcache.conversiones != subidas_vistas) {
-        pvr_txr_load(tex_staging, tex_vram, h->texcache.top * 2u);
+        uint32_t ini = h->texcache.sube_ini & ~15u, fin = (h->texcache.sube_fin + 15u) & ~15u;
+
+        if (fin > TEX_TEXELS)
+            fin = TEX_TEXELS;
+        if (ini < fin)
+            pvr_txr_load(tex_staging + ini, (uint8_t *)tex_vram + ini * 2u, (fin - ini) * 2u);
+        tex_subido(&h->texcache);
         subidas_vistas = h->texcache.conversiones;
     }
 

@@ -325,6 +325,10 @@ int main(int argc, char **argv)
         }
     }
     host_report(&host, &cpu);
+    if (getenv("NFSHS_INTERPLOG") != NULL) {
+        printf("\n=== entradas al interprete, por direccion ===\n");
+        ps1_interp_report(stdout, 40);
+    }
     printf("\n=== bus de hardware (stub del SPU) ===\n");
     printf("  lecturas / escrituras:     %llu / %llu\n",
            (unsigned long long)spu.reads, (unsigned long long)spu.writes);

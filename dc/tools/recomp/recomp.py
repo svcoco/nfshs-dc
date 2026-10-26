@@ -133,6 +133,17 @@ def calls_of(start):
 
 
 HLE_SET = set()
+# Solo en el backend C (M3): codigo que el analisis no genera y que en el juego acaba en el
+# interprete de respaldo, medido con NFSHS_INTERPLOG en el menu del video wall.
+#  - C_HLE_BODIES: funciones HLE que el host a veces NO atiende (el front end "captura" su
+#    propio dibujo y corre el original). Se genera su cuerpo, pero las llamadas a ellas
+#    siguen yendo por ps1_call (no entran en `known`): primero el host, y si no las atiende,
+#    el codigo recompilado en vez del interprete.
+#  - C_EXTRA_STARTS: inicios de funcion a los que solo se llega por puntero y que las
+#    heuristicas no reconocen (0x80107358: cinco instrucciones, sin marco, nadie la llama
+#    con jal; ver dc/src/ps1rt/interp.c).
+C_HLE_BODIES = {0x8004F12C, 0x8004F3B8}      # PSXDrawSquare, PSXDrawTransSquare
+C_EXTRA_STARTS = {0x80107358}
 
 # Optional names transferred from the 1999 development build (tools/symmatch.py output).
 NAMES = {}
@@ -857,10 +868,15 @@ if __name__ == '__main__':
     if '--parts' in args:
         i = args.index('--parts'); parts_n = int(args[i + 1]); args = args[:i] + args[i + 2:]
     roots = all_starts() if '--all' in args else [int(x, 16) for x in args]
+    if lang == 'c':
+        roots = sorted(set(roots) | C_EXTRA_STARTS)
     funcs = collect(roots)
     known = set(funcs)
     collect_entry_points(funcs)
     if lang == 'c':
+        # los cuerpos HLE van al despacho, pero no a `known`: se llaman por ps1_call
+        funcs = sorted(set(funcs) | C_HLE_BODIES)
+        collect_entry_points(funcs)
         n_parts, stubs = emit_c(funcs, known, out_dir, instrs_per_part, comments)
         print(f'{len(funcs)} functions -> {out_dir} ({n_parts} parts, {stubs} stubs, C)')
         sys.exit(0)

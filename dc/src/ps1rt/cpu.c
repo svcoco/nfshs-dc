@@ -10,6 +10,55 @@
 
 #include <stdio.h>
 
+#ifndef PS1_DIAG
+#define PS1_DIAG 1
+#endif
+#if PS1_DIAG
+/* DIAG: cuantas veces entra el interprete por cada direccion, para saber que codigo no
+ * esta recompilado (ps1_interp_report). Tabla abierta; lo que no cabe se cuenta aparte. */
+#define INTERP_TAB 1024u
+static struct { uint32_t addr; uint64_t n; } s_interp[INTERP_TAB];
+static uint64_t s_interp_fuera;
+
+static void interp_nota(uint32_t addr)
+{
+    uint32_t i = (addr >> 2) % INTERP_TAB, k;
+
+    for (k = 0; k < INTERP_TAB; k++, i = (i + 1u) % INTERP_TAB)
+        if (s_interp[i].n == 0u || s_interp[i].addr == addr) {
+            s_interp[i].addr = addr;
+            s_interp[i].n++;
+            return;
+        }
+    s_interp_fuera++;
+}
+
+/* Las `top` direcciones con mas entradas, de mayor a menor. Vacia la tabla. */
+void ps1_interp_report(FILE *f, unsigned top)
+{
+    for (unsigned shown = 0; shown < top; shown++) {
+        uint64_t best = 0;
+        uint32_t bi = 0;
+
+        for (uint32_t i = 0; i < INTERP_TAB; i++)
+            if (s_interp[i].n > best) {
+                best = s_interp[i].n;
+                bi = i;
+            }
+        if (best == 0u)
+            break;
+        fprintf(f, "  interp %08x  %llu\n", (unsigned)s_interp[bi].addr, (unsigned long long)best);
+        s_interp[bi].n = 0;
+    }
+    if (s_interp_fuera)
+        fprintf(f, "  interp (fuera de la tabla) %llu\n", (unsigned long long)s_interp_fuera);
+}
+#define INTERP_NOTA(a) interp_nota(a)
+#else
+void ps1_interp_report(FILE *f, unsigned top) { (void)f; (void)top; }
+#define INTERP_NOTA(a) ((void)0)
+#endif
+
 /* ---------------------------------------------------------------- watchdog y tiempo */
 
 /* Se llama en cada rama hacia atras, y tambien desde ps1_call. El codigo generado
@@ -147,6 +196,7 @@ void ps1_call(Cpu *c, uint32_t addr)
     /* 3. codigo recompilado y, si no esta, el interprete de respaldo */
     if (!(c->dispatch != NULL && c->dispatch(c, addr))) {
         c->interpreted++;
+        INTERP_NOTA(addr);
         ps1_interpret(c, addr);
     }
 
@@ -189,6 +239,7 @@ void ps1_jump(Cpu *c, uint32_t pc)
         return;
     if (!(c->dispatch_at != NULL && c->dispatch_at(c, pc))) {
         c->interpreted++;
+        INTERP_NOTA(pc);
         ps1_interpret(c, pc);
     }
 }

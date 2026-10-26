@@ -1,0 +1,17 @@
+# M3: hasta la seleccion de pista y quedarse ahi, para ver el video wall de la pista
+# (zzzzTR06.dct, Landstrasse: el mapa girando). Es el principio de into_race.txt.
+#
+#   [game setup]   arranca en "game options" -> UP x2 -> "one player"
+#   [race type]    arranca en "test drive"   -> aceptar
+#   [track select] germany / landstrasse     -> se queda
+0   -
+20  UP
+26  -
+36  UP
+42  -
+60  CROSS
+66  -
+110 CROSS
+116 -
+
+#end 3000

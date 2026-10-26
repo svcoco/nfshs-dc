@@ -10,6 +10,7 @@
 #define PS1RT_H
 
 #include <stdint.h>
+#include <stdio.h>
 #include <limits.h>
 #include <setjmp.h>
 #include <stddef.h>
@@ -201,6 +202,9 @@ void     ps1_gte_write(Cpu *c, uint32_t r, uint32_t v);
 /* ---- BIOS HLE (bios.c) e interprete (interp.c) ---- */
 void     ps1_bios_call(Cpu *c, uint32_t table);
 void     ps1_interpret(Cpu *c, uint32_t pc);
+/* DIAG: las `top` direcciones por las que mas se entro al interprete (vacio sin PS1_DIAG). */
+
+void     ps1_interp_report(FILE *f, unsigned top);
 /* Las entradas al interprete, por direccion: dice que le falta a la recompilacion. */
 #define PS1_INTERP_TOP 32u
 extern uint32_t ps1_interp_addr[PS1_INTERP_TOP];

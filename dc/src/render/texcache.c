@@ -188,17 +188,25 @@ uint32_t tex_build(TexCache *tc, const uint16_t *vram, uint16_t *dst, uint32_t c
             w = pot((uint32_t)(e->fu1 - e->fu0) + 1u);
             h = pot((uint32_t)(e->fv1 - e->fv0) + 1u);
             n = (uint32_t)w * h;
-            if (tc->top + n > cap) {
-                lleno = 1;
-                break;
+            if (n > e->cap) {
+                /* no cabe en su hueco (o no tiene): uno nuevo en el tope */
+                if (tc->top + n > cap) {
+                    lleno = 1;
+                    break;
+                }
+                e->offset = tc->top;
+                e->cap = n;
+                tc->top += n;
             }
             e->u0 = e->fu0;
             e->v0 = e->fv0;
             e->w = w;
             e->h = h;
-            e->offset = tc->top;
-            tc->top += n;
             tex_convert(vram, e->tpage, e->clut, e->u0, e->v0, w, h, dst + e->offset);
+            if (e->offset < tc->sube_ini)
+                tc->sube_ini = e->offset;
+            if (e->offset + n > tc->sube_fin)
+                tc->sube_fin = e->offset + n;
             e->lista = 1;
             tc->conversiones++;
             tc->texels_conv += n;
@@ -208,8 +216,10 @@ uint32_t tex_build(TexCache *tc, const uint16_t *vram, uint16_t *dst, uint32_t c
         if (!lleno)
             break;
         /* se vacia y se repite: en la segunda pasada todo entra desde cero */
-        for (i = 0; i < tc->n; i++)
+        for (i = 0; i < tc->n; i++) {
             tc->e[i].lista = 0;
+            tc->e[i].cap = 0;
+        }
         tc->top = 0;
         tc->vaciados++;
     }
@@ -218,6 +228,12 @@ uint32_t tex_build(TexCache *tc, const uint16_t *vram, uint16_t *dst, uint32_t c
     if (tc->top > tc->pico_texels)
         tc->pico_texels = tc->top;
     return hechas;
+}
+
+void tex_subido(TexCache *tc)
+{
+    tc->sube_ini = UINT32_MAX;
+    tc->sube_fin = 0;
 }
 
 const TexEntry *tex_find(const TexCache *tc, uint16_t tpage, uint16_t clut)

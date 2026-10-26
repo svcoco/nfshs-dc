@@ -201,6 +201,19 @@ static void dibuja(pvr_ptr_t tex, uint32_t w, uint32_t h)
     pvr_scene_finish();
 }
 
+/* Una escena vacia: la pantalla en negro. Al cortar una pelicula, para que su ultimo frame
+ * no se quede quieto mientras el juego carga lo siguiente (parece colgado). */
+static void negro(void)
+{
+    pvr_wait_ready();
+    pvr_scene_begin();
+    pvr_list_begin(PVR_LIST_PT_POLY);
+    pvr_list_finish();
+    pvr_list_begin(PVR_LIST_TR_POLY);
+    pvr_list_finish();
+    pvr_scene_finish();
+}
+
 /* Cuantos frames de video tiene el archivo: del numero de frame del primer y el ultimo
  * sector de video (sin leerlo entero). */
 static uint32_t cuenta_frames(FILE *f, uint32_t sectores)
@@ -367,6 +380,8 @@ uint16_t movie_play(GameHost *h, const char *name)
         }
     }
 fin:
+    if (corta)
+        negro();
     if (snd != SND_STREAM_INVALID) {
         snd_stream_stop(snd);
         snd_stream_destroy(snd);

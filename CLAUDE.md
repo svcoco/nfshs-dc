@@ -94,11 +94,13 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 - **Assets:** se hornean en el PC con una herramienta de build que reutiliza `src/formats`
   (Rust) de nfshs-rs. Las texturas quedan twiddled y paletizadas cuando conviene (el PVR
   tiene 1024 entradas de paleta), y las mallas quedan listas para dibujar.
-- **Audio (decisión de Jorge, 2026-10-26, M4):** **el middleware de audio atrapa las
-  peticiones de audio del juego en la API del driver de EA** (tocar un efecto, arrancar un
-  stream, cargar un banco, volumen y tono) **y las procesa con el AICA**, con los bancos y
-  streams del disco. El SPU no se programa ni se emula: es el mismo principio que el render
-  (el juego decide qué suena; el middleware lo hace sonar con el hardware). Medido antes de
+- **Audio (decisiones de Jorge, 2026-10-26, M4):** **el middleware de audio atrapa las
+  peticiones de audio del driver de EA en su capa de hardware** (unas 15 funciones pequeñas
+  del fondo del driver: tocar y callar voces, volumen, tono, dirección y ADSR, subir muestras,
+  leer el estado) **y las procesa con el AICA**: cada voz de EA a un canal del AICA, y las
+  muestras a PCM al subirlas. Toda la lógica de EA sigue corriendo (intérprete de parches,
+  streams, curvas del motor). El SPU no se programa ni se emula: es el mismo principio que el
+  render (el juego decide qué suena; el middleware lo hace sonar con el hardware). Medido antes de
   decidir (`docs/hitos/M4.md`): un SPU de PS1 fiel por software cuesta el 196 % de la CPU del
   SH-4. Para el test diferencial, esas funciones se sustituyen en los dos lados, como hasta
   ahora el SPU. (Sustituye a «se convierte antes de compilar».)

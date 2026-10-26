@@ -571,6 +571,10 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
                     may[i] = (char)((h->track_name[i] >= 'a' && h->track_name[i] <= 'z')
                                     ? h->track_name[i] - 'a' + 'A' : h->track_name[i]);
                 may[i] = 0;
+                /* los mapas son de la pista, no de su variante: zTr06W usa los de ZTR06 */
+                if (i >= 2u && may[i - 2u] >= '0' && may[i - 2u] <= '9' &&
+                    (may[i - 1u] == 'N' || may[i - 1u] == 'S' || may[i - 1u] == 'W'))
+                    may[i - 1u] = 0;
                 snprintf(ruta, sizeof ruta, "dc/build/baked/%sR.RFL", may);
                 if (!car_refl_load(refl, ruta)) {
                     printf("  reflejos: no pude cargar %s\n", ruta);

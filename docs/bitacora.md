@@ -20,7 +20,7 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M1b** Cross-compilar a SH-4 y arrancar | Cerrado en emulador (2026-10-23); falta probar en consola |
 | **M2a** El front end en pantalla | Pasos 1 a 5 hechos; falta leerlo en 480i |
 | **M2b** La pista y el cielo en el PVR | Cerrado en emulador; **la carrera se ve a 60 fps** |
-| **M2c** Coches, objetos y efectos | **Pasos 1 a 8 hechos en emulador**: la carrera se dibuja entera con HUD y efectos a 30–43 fps, el showroom y la pausa; falta una carrera completa hasta la meta y la nieve |
+| **M2c** Coches, objetos y efectos | **Criterio cumplido en emulador** (2026-10-26): una carrera completa idéntica a la referencia en 40 000 frames; showroom, pausa, policía y noche; 30–43 fps |
 | M3 Audio · M4 Controles · M5 Guardado y VMU · M6 Optimización · M7 Enhancements | Sin empezar (numeración del 2026-10-26) |
 
 **Lo que hay hoy:** un CDI de 558 MB que arranca en Dreamcast con la BIOS real, lee sus
@@ -31,8 +31,8 @@ original. En carrera da **30–43 fps** en Flycast; el coste no está en dibujar
 **grabar los coches** (código real del juego cada frame), que es trabajo de M6. Del paso 6
 de M2c (los efectos) ya se dibujan las **sombras** de los coches, las **líneas pintadas** de
 la carretera, las **marcas de neumático**, los **destellos** de las farolas, los **halos** de
-faros y frenos, el **humo**, el **flare del sol**, el **clima** (la lluvia; la nieve, sin probar) y los
-**reflejos** de los coches.
+faros y frenos, el **humo**, el **flare del sol**, el **clima** (lluvia de día y de noche) y los
+**reflejos** de los coches; y de noche, el **haz de los faros**.
 
 ---
 
@@ -384,6 +384,7 @@ El hito que convierte un paseo por un escenario en una carrera.
 | 6 | Efectos: sombras, destellos, humo, marcas, clima, líneas | **Hecho en emulador** (2026-10-25); la lluvia, comparada con el original en DuckStation |
 | 7 | El showroom del front end | **Hecho en emulador**: grabado con oráculo, dibujado con su mapa de reflejo, con las 64 pinturas y los 39 coches horneados; y la policía con la librea de su región (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
 | 8 | La pausa en carrera | **Hecho en emulador** (2026-10-26): con oráculo de RAM, 2D y vista |
+| 9 | Una carrera completa, y la noche | **Hecho en emulador** (2026-10-26): 40 000 frames idénticos, de los menús a la meta y de vuelta |
 
 El HUD va **antes** que los efectos a propósito: sin velocímetro, vueltas ni posición una
 carrera no se puede jugar, y los efectos son adorno al lado de eso.
@@ -443,6 +444,47 @@ de VRAM por coche).
 **Dibujar los coches no cuesta casi nada; lo que cuesta es grabarlos.** Con el dibujo
 apagado el ritmo es el mismo, así que la caída de ~60 a 30–40 fps la produce el paso 3,
 que corre código real del juego cada frame. Es trabajo de M6.
+
+### Paso 9: una carrera completa, y la noche (hecho en emulador, 2026-10-26)
+
+**El criterio de M2c se cumple en emulador.** Ningún guion fijo llega a la meta (sin girar,
+el coche se estrella), así que la entrada de carrera la pone el **piloto automático de
+pruebas de la referencia** (`src/game/ai.rs`), metido en su modo diferencial detrás de
+`NFSHS_DIFF_AUTOPILOT`: conduce siguiendo la línea central de la pista y anota cada frame
+sus botones como guion del port. Los dos lados reciben así exactamente la misma entrada
+(`carrera_completa.txt`). Single race en solitario por Alemania, 2 vueltas:
+
+| | |
+|---|---|
+| salida | frame ~1 300 |
+| meta y «RACE STATISTICS» | ~34 050: vuelta 1 4:16.00, vuelta 2 4:42.78, total 8:58.78 |
+| repetición | ~34 100 a ~37 950 (el Cross del piloto la pide y la corta) |
+| menús | desde ~37 950 |
+
+**Resultado: 40 000 frames idénticos** en RAM, 3 345 733 cuadros 2D, 36 789 vistas,
+6 034 coches, marcas y destellos. Sacó **dos fallos de grabación** que ningún guion
+anterior tocaba:
+- **Las marcas de neumático** se leían al preparar la vista y quedaban las del frame
+  anterior cuando el juego las borra (al recolocar el coche y al acabar). Ahora se leen en
+  la frontera de frame, como la referencia.
+- **El último frame de la carrera**, ya en los menús, llevaba las tablas del HUD grabadas
+  antes del cambio de modo. La referencia las guarda aparte y solo las usa al componer en
+  carrera; aquí se quitan.
+
+**La noche estaba sin hacer.** Faltaba el **haz de los faros** (§3 de CLAUDE.md: por vértice
+en el SH-4): ahora el host lee el de Night (mapa 64 × 64, tabla 256 × 16 y los ejes del coche)
+y `track.c` cambia el índice de luz de los vértices de la pista que caen dentro, como el
+shader de la referencia. Además, **las pistas N y S estaban horneadas con el formato
+antiguo** (del 23 de octubre) y no cargaban: la noche salía en negro. Rehorneadas (`make
+bake`, 9 s). Y **los coches salían sin reflejo con cualquier variante** (noche, lluvia): se
+buscaba `ZTR06WR.RFL` y los mapas son de la pista, `ZTR06R.RFL`.
+
+**La «nieve» no es nieve en Alemania.** La variante S de una pista es clima con noche
+(`GameSetup` +0x48 y +0x54). `docs/FORMATS.md` (del upstream) la llama «snow», pero el
+original, por el mismo camino de menús en DuckStation, pinta **lluvia de noche**. El port
+graba lo que pinta el juego (272 991 cuadros de clima idénticos en `noche_lluvia.txt`) y
+en Flycast se ve como en DuckStation: la escena azul, la farola, la carretera iluminada,
+la lluvia y las gotas en la lente.
 
 ### Paso 8: la pausa en carrera (hecho en emulador, 2026-10-26)
 

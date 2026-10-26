@@ -33,7 +33,9 @@
 #endif
 
 #define HOST_HLE_MAX 256u
-#define PAD_SCRIPT_MAX 256u
+/* pasos del guion de entrada: el de una carrera entera con el piloto automatico de la
+ * referencia (NFSHS_DIFF_AUTOPILOT) tiene ~820 por vuelta */
+#define PAD_SCRIPT_MAX 4096u
 /* Tabla de TODAS las llamadas que ve el host, por direccion (HLE y no HLE), para
  * poder diferenciarla contra la de la referencia. */
 #define HOST_SEEN_MAX 4096u
@@ -203,7 +205,23 @@ typedef struct ObjectDraw {
     int32_t  pos[3];           /* 16.16 */
 } ObjectDraw;
 
+/* El haz de los faros de noche (Night_NightCalc), como NightBeam de la referencia: en el
+ * espacio del haz (los ejes del coche del jugador desde su posicion, en 1/64 m), un vertice
+ * de la pista con z0 < z < z0 + 2^(zs+6) y |x| < 2^(xs+5) cambia su indice de luz s por
+ * table[s][map[(z - z0) >> zs][(x + 2^(xs+5)) >> xs]]. Se aplica por vertice en el SH-4
+ * (decision de la seccion 3 de CLAUDE.md). */
+typedef struct NightBeam {
+    uint8_t  on;               /* noche y el coche del jugador con los faros encendidos */
+    int32_t  z0;
+    uint32_t xs, zs;
+    float    origin[3];        /* metros, espacio del mundo (la X de PS1 espejada) */
+    float    right[3], forward[3];
+    uint8_t  map[4096];        /* 64 x 64 niveles */
+    uint8_t  table[4096];      /* 256 x 16 indices de la tabla de luz */
+} NightBeam;
+
 typedef struct RaceView {
+    const NightBeam *beam;     /* el haz de noche de esta vista, o NULL */
     uint32_t player;
     int16_t  rect[4];          /* recorte relativo al de la vista 0, y su tamano */
     int32_t  camera_pos[3];
@@ -377,6 +395,7 @@ typedef struct GameHost {
     /* El nombre base del ultimo .GRP que el juego abrio: es como el port sabe QUE pista
      * tiene que cargar horneada, sin tener que leerselo al juego por otro sitio. */
     char     track_name[16];
+    NightBeam beam;          /* el de la ultima vista grabada (ver NightBeam) */
     /* La letra de region de la ultima librea de policia que el juego abrio, por modelo (ver
      * host_car_file): `zzzgbmws.viv` deja 'G' para el BMW. 0 si no abrio ninguna. */
     char     police[5];
@@ -417,6 +436,7 @@ typedef struct GameHost {
     uint32_t otags_frame;                 /* DrawOTag desde la ultima frontera de frame */
     uint32_t hud_start[HUD_LISTS_MAX];
     uint32_t hud_lists;
+    uint32_t hud_end;                     /* donde acaba la ultima tabla grabada */
     uint64_t hud_single;                  /* frames con una sola tabla (ver overlay.c) */
 
     /* ---- la pausa (M2c) ----

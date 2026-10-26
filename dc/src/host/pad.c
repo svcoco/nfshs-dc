@@ -238,8 +238,21 @@ void host_frame_top(GameHost *h, Cpu *c)
      * las tablas grabadas en el frame se tira la del mundo y la lista se da la vuelta. */
     h->otags_frame = 0;
     h->paused = h->mode == HOST_RACE && ps1_r32(c, SIM_PAUSED) != 0u;
-    if (h->mode == HOST_RACE && !h->paused)
+    if (h->mode == HOST_RACE && !h->paused) {
         overlay_race_compose(h);
+    } else if (h->hud_lists > 0u) {
+        /* Tablas de carrera grabadas en un frame que se cierra ya en los menus (el ultimo de
+         * la carrera): la referencia las guarda aparte y solo las pasa a la lista al componer
+         * en carrera, asi que no entran. Aqui ya estaban en la lista: se quitan. */
+        Overlay *o = &h->overlay;
+        uint32_t d = h->hud_start[0], e = h->hud_end;
+
+        if (d < e && e <= o->n) {
+            memmove(&o->quad[d], &o->quad[e], (size_t)(o->n - e) * sizeof o->quad[0]);
+            o->n -= e - d;
+        }
+        h->hud_lists = 0;
+    }
     hold_cameras(h, c);
     /* el flare del sol: en pausa, si el juego no lo pinta, el del ultimo frame (como la
      * referencia, que lo vuelca asi) */
@@ -279,6 +292,10 @@ void host_frame_top(GameHost *h, Cpu *c)
     if (h->clock % HOST_FIELD != 0u || h->clock == h->last_top)
         host_advance_to(h, c, (h->clock / HOST_FIELD + 1u) * HOST_FIELD);
     h->last_top = h->clock;
+    /* Las marcas de neumatico, de la RAM en este punto, como las lee la referencia al volcar
+     * (read_skids en cada frame). Leerlas al preparar la vista dejaba las del frame anterior
+     * cuando el juego las borra: al recolocar el coche y al terminar la carrera. */
+    host_read_skids(h, c);
 
 #if PS1_DIAG
     dump_frame(h, c);

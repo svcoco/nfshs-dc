@@ -198,8 +198,7 @@ bake:
 
 # Los coches (M2c pasos 4 y 7): un .CAR por modelo con las 64 pinturas (paleta en el disco,
 # textura normal en la VRAM). Los de carrera con su version de mas detalle (H), que es la
-# que ensena el showroom; los de trafico solo tienen la S. La policia queda fuera: su librea
-# depende de la pista y el cargador la resuelve en tiempo de ejecucion.
+# que ensena el showroom; los de trafico solo tienen la S. La policia, todas sus libreas.
 CARS_RACE    := MSLK BMWZ CMRO TRAM ADB7 JXKR BMWM CORV F550 P993 F375 DIAB MCLK MCF1 X993 XCF1 BNS1 BNS2
 CARS_TRAFFIC := ARMY BEEP BMW5 CBUS CHOP COMC CUCA F500 GUAT LOGT MERC PKUP RIAT SAND SBUS TAXI TBUS TON1 TON2 VAN WOLW
 # la policia: una librea por region (la primera letra; el juego elige la de la pista, ver

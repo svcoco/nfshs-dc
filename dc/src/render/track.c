@@ -310,6 +310,29 @@ static uint32_t color_sombra(const uint32_t *light, uint32_t s)
     }
 }
 
+/* El haz de los faros de noche de la vista que se esta dibujando (ver NightBeam), o NULL.
+ * Lo fija track_draw; solo lo usa la pista. */
+static const NightBeam *s_haz;
+
+/* El indice de luz `s` de un vertice de la pista en `w` (metros, espacio del mundo) con el
+ * haz encima: Night_NightCalc, como track_colour en el shader de la referencia. */
+static uint32_t sombra_haz(const NightBeam *b, const float w[3], uint32_t s)
+{
+    float d[3];
+    int32_t x, z, mitad;
+    uint32_t k;
+
+    for (k = 0; k < 3u; k++)
+        d[k] = (w[k] - b->origin[k]) * 64.0f;
+    x = (int32_t)floorf(d[0] * b->right[0] + d[1] * b->right[1] + d[2] * b->right[2]);
+    z = (int32_t)floorf(d[0] * b->forward[0] + d[1] * b->forward[1] + d[2] * b->forward[2]);
+    mitad = (int32_t)1 << (b->xs + 5u);
+    if (z <= b->z0 || z >= b->z0 + ((int32_t)1 << (b->zs + 6u)) || x <= -mitad || x >= mitad)
+        return s;
+    k = b->map[(((uint32_t)(z - b->z0) >> b->zs) & 63u) * 64u + (((uint32_t)(x + mitad) >> b->xs) & 63u)];
+    return b->table[(s & 0xFFu) * 16u + (k & 15u)];
+}
+
 /* Dibuja una malla: `verts` es su charco y `quads` sus caras. */
 /* Dibuja una malla colocada en `o` (metros, espacio de PS1) y, si `mat` no es NULL,
  * girada y escalada por el (3x3 por filas, ya transpuesta por quien llama). La pista usa
@@ -393,7 +416,14 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
             cv[k].z = vw->row[2][0] * d[0] + vw->row[2][1] * d[1] + vw->row[2][2] * d[2];
             cv[k].u = cu[e] / au;
             cv[k].v = cvv[e] / av;
-            cv[k].argb = color_sombra(light, (uint32_t)(uint16_t)v[3] & 0xFFu);
+            {
+                uint32_t s = (uint32_t)(uint16_t)v[3] & 0xFFu;
+
+                /* de noche, la pista dentro del haz de los faros */
+                if (s_haz != NULL && mat == NULL)
+                    s = sombra_haz(s_haz, w, s);
+                cv[k].argb = color_sombra(light, s);
+            }
         }
 
         /* Los vertices del cuadro van en orden CICLICO alrededor de el, no en zigzag,
@@ -417,6 +447,7 @@ void track_draw(const Track *t, const struct RaceView *view, const uint32_t *lig
     if (st != NULL)
         memset(st, 0, sizeof(*st));
     view_init(&vw, view, sw, sh);
+    s_haz = (view->beam != NULL && view->beam->on) ? view->beam : NULL;
 
     for (i = 0; i < view->chunks_n; i++) {
         int16_t id = view->chunk[i];

@@ -111,6 +111,11 @@ static void pista_carga(const char *nombre)
     {
         static uint16_t refl[CAR_REFL_SIZE * CAR_REFL_SIZE];
 
+        /* los mapas son de la pista, no de su variante (noche, nieve, lluvia): zTr06W usa
+         * los de ZTR06. Antes se buscaba ZTR06WR.RFL y esos coches salian sin reflejo. */
+        if (i >= 2u && may[i - 2u] >= '0' && may[i - 2u] <= '9' &&
+            (may[i - 1u] == 'N' || may[i - 1u] == 'S' || may[i - 1u] == 'W'))
+            may[i - 1u] = 0;
         snprintf(ruta, sizeof ruta, "/cd/BAKED/%sR.RFL", may);
         if (!car_refl_load(refl, ruta)) {
             printf("reflejos: no pude cargar %s\n", ruta);

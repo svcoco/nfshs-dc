@@ -6,6 +6,10 @@
 #include "addr.h"
 #include "host.h"
 
+#include <math.h>
+
+static int night_beam_read(GameHost *h, Cpu *c, uint32_t player);
+
 /* Bandera que el juego pone para indicar que un video se salto. */
 #define MOVIE_SKIPPED 0x80052EBCu
 
@@ -132,6 +136,7 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
         RaceView *v = &h->view[h->views_n++];
         uint32_t i;
 
+        v->beam = night_beam_read(h, c, player) ? &h->beam : NULL;
         v->player = player;
         for (i = 0; i < 3u; i++)
             v->camera_pos[i] = (int32_t)ps1_r32(c, ADDR_RENDER_VIEW + 8u + 4u * i);
@@ -162,7 +167,58 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
      * los dibuja ahi y ese orden decide que ve cada rutina. */
     host_record_cars(h, c);
     host_record_halos(h, c);
-    host_read_skids(h, c);
+    /* (las marcas de neumatico se leen en la frontera de frame: ver host_frame_top) */
+}
+
+/* El haz de los faros de noche de la vista de `player`, como NightBeam::read de la
+ * referencia: el mapa y la tabla de Night (0x8013ED20 y 0x8013ED28), su forma
+ * (Night_SetEnviroment) y los ejes del coche, como los usa su renderer (el coche con su
+ * origen a ras de suelo, girado solo en horizontal). Devuelve si hay que aplicarlo. */
+static int night_beam_read(GameHost *h, Cpu *c, uint32_t player)
+{
+    NightBeam *b = &h->beam;
+    uint32_t map = ps1_r32(c, 0x8013ED20u), table = ps1_r32(c, 0x8013ED28u), car, i;
+    float row[3][3], pos[3], lift, n, fx, fz;
+
+    b->on = 0;
+    if (map == 0u || table == 0u || ps1_r32(c, 0x801144F8u) == 0u)
+        return 0;
+    car = ps1_r32(c, 0x80110CA0u + 4u * player);
+    /* faros encendidos: Car_tObj+1095, bits 1 y 2 */
+    if (car == 0u || (ps1_r8(c, car + 1095u) & 6u) == 0u)
+        return 0;
+    b->z0 = (int16_t)ps1_r16(c, 0x8013ED10u);
+    b->xs = ps1_r8(c, 0x8013ED18u);
+    b->zs = ps1_r8(c, 0x8013ED1Cu);
+    for (i = 0; i < 4096u; i++) {
+        b->map[i] = (uint8_t)ps1_r8(c, map + i);
+        b->table[i] = (uint8_t)ps1_r8(c, table + i);
+    }
+    /* a metros y al espacio del mundo (la X espejada) */
+    for (i = 0; i < 9u; i++)
+        row[i / 3u][i % 3u] = (float)(int32_t)ps1_r32(c, car + 0xF0u + 4u * i) / 65536.0f *
+                              (i % 3u == 0u ? -1.0f : 1.0f);
+    for (i = 0; i < 3u; i++)
+        pos[i] = (float)(int32_t)ps1_r32(c, car + 0xA0u + 4u * i) / 65536.0f * (i == 0u ? -1.0f : 1.0f);
+    lift = (float)(int32_t)ps1_r32(c, car + 0x134u + 4u) / 65536.0f;
+    n = sqrtf(row[1][0] * row[1][0] + row[1][1] * row[1][1] + row[1][2] * row[1][2]);
+    for (i = 0; i < 3u; i++)
+        b->origin[i] = pos[i] - (n > 1e-6f ? row[1][i] / n : (i == 1u ? 1.0f : 0.0f)) * lift;
+    /* adelante y derecha en horizontal (Car::forward y Car::right de la referencia) */
+    fx = row[2][0];
+    fz = row[2][2];
+    n = sqrtf(fx * fx + fz * fz);
+    if (n < 1e-6f) {
+        fx = 0.0f;
+        fz = 1.0f;
+    } else {
+        fx /= n;
+        fz /= n;
+    }
+    b->forward[0] = fx; b->forward[1] = 0.0f; b->forward[2] = fz;
+    b->right[0] = -fz;  b->right[1] = 0.0f;   b->right[2] = fx;
+    b->on = 1;
+    return 1;
 }
 
 int host_game_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)

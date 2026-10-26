@@ -19,10 +19,11 @@ que la consola acepta, pero nadie lo ha quemado todavía. **M2a tiene sus cinco 
 hechos**: el front end **se dibuja con el PVR en Dreamcast a ~60 fps**, completo y
 legible; queda mirarlo en 480i en una tele, que es el criterio de salida del hito.
 **M2b también está hecho en emulador**: la carrera se dibuja —pista, cielo y objetos del
-escenario— a **60 fps**. **M2c va por el paso 7 (el showroom del front end) tras tener sus seis primeros pasos hechos en emulador**: coches, objetos,
-HUD y efectos (sombras, líneas, marcas, destellos, halos, humo, sol, clima y reflejos) se
-dibujan en Dreamcast a 30-43 fps, todo con oráculo contra la referencia salvo la imagen.
-La lluvia se comparó además con el juego original en DuckStation.**
+escenario— a **60 fps**. **M2c cumple su criterio en emulador (2026-10-26)**: una carrera completa de un jugador,
+de los menús a la meta, las estadísticas, la repetición y de vuelta a los menús, sale
+**idéntica a la referencia en 40 000 frames** (RAM, 2D y vista). Coches, objetos, HUD,
+efectos, showroom, pausa y noche se dibujan en Dreamcast a 30-43 fps; la lluvia y la
+lluvia de noche se compararon además con el original en DuckStation.**
 
 El repo es un **fork** de nfshs-rs: `origin` = `svcoco/nfshs-dc`, `upstream` =
 `bsimovic93/nfshs-rs`, commit base `27d903e`. `master` es el espejo limpio del upstream y
@@ -131,7 +132,7 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 | M1b | Cross-compilar a SH-4 (KOS, `-m4-single`) + host mínimo (archivos, pad, timers, VSync, BIOS) | **Hecho en Flycast con BIOS real (2026-10-23).** Arranca desde CDI; front end a 69–78 fps y carrera simulando a **98–113 fps**; `.text` de 3,43 MB con `-Os`, ELF `text 3,8 MB / bss 4,85 MB`; 227/227 unitarias en SH-4. Falta quemarlo y probarlo en una consola |
 | M2a | Grabación en C + modos 480p/480i + 2D en PVR + espejo de VRAM y texturas | Front end navegable y legible en ambos modos |
 | M2b | Pista y cielo en PVR (transformación en SH-4, recorte por plano cercano) | **Hecho en emulador (2026-10-23).** La carrera se dibuja a **60 fps** con ~1 150 triángulos de pista y 104 de cielo. La transformación va en C con `float`, **sin FTRV**: esa optimización queda para M6 y ahora hay con qué medirla (`docs/hitos/M2b.md`) |
-| M2c | Coches, props y efectos | **Pasos 1-6 hechos en emulador (2026-10-25); paso 7 (showroom) en curso.** Objetos, coches, HUD y todos los efectos grabados, validados contra la referencia y dibujados; la carrera se juega a 30-43 fps; la lluvia, comparada con el original en DuckStation. Carrera completa de un jugador (`docs/hitos/M2c.md`) |
+| M2c | Coches, props y efectos | **Criterio cumplido en emulador (2026-10-26).** Carrera completa de un jugador idéntica a la referencia en 40 000 frames (`carrera_completa.txt`, con el piloto de pruebas de la referencia); showroom, pausa, policía y noche. 30-43 fps en Flycast (`docs/hitos/M2c.md`) |
 | M3 | Middleware de audio: SPU → AICA (ADPCM de PS1 convertido al hornear) | Música, motor y efectos en el front end y en carrera |
 | M4 | Middleware de IO: controles (mando de Dreamcast, analógicos, gatillos, vibración) | Front end y carrera jugables con el mando de Dreamcast |
 | M5 | Middleware de IO: guardado y VMU (memory card de PS1 → VMU) | Guardar y cargar la partida en la VMU |

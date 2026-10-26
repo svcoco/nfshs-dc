@@ -55,6 +55,7 @@ reflexion. *(El recuento de partes y poligonos se mide al hornearlos, en el paso
 | 6 | **Efectos**: sombras, destellos, humo, marcas, clima, lineas | **Hecho en emulador (2026-10-25)**: todos los efectos con oraculo, salvo la imagen; la lluvia, comparada con el original en DuckStation |
 | 7 | **El showroom del front end**: el coche de seleccion, concesionario y garaje | **Hecho en emulador (2026-10-26)**: grabado con oraculo, dibujado con el PVR, pinturas y mapa de reflejo; y la policia con la librea de su region (las sombras de los pasos de rueda no van: el juego no las pide en el showroom) |
 | 8 | **La pausa en carrera**: el menu y lo que se ve detras | **Hecho en emulador (2026-10-26)**: RAM, 2D y vista identicas con `pausa.txt` |
+| 9 | **Una carrera completa, y la noche** | **Hecho en emulador (2026-10-26)**: 40 000 frames identicos con `carrera_completa.txt` |
 
 Los pasos 1 y 3 van primero **porque tienen oraculo**, igual que la lista 2D de M2a y la
 vista de M2b: la referencia graba exactamente lo mismo, asi que se comparan campo a campo
@@ -606,3 +607,68 @@ Restart, Options, Quit Race) sobre la carretera y el HUD.
 
 **Sin probar:** las opciones del menu (Restart, Options, Quit Race) y una pausa en pantalla
 partida.
+
+## 13. Paso 9 (hecho en emulador): una carrera completa, y la noche (2026-10-26)
+
+**Criterio de salida de M2c cumplido en emulador:** una carrera completa de un jugador,
+identica a la referencia.
+
+### El piloto de pruebas como entrada
+
+Un guion fijo no llega a la meta. La referencia tiene un piloto automatico de pruebas
+(`src/game/ai.rs`: sigue la linea central `vroad` de la pista, frena antes de las curvas y
+se desatasca marcha atras), pero vive en el camino de la aplicacion. Se ha metido en el
+**modo diferencial** de la referencia (`boot-main`), detras de `NFSHS_DIFF_AUTOPILOT=FILE`:
+en carrera lee el coche del jugador de la RAM, decide, anade sus botones a los del guion y
+los anota en FILE como guion del port. Para eso los dos lectores de guiones aceptan
+`0x1234` (el de la referencia no lo hacia) y `PAD_SCRIPT_MAX` sube de 256 a 4 096.
+
+`fe-play` no servia: su arranque (`RaceThread`) deja el juego en otro estado y, con los
+mismos botones, los menus no siguen el mismo camino que en el port.
+
+### Resultado (`carrera_completa.txt`)
+
+| Frame | Que pasa |
+|---|---|
+| ~1 300 | salida (single race en solitario, Alemania, 2 vueltas, el SLK comprado) |
+| ~34 050 | meta: "RACE STATISTICS", vuelta 1 4:16.00, vuelta 2 4:42.78, total 8:58.78 |
+| ~34 100-37 950 | la repeticion (camaras de television y la barra de video) |
+| ~37 950 | de vuelta a "game setup" |
+
+| Oraculo | 40 000 frames |
+|---|---|
+| RAM | identica |
+| lista 2D | 3 345 733 cuadros identicos |
+| vista | 36 789 vistas, 1 359 742 objetos, 6 034 coches, 5 931 116 marcas, 225 772 destellos identicos |
+
+Dos fallos de grabacion que salieron aqui:
+- **Marcas de neumatico:** se leian en `Render_RenderPlayerView` y quedaban las del frame
+  anterior cuando el juego las borra (frames 34 051, 35 998 y desde el 37 950). Se leen
+  ahora en la frontera de frame (`host_frame_top`), donde las lee la referencia.
+- **El ultimo frame de carrera** (37 950) ya cerraba en los menus con las tablas del HUD
+  grabadas antes: 312 cuadros contra 299. La referencia las guarda en `frame_lists` y solo
+  las compone en carrera; aqui se quitan (`hud_end`).
+
+### La noche
+
+- **El haz de los faros** (`NightBeam`, `night_beam_read` en `game.c`, `sombra_haz` en
+  `track.c`): el host lee el mapa de 64 x 64 niveles (0x8013ED20), la tabla de 256 x 16
+  indices (0x8013ED28), su forma (z0, xs, zs) y los ejes del coche del jugador; cada
+  vertice de la pista dentro del haz cambia su indice de luz `s` por `table[s][nivel]`.
+  Por vertice en el SH-4, como decide la seccion 3 de CLAUDE.md y como el shader de la
+  referencia.
+- **Pistas N y S rehorneadas:** eran del formato anterior y `track_load` las rechazaba; la
+  noche salia en negro.
+- **Mapas de reflejo de las variantes:** el renderer pedia `ZTR06WR.RFL`; los mapas son de
+  la pista (`ZTR06R.RFL`). Con lluvia o de noche los coches salian sin reflejo.
+
+### La "nieve"
+
+La variante S es clima con noche (`GameSetup` +0x48 y +0x54 a 1). `docs/FORMATS.md` la
+llama "snow", pero en Alemania el original pinta **lluvia de noche**: comprobado en
+DuckStation por el mismo camino de menus. El guion es `noche_lluvia.txt`: 3 000 frames
+identicos y 272 991 cuadros de clima. En Flycast se ve como en DuckStation.
+
+**Sin probar:** la noche sin clima (variante N) en Flycast, otras pistas con clima por si
+alguna tiene nieve de verdad, y las opciones de la pantalla de estadisticas (el piloto solo
+pulsa Cross).

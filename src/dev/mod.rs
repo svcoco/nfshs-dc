@@ -365,6 +365,11 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     let mut buttons = 0u16;
                     for name in it.next().unwrap_or("-").split([',', '+']) {
                         use ps1::race::pad;
+                        // "0x1234": the buttons in hexadecimal, as the C host also reads them
+                        if let Some(h) = name.trim().strip_prefix("0x").or_else(|| name.trim().strip_prefix("0X")) {
+                            buttons |= u16::from_str_radix(h, 16).unwrap_or(0);
+                            continue;
+                        }
                         buttons |= match name.trim().to_ascii_uppercase().as_str() {
                             "SELECT" => pad::SELECT, "START" => pad::START,
                             "UP" => pad::UP, "RIGHT" => pad::RIGHT,
@@ -379,6 +384,13 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     diff_steps.push((at, buttons));
                 }
             }
+            // NFSHS_DIFF_AUTOPILOT=FILE: in races, the test autopilot (game/ai.rs) drives the
+            // player's car through the pad, on top of the script; every frame's buttons go to
+            // FILE as a script in the C port's format, so that the port gets the very same
+            // input (a whole race to the finish line, which no fixed script survives)
+            let mut pilot: Option<(std::fs::File, game::ai::Driver, Vec<glam::Vec3>, usize, u32, u16)> = std::env::var_os("NFSHS_DIFF_AUTOPILOT")
+                .map(|p| (std::fs::File::create(p).expect("NFSHS_DIFF_AUTOPILOT"), game::ai::Driver::default(), Vec::new(), 0, u32::MAX, 0xFFFF));
+            let pilot_root = data.root.clone();
             let on_frame: ps1::host::FrameFn = Box::new(move |c, info| {
                 frame += 1;
                 if let Some(out) = ovl_out.as_mut() {
@@ -721,7 +733,58 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     if diff_end != 0 && frame >= diff_end {
                         return None;
                     }
-                    let b = diff_steps.iter().rev().find(|(n, _)| *n <= frame).map_or(0, |(_, b)| *b);
+                    let mut b = diff_steps.iter().rev().find(|(n, _)| *n <= frame).map_or(0, |(_, b)| *b);
+                    if let Some((log, driver, path, progress, track, last)) = pilot.as_mut() {
+                        use ps1::race::{addr, pad};
+                        let player = c.m.r32(addr::HUMAN_CARS);
+                        if info.front_end || player == 0 {
+                            path.clear();
+                            *track = u32::MAX;
+                        } else if c.m.r32(addr::SIM_PAUSED) == 0 {
+                            // the track's centre line, once per race (the variants share it)
+                            let t = c.m.r32(addr::GAMESETUP + 0x3C);
+                            if *track != t {
+                                *track = t;
+                                *driver = game::ai::Driver::default();
+                                path.clear();
+                                let data = assets::GameData::new(&pilot_root);
+                                if let Ok(tr) = assets::load_track(&data, &mut assets::Atlas::new(2048), t, "", &[], None) {
+                                    *path = tr.track.vroad.iter().map(|v| assets::ps1_to_world(v.pos)).collect();
+                                    if path.len() < 2 {
+                                        *path = tr.nodes.clone();
+                                    }
+                                }
+                                *progress = usize::MAX;
+                            }
+                            let n = path.len();
+                            if n >= 2 {
+                                let p = game::original::pose(&ps1::race::CarState::read(&mut c.m, player));
+                                let car = game::car::Car { pos: p.pos, vel: p.vel, yaw: p.forward.x.atan2(p.forward.z), up: p.up, rot: p.rot, wheel_pose: (p.wheel_rot, p.wheel_steer) };
+                                // the nearest centre line point: everywhere at first, then near the last
+                                let (from, window) = if *progress == usize::MAX { (0, n / 2 + 1) } else { (*progress, 24.min(n / 2)) };
+                                let mut best = (f32::MAX, from);
+                                for k in 0..window * 2 {
+                                    let i = (from + n * 2 + k - window) % n;
+                                    let d = path[i].distance_squared(car.pos);
+                                    if d < best.0 {
+                                        best = (d, i);
+                                    }
+                                }
+                                *progress = best.1;
+                                let ctl = driver.controls(&car, path, *progress, 1.0 / 60.0);
+                                for (on, bit) in [(ctl.throttle > 0.5, pad::CROSS), (ctl.brake > 0.5, pad::SQUARE), (ctl.steer < -0.2, pad::LEFT), (ctl.steer > 0.2, pad::RIGHT)] {
+                                    if on {
+                                        b |= bit;
+                                    }
+                                }
+                            }
+                        }
+                        if b != *last {
+                            use std::io::Write;
+                            let _ = writeln!(log, "{frame} {}", if b == 0 { "-".to_string() } else { format!("{b:#06x}") });
+                            *last = b;
+                        }
+                    }
                     return Some([b.into(), 0.into()]);
                 }
                 if Some(frame) == ram_at {

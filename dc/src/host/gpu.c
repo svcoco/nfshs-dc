@@ -141,6 +141,7 @@ int host_gpu_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
                 h->hud_start[h->hud_lists++] = h->overlay.n;
             if (h->otags_frame > 0u || overlay_ot_len(c, a0) < 1500u)
                 overlay_record_ot(h, c, a0);
+            h->hud_end = h->overlay.n;
             h->otags_frame++;
         }
         *ret = 0;

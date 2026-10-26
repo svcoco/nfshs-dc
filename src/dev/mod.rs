@@ -321,7 +321,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             // NFSHS_DIFF_OVERLAY: vuelca la LISTA DE DIBUJO por frame, para comparar la
             // grabacion 2D del port en C (dc/src/host/overlay.c) contra esta, que es la
             // que alimenta al renderer de referencia. Formato, todo little-endian:
-            //   cabecera: "NFSO" u32 version=1
+            //   cabecera: "NFSO" u32 version=2 (la 2 anade el showroom al final de cada frame)
             //   por frame: u32 frame, u32 cuadros, u32 otros_comandos, y por cuadro
             //              i16 pts[4][2], u32 colores[4], u8 hay_textura, u8 semi,
             //              u8 abr, u8 relleno, u16 tpage, u16 clut, u16 uv[4][2]
@@ -331,7 +331,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     use std::io::Write;
                     let mut f = std::io::BufWriter::new(std::fs::File::create(&path).expect("NFSHS_DIFF_OVERLAY"));
                     f.write_all(b"NFSO").expect("cabecera");
-                    f.write_all(&1u32.to_le_bytes()).expect("cabecera");
+                    f.write_all(&2u32.to_le_bytes()).expect("cabecera");
                     f
                 });
             // NFSHS_DIFF_VIEW: dumps the RACE VIEW per frame, to compare the C port's
@@ -426,6 +426,91 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                             rec.extend_from_slice(&t[0].to_le_bytes());
                             rec.extend_from_slice(&t[1].to_le_bytes());
                         }
+                    }
+                    // the showroom (version 2): each car and each floor with where it sits in
+                    // the list (how many quads and clips before it), as dc/src/host/overlay.c
+                    {
+                        use ps1::host::OverlayCmd;
+                        let mut before = 0u32;
+                        let mut cars: Vec<u8> = Vec::new();
+                        let mut floors: Vec<u8> = Vec::new();
+                        let (mut ncar, mut nfloor) = (0u32, 0u32);
+                        let quad = |r: &mut Vec<u8>, q: &OverlayCmd| {
+                            if let OverlayCmd::Quad { pts, colours, tex, semi, abr } = q {
+                                for p in pts {
+                                    r.extend_from_slice(&p[0].to_le_bytes());
+                                    r.extend_from_slice(&p[1].to_le_bytes());
+                                }
+                                for c in colours {
+                                    r.extend_from_slice(&c.to_le_bytes());
+                                }
+                                r.extend_from_slice(&[0u8, u8::from(tex.is_some()), u8::from(*semi), *abr]);
+                                let (tpage, clut, uv) = match tex {
+                                    Some(t) => (t.tpage, t.clut, t.uv),
+                                    None => (0, 0, [[0u16; 2]; 4]),
+                                };
+                                r.extend_from_slice(&tpage.to_le_bytes());
+                                r.extend_from_slice(&clut.to_le_bytes());
+                                for t in uv {
+                                    r.extend_from_slice(&t[0].to_le_bytes());
+                                    r.extend_from_slice(&t[1].to_le_bytes());
+                                }
+                            }
+                        };
+                        for cmd in info.overlay.iter() {
+                            match cmd {
+                                OverlayCmd::Quad { .. } | OverlayCmd::Clip { .. } => before += 1,
+                                OverlayCmd::ShowroomCar { car, parts, cam_pos, cam_rot, h, ofx, ofy, mirrored, level, env } => {
+                                    ncar += 1;
+                                    let r = &mut cars;
+                                    r.extend_from_slice(&before.to_le_bytes());
+                                    let mut code = [0u8; 4];
+                                    for (k, b) in car.code.bytes().take(4).enumerate() {
+                                        code[k] = b;
+                                    }
+                                    r.extend_from_slice(&code);
+                                    r.extend_from_slice(&[car.colour, u8::from(*mirrored), 0, 0]);
+                                    r.extend_from_slice(&level.to_le_bytes());
+                                    for v in car.position.iter().chain(car.orient.iter()).chain(car.dimension.iter()) {
+                                        r.extend_from_slice(&v.to_le_bytes());
+                                    }
+                                    let mut p57 = [0u8; 60];
+                                    p57[..parts.len().min(57)].copy_from_slice(&parts[..parts.len().min(57)]);
+                                    r.extend_from_slice(&p57);
+                                    for v in cam_pos.iter().chain(cam_rot.iter()) {
+                                        r.extend_from_slice(&v.to_le_bytes());
+                                    }
+                                    r.extend_from_slice(&h.to_le_bytes());
+                                    r.extend_from_slice(&ofx.to_le_bytes());
+                                    r.extend_from_slice(&ofy.to_le_bytes());
+                                    r.extend_from_slice(&[u8::from(env.is_some()), 0, 0, 0]);
+                                    let e = env.unwrap_or_default();
+                                    for m in [e.a, e.b] {
+                                        for w in m.unwrap_or([0; 4]) {
+                                            r.extend_from_slice(&w.to_le_bytes());
+                                        }
+                                    }
+                                    r.extend_from_slice(&e.scroll.to_le_bytes());
+                                    r.extend_from_slice(&e.colour.to_le_bytes());
+                                    r.extend_from_slice(&e.yaw.to_le_bytes());
+                                    r.extend_from_slice(&[0u8, 0]);
+                                }
+                                OverlayCmd::ShowroomFloor(v) => {
+                                    nfloor += 1;
+                                    let qs: Vec<&OverlayCmd> = v.iter().filter(|q| matches!(q, OverlayCmd::Quad { .. })).collect();
+                                    floors.extend_from_slice(&before.to_le_bytes());
+                                    floors.extend_from_slice(&(qs.len() as u32).to_le_bytes());
+                                    for q in qs {
+                                        quad(&mut floors, q);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        rec.extend_from_slice(&ncar.to_le_bytes());
+                        rec.extend_from_slice(&cars);
+                        rec.extend_from_slice(&nfloor.to_le_bytes());
+                        rec.extend_from_slice(&floors);
                     }
                     out.write_all(&rec).expect("NFSHS_DIFF_OVERLAY");
                 }

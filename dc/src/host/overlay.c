@@ -621,6 +621,7 @@ void host_build_textures(GameHost *h)
     necesita(h, h->glow_quad, h->glow_quads_n);
     necesita(h, h->sky_quad, h->sky_quads_n);
     necesita(h, h->weather_quad, h->weather_quads_n);
+    necesita(h, h->sroom_floor, h->sroom_floor_n);
     tex_build(&h->texcache, h->vram, h->tex_buf, h->tex_cap);
 }
 
@@ -679,7 +680,7 @@ int overlay_dump_open(GameHost *h, const char *path)
     if (f == NULL)
         return 0;
     fwrite("NFSO", 1, 4, f);
-    put32o(f, 1u);
+    put32o(f, 2u);   /* version 2: anade los coches y el suelo del showroom */
     h->ovl_dump = f;
     return 1;
 }
@@ -692,10 +693,92 @@ void overlay_dump_frame(GameHost *h)
     if (f == NULL)
         return;
     put32o(f, (uint32_t)h->frames);
-    put32o(f, h->overlay.n);
+    {
+        uint32_t nq = 0;
+
+        for (i = 0; i < h->overlay.n; i++)
+            nq += (h->overlay.quad[i].kind <= OVL_CLIP);
+        put32o(f, nq);
+    }
     put32o(f, 0u);                       /* el port no produce otros comandos todavia */
     for (i = 0; i < h->overlay.n; i++)
-        overlay_dump_quad(f, &h->overlay.quad[i]);
+        if (h->overlay.quad[i].kind <= OVL_CLIP)
+            overlay_dump_quad(f, &h->overlay.quad[i]);
+    /* Despues de los cuadros, el showroom: cada coche y cada suelo con la posicion que
+     * ocupa en la lista (cuantos cuadros y recortes van antes). */
+    {
+        uint32_t antes = 0, ncar = 0, nsuelo = 0, k;
+
+        for (i = 0; i < h->overlay.n; i++) {
+            uint8_t kd = h->overlay.quad[i].kind;
+
+            ncar += (kd == OVL_SR_CAR);
+            nsuelo += (kd == OVL_SR_FLOOR);
+        }
+        put32o(f, ncar);
+        for (i = 0; i < h->overlay.n; i++) {
+            const OverlayQuad *q = &h->overlay.quad[i];
+
+            if (q->kind <= OVL_CLIP) {
+                antes++;
+                continue;
+            }
+            if (q->kind != OVL_SR_CAR)
+                continue;
+            {
+                const ShowroomCar *s = &h->sroom[(uint16_t)q->pts[0][0]];
+                const CarDraw *d = &s->d;
+
+                put32o(f, antes);
+                fwrite(d->code, 1, 4, f);
+                fputc(s->colour, f);
+                fputc(s->mirrored, f);
+                put16(f, 0);
+                put32o(f, s->level);
+                for (k = 0; k < 3u; k++)
+                    put32o(f, (uint32_t)d->pos[k]);
+                for (k = 0; k < 9u; k++)
+                    put32o(f, (uint32_t)d->orient[k]);
+                for (k = 0; k < 3u; k++)
+                    put32o(f, (uint32_t)d->dimension[k]);
+                fwrite(d->parts, 1, 57, f);
+                fputc(0, f); fputc(0, f); fputc(0, f);
+                for (k = 0; k < 3u; k++)
+                    put32o(f, (uint32_t)s->cam_pos[k]);
+                for (k = 0; k < 9u; k++)
+                    put32o(f, (uint32_t)s->cam_rot[k]);
+                put32o(f, s->h);
+                put32o(f, (uint32_t)s->ofx);
+                put32o(f, (uint32_t)s->ofy);
+                fputc(d->env_ok, f);
+                fputc(0, f); fputc(0, f); fputc(0, f);
+                for (k = 0; k < 4u; k++)
+                    put32o(f, (d->env_ok && d->env_a[0] != 0u) ? d->env_a[k] : 0u);
+                for (k = 0; k < 4u; k++)
+                    put32o(f, (d->env_ok && d->env_b[0] != 0u) ? d->env_b[k] : 0u);
+                put32o(f, d->env_ok ? d->env_scroll : 0u);
+                put32o(f, d->env_ok ? d->env_colour : 0u);
+                put16(f, d->env_ok ? (uint16_t)d->env_yaw : 0u);
+                put16(f, 0);
+            }
+        }
+        put32o(f, nsuelo);
+        antes = 0;
+        for (i = 0; i < h->overlay.n; i++) {
+            const OverlayQuad *q = &h->overlay.quad[i];
+
+            if (q->kind <= OVL_CLIP) {
+                antes++;
+                continue;
+            }
+            if (q->kind != OVL_SR_FLOOR)
+                continue;
+            put32o(f, antes);
+            put32o(f, (uint16_t)q->pts[0][1]);
+            for (k = 0; k < (uint16_t)q->pts[0][1]; k++)
+                overlay_dump_quad(f, &h->sroom_floor[(uint16_t)q->pts[0][0] + k]);
+        }
+    }
 }
 
 void overlay_dump_close(GameHost *h)

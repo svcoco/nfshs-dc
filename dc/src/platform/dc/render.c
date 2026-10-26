@@ -935,6 +935,8 @@ void render_frame(GameHost *h)
         int k, alineado, npol;
         P2 pol[16];
 
+        if (q->kind == OVL_SR_CAR || q->kind == OVL_SR_FLOOR)
+            continue;
         if (q->kind == OVL_CLIP) {
             clip.x0 = (float)q->pts[0][0] * sx;
             clip.y0 = (float)q->pts[0][1] * sy;

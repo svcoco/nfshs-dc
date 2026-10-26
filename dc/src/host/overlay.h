@@ -35,7 +35,12 @@ typedef struct {
 /* Que es cada entrada de la lista. */
 typedef enum {
     OVL_QUAD = 0,            /* un cuadro en coordenadas de pantalla */
-    OVL_CLIP = 1             /* SetDrawArea: el dibujo que sigue va recortado a ese rect */
+    OVL_CLIP = 1,            /* SetDrawArea: el dibujo que sigue va recortado a ese rect */
+    /* Marcadores del showroom (M2c paso 7): no son cuadros, apuntan a las tablas del host.
+     * pts[0][0] es el indice; en el suelo, pts[0][1] es cuantos cuadros. El volcado y el
+     * dibujo 2D se los saltan. */
+    OVL_SR_CAR = 2,          /* un coche del showroom: GameHost::sroom[pts[0][0]] */
+    OVL_SR_FLOOR = 3         /* su suelo: sroom_floor[pts[0][0]] .. + pts[0][1] */
 } OverlayKind;
 
 /* Esquinas en orden: arriba-izquierda, arriba-derecha, abajo-izquierda, abajo-derecha.

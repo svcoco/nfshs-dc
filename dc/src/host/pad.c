@@ -199,6 +199,8 @@ void host_frame_top(GameHost *h, Cpu *c)
     if (h->on_draw != NULL)
         h->on_draw(h);
     overlay_reset(&h->overlay);
+    h->sroom_n = 0;
+    h->sroom_floor_n = 0;
     /* Las vistas de carrera tambien son de UN frame: el renderer ya las ha consumido
      * en on_draw. */
     h->views_n = 0;

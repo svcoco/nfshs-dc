@@ -168,6 +168,25 @@ typedef struct Glow {
     float    radius;           /* halo de coche: el radio de su caja, en metros */
 } Glow;
 
+/* El showroom del front end (M2c paso 7): el coche de la pantalla de seleccion, que el
+ * original dibuja con R3DCar_InsertCarFacetMenuII (una vez para el reflejo en el suelo y otra
+ * para el coche), y su plataforma giratoria (R3DCar_Showroom). Se graba como la referencia
+ * (OverlayCmd::ShowroomCar / ShowroomFloor). */
+#define SROOM_MAX          8u
+#define SROOM_FLOOR_MAX  256u
+#define SROOM_SHADOW_MAX  32u
+
+typedef struct ShowroomCar {
+    CarDraw  d;                /* el coche como en carrera: modelo, pose, partes, reflejo */
+    uint8_t  colour;           /* la pintura, como CarState::colour */
+    uint8_t  mirrored;         /* es su reflejo en el suelo (gp+3532 & 0x80) */
+    uint32_t level;            /* su nivel de luz (128 = tal cual; a la mitad en el reflejo) */
+    int32_t  cam_pos[3];       /* la camara de la vista, como en carrera */
+    int32_t  cam_rot[9];
+    uint32_t h;                /* la proyeccion del GTE: distancia y centro (16.16) */
+    int32_t  ofx, ofy;
+} ShowroomCar;
+
 #define HUD_LISTS_MAX  16u
 #define DRAW_ENVS_MAX  64u
 
@@ -319,6 +338,17 @@ typedef struct GameHost {
      * terminar los coches, como la referencia, porque el orden fija el modo de dibujo. */
     uint32_t    halo_rng[16][3];         /* inicio, fin, Car_tObj */
     uint32_t    halo_rng_n;
+    /* El showroom del frame (ver ShowroomCar) y su suelo; la sombra se guarda aparte hasta
+     * que la recoge el suelo, como la referencia (que puede ser en el frame siguiente). */
+    ShowroomCar sroom[SROOM_MAX];
+    uint32_t    sroom_n;
+    OverlayQuad sroom_floor[SROOM_FLOOR_MAX];
+    uint32_t    sroom_floor_n;
+    OverlayQuad sroom_shadow[SROOM_SHADOW_MAX];
+    uint32_t    sroom_shadow_n;
+    int8_t      sroom_type;               /* DrawCar: el tipo de coche que se ensena */
+    uint8_t     sroom_paint;
+    uint8_t     sroom_type_ok;
     uint32_t cars_cap_buf[CAR_CAPTURE_MAX];
     uint32_t cars_cap;        /* palabras escritas */
     uint32_t cars_n;          /* coches anotados */

@@ -122,6 +122,21 @@ int host_views_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
         break;
     }
 
+    /* tScreenTrackSelect::DrawVideoWall llamada desde DrawBackground (ra 0x80041E5C), que
+     * acaba de construir en el buffer de primitivas los dos cuadros del video de la pista que
+     * gira (POLY_FT4, con los fotogramas volcados en la VRAM en x 512): se graban y la rutina
+     * corre como siempre. Como la referencia (mod.rs). Sin esto faltaban esos dos cuadros en
+     * la pantalla de pista, la "deuda de dos cuadros" de los menus desde M2a. */
+    if (h->mode == HOST_FRONTEND && !h->capturing && addr == 0x800422DCu &&
+        c->r[31] == 0x80041E5Cu) {
+        uint32_t fin = ps1_r32(c, 0x1F800004u);
+
+        if ((ps1_r32(c, fin - 80u) >> 24) == 9u && (ps1_r8(c, fin - 80u + 7u) & 0xFCu) == 0x2Cu &&
+            (ps1_r32(c, fin - 40u) >> 24) == 9u && (ps1_r8(c, fin - 40u + 7u) & 0xFCu) == 0x2Cu)
+            overlay_record_packets(h, c, fin - 80u, fin);
+        return 0;
+    }
+
     /* Las rutinas que construyen primitivas: en el front end se corren anidadas. El
      * guardia de `capturing` es imprescindible, porque DrawTV llama a DrawTVLines y la
      * anidada de dentro tiene que correr en su sitio. */

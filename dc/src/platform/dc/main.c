@@ -313,7 +313,9 @@ int main(int argc, char **argv)
     ps1_spu_init(&spu);
     ps1_spu_attach(&spu, &cpu);
     /* M4: lo que el driver de sonido pide al SPU, al AICA */
+#ifndef NFSHS_SIN_AUDIO
     aica_spu_init(&spu);
+#endif
     cpu.tick_limit = TICK_LIMIT;
     cpu.spin_limit = SPIN_LIMIT;
 

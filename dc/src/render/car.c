@@ -548,13 +548,18 @@ void car_shadow(const Track *t, const struct CarDraw *d, const struct RaceView *
             p[1] = suelo;
         p[1] += 0.03f;
         /* El original no tiene buffer de profundidad: aqui el cuadro se acerca a la
-         * camara (over_road de la referencia) para que no se hunda bajo la carretera. */
+         * camara (over_road de la referencia) para que no se hunda bajo la carretera.
+         * Mucho menos que la referencia (0,25 + 0,06 d, hasta 1,2 m): alli la sombra se
+         * dibuja ANTES que los coches y sin escribir profundidad, asi que el coche siempre la
+         * tapa; en el PVR la sombra resta en la lista translucida, que va DESPUES de la de los
+         * coches, y con 1,2 m pasaba por delante de los bajos del coche y los oscurecia
+         * (parachoques y faldones; visto por Jorge en Flycast, M4). */
         for (j = 0; j < 3u; j++)
             to[j] = vw.cam[j] - p[j];
         dist = sqrtf(to[0] * to[0] + to[1] * to[1] + to[2] * to[2]);
-        empuje = 0.25f + dist * 0.06f;
-        if (empuje > 1.2f)
-            empuje = 1.2f;
+        empuje = 0.08f + dist * 0.012f;
+        if (empuje > 0.3f)
+            empuje = 0.3f;
         if (empuje > dist * 0.5f)
             empuje = dist * 0.5f;
         for (j = 0; j < 3u; j++)

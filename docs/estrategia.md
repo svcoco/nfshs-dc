@@ -20,7 +20,7 @@ Por eso el plan las separa en el tiempo:
 - **M2** añade el renderer, que es trabajo nuevo y no una traducción.
 - **M3** pone los vídeos (FMV). **Cerrado en emulador (2026-10-26).**
 - **M4 a M6** completan el middleware que falta: audio, controles (con los dos jugadores) y
-  guardado con la VMU.
+  guardado con la VMU. **M4 cerrado en emulador (2026-10-27).**
 - **M7** lleva el port a una **consola real** (CD-R, 480i y 480p): hasta ahí todo se ha
   validado en emulador, y es la primera vez que hay cifras del hardware de verdad. Empieza
   por que el CDI quepa en un CD-R de 80 minutos (con las películas de M3 se pasa).
@@ -32,6 +32,8 @@ Por eso el plan las separa en el tiempo:
   texturas externos y reúne **objetivos descartables** (salida en 720p, resolución interna
   3×, widescreen y un disco de arranque que lee el disco original de PS1): se estudian y se
   desechan si la plataforma no los permite o cuestan demasiado.
+- **M10 "Polishing"** pule con medidas; empieza por la herramienta de espectrogramas que compara
+  el audio con el original (DuckStation) tramo a tramo.
 
 El coste de este orden es que se tarda más en ver algo en pantalla. El beneficio quedó
 demostrado en M1a, y está documentado abajo.

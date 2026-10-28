@@ -7,7 +7,7 @@ descartaron no se guardan aquí.
 Se actualiza al cerrar cada paso. El detalle largo vive en `docs/hitos/`; esto es el
 resumen que permite retomar el proyecto sin releerlo todo.
 
-**Última entrada: 2026-10-27** (M4: la música en el AICA y el reloj real).
+**Última entrada: 2026-10-27** (cierre de M4 en emulador).
 
 ---
 
@@ -23,7 +23,8 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M2c** Coches, objetos y efectos | **Criterio cumplido en emulador** (2026-10-26): una carrera completa idéntica a la referencia en 40 000 frames; showroom, pausa, policía y noche; 30–43 fps |
 | **M2** (a, b y c) | **Cerrado en emulador (2026-10-26)** |
 | **M3** FMV | **Cerrado en emulador (2026-10-26)**: películas con sonido a sus 15 fps y video wall idéntico a la referencia; menús a ~40 fps |
-| **M4** Audio | **En curso**: el middleware suena por el AICA (también la música en stream); reloj real en Dreamcast |
+| **M4** Audio | **Cerrado en emulador (2026-10-27)**: música, motor y efectos por el AICA; reverb en su DSP; reloj real en Dreamcast |
+| M10 Polishing | Sin empezar: primero, la herramienta de espectrogramas contra el original |
 | M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables | Sin empezar (numeración del 2026-10-26) |
 
 **Lo que hay hoy (M3 cerrado en emulador):** lo de M2, más los **vídeos**: la intro, el
@@ -962,7 +963,7 @@ incompleta— los encontró el oráculo, no la lectura del código.
   habría que resolver los 57 huecos de partes, los faros y abolladuras por triángulo, el
   presupuesto de triángulos en el SH-4 y el de VRAM.
 
-## M4: audio (en curso)
+## M4: audio (cerrado en emulador, 2026-10-27)
 
 - **El middleware atrapa las escrituras del driver de EA en el SPU** (`SpuSink`) y las hace
   sonar con el AICA: muestras a PCM16 en un espejo en su RAM, una voz por canal. La música en

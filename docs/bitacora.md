@@ -976,4 +976,9 @@ incompleta— los encontró el oráculo, no la lectura del código.
   middleware la levanta cuando el canal del AICA pasa por ella, y corrige el canal con los
   rellenos del propio driver (espera si va adelantado, salta si va retrasado). Bloques
   pisados (deben ser 0): 0 en una carrera entera con su carga, 1 en 80 s de front end.
-- Detalle en `docs/hitos/M4.md` (secciones 8 y 9).
+- **Envolventes y barridos, medidos:** el juego solo usa una puerta (ataque inmediato, 1,5 ms
+  de release) y ningun barrido; el AICA ya lo hace.
+- **La reverb va en el DSP del AICA:** microprograma generado y probado contra la reverb de PS1
+  (`dc/tools/dsp/reverb_aica.py`, dentro de ~0,5 dB). En Flycast hay que activar el DSP
+  (`aica.DSPEnabled`, apagado por omision).
+- Detalle en `docs/hitos/M4.md` (secciones 8 a 10).

@@ -105,7 +105,9 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
   SH-4. Para el test diferencial, esas funciones se sustituyen en los dos lados, como hasta
   ahora el SPU. (Sustituye a «se convierte antes de compilar».) Las voces de más de 65 534 muestras
   (la música en stream) también van a un canal del AICA, en bucle sobre un anillo que un hilo
-  rellena; la CPU no mezcla nada (`docs/hitos/M4.md`, sección 9).
+  rellena; la CPU no mezcla nada (`docs/hitos/M4.md`, sección 9). La reverb del SPU la hace
+  el **DSP del AICA** con un microprograma generado (sección 10); en Flycast el DSP viene
+  apagado por omisión (`aica.DSPEnabled`).
 - **Vídeo (en M2a):** 480p a 31 kHz (VGA) y 480i a 15 kHz. Se renderiza a 640×480 en
   ambos y el modo se elige con `vid_check_cable` (se puede forzar con `/cd/VIDEO.TXT`).
   **Hecho el 2026-10-23** (`dc/src/platform/dc/video.c`), comprobado con los dos cables.

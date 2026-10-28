@@ -40,6 +40,7 @@
 #include "aica.h"
 #include "aica_spu.h"
 #include "spu.h"
+#include "reverb_dsp.h"
 
 #define BLOQUES    (PS1_SPU_RAM_SIZE / 16u)        /* 32 768 bloques de 16 bytes */
 #define PCM_BLOQUE 56u                             /* 28 muestras de 16 bits */
@@ -50,6 +51,7 @@
 #define DELANTE    (96u * 28u)                     /* por delante del canal: 122 ms a 22 050 Hz */
 #define ANILLOS    4u
 #define NADA       0xFFFFFFFFu
+#define AICA_REG(o) (0xA0700000u + (uint32_t)(o))      /* registros del AICA desde el SH-4 */
 #define VALIDO_MS  250u                            /* ver valido() */
 #define VUELTA_MS  1000u                           /* ver valido() */
 #define ADELANTO_MS 750u                           /* ver sigue_al_driver() */
@@ -97,6 +99,10 @@ static int16_t  s_hist[BLOQUES][2];                /* las dos ultimas muestras d
 static int16_t  s_pcm[28u * 64u];                  /* bloques decodificados antes de subirlos */
 static uint8_t  s_de_larga[BLOQUES];               /* lo esta leyendo una voz larga */
 static uint8_t  s_sucio[BLOQUES];                  /* cambio y el espejo no lo tiene */
+static uint32_t s_rev_anillo;                      /* anillo del DSP de reverb; 0: sin reverb */
+static uint32_t s_rev_lo = BLOQUES;                /* desde aqui, el area de reverb de PS1 */
+static volatile uint8_t s_rev_sucia;               /* hay que recalcular COEF y MADRS */
+static int32_t  s_rev_pico;                        /* DIAG: pico de EFREG en el tramo */
 static int16_t  s_anpcm[DELANTE] __attribute__((aligned(32)));   /* lo mismo, del hilo */
 static Voz      s_v[VOCES];
 static uint16_t s_main[2] = { 0x7FFF, 0x7FFF };
@@ -157,7 +163,7 @@ static void espejo(const uint8_t *ram, uint32_t b0, uint32_t b1, int solo_sucios
 
     for (uint32_t b = b0;; b++) {
         uint32_t k = b % BLOQUES;
-        int va = b < b1 && (solo_sucios ? s_sucio[k] : !s_de_larga[k]);
+        int va = b < b1 && k < s_rev_lo && (solo_sucios ? s_sucio[k] : !s_de_larga[k]);
         if (n != 0u && (!va || n == 64u || k == 0u)) {
             uint64_t t = timer_us_gettime64();
             spu_memload(s_base + inicio * PCM_BLOQUE, s_pcm, n * PCM_BLOQUE);
@@ -177,7 +183,7 @@ static void espejo(const uint8_t *ram, uint32_t b0, uint32_t b1, int solo_sucios
             s_hist[k][1] = (int16_t)s2;
             s_sucio[k] = 0;
             n++;
-        } else if (!solo_sucios) {
+        } else if (!solo_sucios && b < b1 && k < s_rev_lo) {
             s_sucio[k] = 1;
             s_saltados++;
         }
@@ -187,6 +193,7 @@ static void espejo(const uint8_t *ram, uint32_t b0, uint32_t b1, int solo_sucios
 static void pisados(Voz *v, uint32_t b0, uint32_t b1);
 static void sigue_al_driver(Voz *v, uint32_t b0, uint32_t b1);
 static void retoma(Voz *v, uint64_t ahora);
+static void rev_aplica(const uint16_t *regs);
 
 static void subida(void *ctx, const uint8_t *ram, uint32_t addr, uint32_t len)
 {
@@ -609,6 +616,15 @@ static void *hilo_largas(void *arg)
         for (unsigned n = 0; n < VOCES; n++)
             if (s_v[n].suena && s_v[n].larga && s_v[n].anillo >= 0)
                 rellena(&s_v[n], t0);
+        if (s_rev_sucia)
+            rev_aplica(s_spu->reg);
+        if (s_rev_anillo != 0u)                    /* DIAG: la salida del DSP */
+            for (unsigned k = 0; k < 2u; k++) {
+                int32_t e = (int16_t)g2_read_32(AICA_REG(0x4580u + 4u * k));
+                e = e < 0 ? -e : e;
+                if (e > s_rev_pico)
+                    s_rev_pico = e;
+            }
         s_hilo_us += timer_us_gettime64() - t0;
         mutex_unlock(&s_mtx);
     }
@@ -687,6 +703,129 @@ static void revolumen(Voz *v, const uint16_t *regs, unsigned n)
               0, 0, 0, 0, 0, v->vol, v->pan);
 }
 
+/* ---- la reverb: el DSP del AICA ----
+ *
+ * El juego usa la reverb del SPU (medido, M4.md seccion 10): el preset "Studio Small" en
+ * 0x7E0C0, con todas las voces de efectos (EON) y volumen de salida 0x2040 en carrera (0 en el
+ * front end). Aqui la hace el DSP del AICA con el microprograma de reverb_dsp.h (generado y
+ * probado contra la reverb de PS1 por dc/tools/dsp/reverb_aica.py); sus coeficientes (COEF)
+ * y direcciones (MADRS) salen de los registros de reverb que escribe el juego.
+ *
+ * El anillo del DSP (8 K palabras, 16 KB, alineado a 2 KB) va DENTRO del espejo, en los
+ * bloques del area de reverb de PS1 (mBASE..fin), que no son muestras: la RAM del AICA no da
+ * para mas. Esos bloques dejan de ir al espejo. El cero del formato flotante del DSP es
+ * 0x6000 (una palabra a 0 vale medio fondo de escala), asi que el anillo se llena con el. */
+#define REV_BYTES     (REVERB_RBL * 2u)
+
+static uint8_t  s_rev_on;                          /* SPUCNT bit 7 */
+static uint32_t s_rev_cambios;
+
+static int32_t redondea(int64_t x, unsigned sh)
+{
+    return (int32_t)((x + ((int64_t)1 << (sh - 1u))) >> sh);
+}
+
+/* Un coeficiente de 13 bits (1,0 = 4096); las mismas formulas que coef_valor() en la
+ * herramienta. */
+static int32_t rev_coef(const uint16_t *regs, unsigned s)
+{
+    const uint16_t *r = &regs[0x1C0u >> 1];
+    const uint8_t *f = reverb_coef[s];
+    int64_t a = (int16_t)r[f[1]], b = (int16_t)r[f[2]];
+    int32_t x;
+
+    switch (f[0]) {
+    case 1: x = redondea(a, 3); break;
+    case 2: x = redondea(a * b, 18); break;
+    case 3: x = 4096 - redondea(a, 3); break;
+    case 4: x = -redondea(a, 3); break;
+    case 5: x = 4095; break;
+    case 6: {
+        /* en PS1 la reverb sale sin el volumen principal; aqui entra con el (va en el TL).
+           Y entre 16: dentro del DSP la escala es la de PS1, 16 veces la de las voces. */
+        int64_t o = (int16_t)regs[(0x184u >> 1) + f[1]], m = s_main[f[1]] ? s_main[f[1]] : 1;
+        x = redondea(o * 32767 / m, 7);
+        break;
+    }
+    case 7: x = redondea(a * b * 46341, 34); break; /* / raiz(2): ver ENTRADA en la herramienta */
+    default: x = 0; break;
+    }
+    return x < -4096 ? -4096 : x > 4095 ? 4095 : x;
+}
+
+static void rev_envios(const uint16_t *regs)
+{
+    uint32_t eon = regs[0x198u >> 1] | ((uint32_t)regs[0x19Au >> 1] << 16);
+
+    for (unsigned n = 0; n < VOCES; n++)
+        g2_write_32(AICA_REG((uint32_t)s_v[n].canal * 0x80u + 0x20u),
+                    (s_rev_anillo != 0u && ((eon >> n) & 1u)) ? 0xF0u : 0u);  /* IMXL 15, ISEL 0 */
+}
+
+static void rev_salida(void)
+{
+    int on = s_rev_on && s_rev_anillo != 0u;
+
+    g2_write_32(AICA_REG(0x2000u), on ? (0xFu << 8) | 0x1Fu : 0u);    /* EFREG 0: izquierda */
+    g2_write_32(AICA_REG(0x2004u), on ? (0xFu << 8) | 0x0Fu : 0u);    /* EFREG 1: derecha */
+}
+
+/* El area de reverb del juego (mBASE) cambio: el anillo del DSP, si cabe. */
+static void rev_area(const uint16_t *regs, uint16_t mbase)
+{
+    uint32_t lo = (uint32_t)mbase * 8u / 16u, ini, fin = s_base + BLOQUES * PCM_BLOQUE;
+
+    s_rev_anillo = 0;
+    s_rev_lo = BLOQUES;
+    if (lo < BLOQUES) {
+        ini = (s_base + lo * PCM_BLOQUE + 2047u) & ~2047u;
+        if (ini + REV_BYTES <= fin) {
+            s_rev_lo = lo;
+            s_rev_anillo = ini;
+            spu_memset(ini, 0x60006000u, REV_BYTES);
+            g2_write_32(AICA_REG(0x2804u), ini / 2048u);              /* RBL 0 (8 K), RBP */
+        }
+    }
+    s_rev_sucia = 1;
+    rev_envios(regs);
+    rev_salida();
+}
+
+/* COEF y MADRS desde los registros (del hilo, fuera del camino del juego: el juego escribe los
+ * 32 registros de golpe). */
+static void rev_aplica(const uint16_t *regs)
+{
+    const uint16_t *r = &regs[0x1C0u >> 1];
+
+    s_rev_sucia = 0;
+    if (s_rev_anillo == 0u)
+        return;
+    for (unsigned s = 0; s < REVERB_PASOS; s++)
+        g2_write_32(AICA_REG(0x3000u + 4u * s), ((uint32_t)rev_coef(regs, s) << 3) & 0xFFFFu);
+    for (unsigned i = 0; i < REVERB_MADRS; i++) {
+        int32_t off = (int32_t)r[reverb_madrs[i].a] * 8;
+        if (reverb_madrs[i].b != 0xFFu)
+            off -= (int32_t)r[reverb_madrs[i].b] * 8;
+        g2_write_32(AICA_REG(0x3200u + 4u * i),
+                    (uint32_t)(-off + reverb_madrs[i].extra) & (REVERB_RBL - 1u));
+    }
+    s_rev_cambios++;
+}
+
+/* El microprograma, una vez; callado hasta que el juego configure la reverb. */
+static void rev_programa(void)
+{
+    for (unsigned s = 0; s < 128u; s++) {
+        g2_write_32(AICA_REG(0x3000u + 4u * s), 0);
+        for (unsigned k = 0; k < 4u; k++)
+            g2_write_32(AICA_REG(0x3400u + 16u * s + 4u * k), s < REVERB_PASOS ? reverb_mpro[s][k] : 0u);
+    }
+    for (unsigned i = 0; i < 64u; i++)
+        g2_write_32(AICA_REG(0x3200u + 4u * i), 0);
+    for (unsigned i = 0; i < 18u; i++)
+        g2_write_32(AICA_REG(0x2000u + 4u * i), 0);
+}
+
 static void registro_(const uint16_t *regs, uint32_t off, uint16_t val)
 {
     if (off < 0x180u) {
@@ -726,6 +865,24 @@ static void registro_(const uint16_t *regs, uint32_t off, uint16_t val)
             for (unsigned n = 0; n < VOCES; n++)
                 if (s_v[n].suena)
                     revolumen(&s_v[n], regs, n);
+            s_rev_sucia = 1;                       /* la salida de la reverb lo compensa */
+        }
+        break;
+    case 0x184:
+    case 0x186:
+        s_rev_sucia = 1;
+        break;
+    case 0x198:
+    case 0x19A:
+        rev_envios(regs);
+        break;
+    case 0x1A2:
+        rev_area(regs, val);
+        break;
+    case 0x1AA:
+        if (((val >> 7) & 1u) != s_rev_on) {
+            s_rev_on = (uint8_t)((val >> 7) & 1u);
+            rev_salida();
         }
         break;
     case 0x188:
@@ -747,6 +904,8 @@ static void registro_(const uint16_t *regs, uint32_t off, uint16_t val)
             }
         break;
     default:
+        if (off >= 0x1C0u)
+            s_rev_sucia = 1;                       /* parametros de la reverb */
         break;
     }
 }
@@ -816,6 +975,7 @@ int aica_spu_init(SpuStub *spu)
         s_nanillos++;
     }
     s_spu = spu;
+    rev_programa();
     attr.prio = PRIO_DEFAULT - 2;                  /* por delante del juego cuando despierta */
     attr.label = "audio";
     thd_create_ex(&attr, hilo_largas, NULL);
@@ -838,6 +998,10 @@ void aica_spu_report(void)
            (unsigned long)s_largas_max, (unsigned long)s_sin_anillo, (unsigned long)s_vacios, (unsigned long)s_tarde, (unsigned long)(s_tarde - s_tarde_ant), (unsigned long)s_irqs, (unsigned long)s_paradas,
            (unsigned long)(s_hilo_us / 1000u));
     s_tarde_ant = s_tarde;
+    printf("        audio: reverb %s, anillo del DSP en %#lx (area de PS1 desde el bloque %#lx), %lu configuraciones, pico de salida %ld\n",
+           s_rev_on && s_rev_anillo ? "encendida" : "apagada", (unsigned long)s_rev_anillo,
+           (unsigned long)s_rev_lo, (unsigned long)s_rev_cambios, (long)s_rev_pico);
+    s_rev_pico = 0;
     printf("        audio: subidas %lu (bloques saltados %lu)  registros %lu  niveles %lu  subida %lu ms  bus %lu ms\n",
            (unsigned long)s_n_subidas, (unsigned long)s_saltados,
            (unsigned long)s_n_registros, (unsigned long)s_n_niveles,

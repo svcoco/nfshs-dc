@@ -42,6 +42,9 @@ typedef struct SpuSink {
     void     (*reg)(void *ctx, const uint16_t *regs, uint32_t off, uint16_t v);
     /* el driver lee el nivel de envolvente de la voz `v` (0: la voz termino) */
     uint16_t (*level)(void *ctx, unsigned v);
+    /* una voz ha leido la direccion de IRQ (0x1A4) desde la ultima consulta: 1 y se olvida.
+     * Puede ser NULL. */
+    int      (*irq)(void *ctx);
 } SpuSink;
 
 typedef struct {

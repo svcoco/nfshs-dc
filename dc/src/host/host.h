@@ -45,6 +45,9 @@
  * root counter del juego, y 1920/32 = 60 Hz para los campos de video. */
 #define HOST_TICK   15u
 #define HOST_FIELD  32u
+/* Con reloj real, campos que puede avanzar el juego como mucho en un frame (4: hasta 15 fps
+ * el juego va a su velocidad; ver host_frame_top). */
+#define HOST_REAL_MAX_FIELDS 4u
 #define HOST_HZ     1920u
 
 /* Espejo de la VRAM del PS1: 1024 x 512 pixeles de 16 bits (1 MB). El juego escribe
@@ -286,6 +289,13 @@ typedef struct GameHost {
 
     /* ---- estado del sistema ---- */
     uint64_t clock;          /* reloj virtual, 1/1920 s */
+    /* Reloj REAL (Dreamcast): en cada frontera de frame el reloj alcanza al tiempo real,
+     * como los temporizadores de la PS1, que avanzan tarde lo que tarde el frame. Sin el
+     * (PC, test diferencial), un campo por frame: a menos de 60 fps el juego iria a
+     * camara lenta. Necesita now_us. */
+    int      real_clock;
+    uint64_t real_us0, real_clock0;    /* el ancla: el reloj y now_us en la primera frontera */
+    uint64_t real_dropped;             /* tiempo real descartado por el tope (1/1920 s) */
     uint32_t rcnt;           /* lo que devuelve GetRCnt */
     uint32_t next_event;     /* descriptores de OpenEvent */
     uint32_t pad_buffers[2];
@@ -485,6 +495,9 @@ typedef struct GameHost {
 /* Mueve el reloj virtual hasta t, encolando las interrupciones de timer que caen en
  * medio y la devolucion de VSync de cada campo. */
 void host_advance_to(GameHost *h, Cpu *c, uint64_t t);
+/* Reloj real en unidades del reloj del juego (1/1920 s); fija el ancla la primera vez.
+ * Solo con real_clock y now_us. */
+uint64_t host_real_clock(GameHost *h);
 
 /* Modulos del host. Devuelven 1 si atendieron la llamada, y entonces dejan el
  * resultado en *ret. */

@@ -15,6 +15,13 @@
  *   - KEY-OFF: se calla el canal.
  *   - El driver LEE el nivel de envolvente de cada voz para saber si termino: se responde si
  *     el canal sigue sonando (por tiempo, en las muestras sin bucle).
+ *   - VOZ LARGA (sin fin en 65 534 muestras, lo maximo de un canal del AICA: LSA/LEA son de
+ *     16 bits; es la musica en stream, dos voces sobre anillos de ~86 000 muestras): tambien
+ *     va a un canal del AICA, en bucle sobre un ANILLO propio en su RAM. Un hilo sigue la
+ *     posicion del canal y escribe por delante los bloques que la voz de PS1 va leyendo
+ *     (siguiente bloque, o la repeticion al acabar uno con bandera de fin), ya en PCM16 y a
+ *     su frecuencia original. El tono, el volumen y el panorama los hace el AICA, como en
+ *     las demas voces; la CPU solo decodifica los bloques, sin remuestrear ni mezclar.
  *
  * Lo que queda fuera de esta primera version, a proposito: la forma del ADSR (se aplica el
  * volumen entero desde el key-on y el key-off calla en seco), la reverb, y los barridos de
@@ -38,6 +45,14 @@
 #define PCM_BLOQUE 56u                             /* 28 muestras de 16 bits */
 #define VOCES      24u
 #define LARGO_MAX  65534u                          /* LSA/LEA del AICA son de 16 bits */
+#define ANILLO_BLQ 256u                            /* bloques del anillo de una voz larga */
+#define ANILLO     (ANILLO_BLQ * 28u)              /* 7 168 muestras: 325 ms a 22 050 Hz */
+#define DELANTE    (96u * 28u)                     /* por delante del canal: 122 ms a 22 050 Hz */
+#define ANILLOS    4u
+#define NADA       0xFFFFFFFFu
+#define VALIDO_MS  2000u                           /* ver valido() */
+/* Las peliculas piden su stream (2 x 16 KB) mientras suenan: se deja sitio. */
+#define RESERVA    (2u * (SND_STREAM_BUFFER_MAX / 4u) + 2048u)
 
 static const int32_t FILTROS[5][2] = { {0, 0}, {60, 0}, {115, -52}, {98, -55}, {122, -60} };
 
@@ -50,72 +65,159 @@ typedef struct {
     uint32_t vol, pan;                             /* 0-255 */
     uint64_t fin_us;                               /* sin bucle: cuando acaba */
     uint16_t vl, vr;                               /* ultimos volumenes fijos (magnitud) */
-    /* VOZ LARGA (no cabe en un canal del AICA, que llega a 65 534 muestras: la musica en
-     * stream): la mezcla el SH-4 desde la RAM de sonido, como el SPU pero sin gaussiana. */
-    uint8_t  sw;
-    uint8_t  tiene, flags;
-    uint32_t addr, repeat, counter;
+    /* VOZ LARGA: su canal toca en bucle el anillo `anillo`; aqui va la voz de PS1 que lo
+     * alimenta (como en el SPU) y la cuenta de muestras escritas y tocadas. */
+    uint8_t  larga;
+    uint8_t  ignora_bucle;                         /* se escribio la repeticion en marcha */
+    int      anillo;                               /* -1: sin anillo (no suena) */
+    uint32_t addr, repeat;
     int32_t  s1, s2;
-    int16_t  buf[28];
+    uint32_t escritas, tocadas, fin;               /* muestras; fin: NADA si sigue */
+    uint32_t ult_pos;                              /* ultima posicion del canal en el anillo */
+    uint32_t lo, hi;                               /* bloques que ha leido (para s_de_larga) */
+    uint64_t t_us;                                 /* cuando se miro */
+    uint8_t  parada;                               /* espera a que el driver escriba */
+    uint32_t keyon_ms;
+    uint32_t vueltas;                              /* saltos a la repeticion (vueltas al anillo) */
 } Voz;
+
+/* El bloque de la RAM de sonido de cada tramo (28 muestras) escrito en un anillo: para la IRQ
+ * por direccion y para ver si el driver pisa algo que aun no ha sonado. */
+#define SIN_BLOQUE 0xFFFFu
 
 static uint32_t s_base;                            /* el espejo en la RAM del AICA; 0: no hay */
 static int16_t  s_hist[BLOQUES][2];                /* las dos ultimas muestras de cada bloque */
 static int16_t  s_pcm[28u * 64u];                  /* bloques decodificados antes de subirlos */
+static uint8_t  s_de_larga[BLOQUES];               /* lo esta leyendo una voz larga */
+static uint8_t  s_sucio[BLOQUES];                  /* cambio y el espejo no lo tiene */
+static int16_t  s_anpcm[DELANTE] __attribute__((aligned(32)));   /* lo mismo, del hilo */
 static Voz      s_v[VOCES];
 static uint16_t s_main[2] = { 0x7FFF, 0x7FFF };
 static SpuSink  s_sink;
-static snd_stream_hnd_t s_mezcla = SND_STREAM_INVALID;   /* las voces largas */
-static int16_t  s_mez[4096 * 2] __attribute__((aligned(32)));
+static uint32_t s_anillo[ANILLOS];                 /* en la RAM del AICA */
+static uint8_t  s_anillo_usado[ANILLOS];
+static uint16_t s_tramo[ANILLOS][ANILLO_BLQ];
+static unsigned s_nanillos;
+static mutex_t  s_mtx = MUTEX_INITIALIZER;         /* el juego y el hilo de las voces largas */
+static volatile int s_irq;                         /* una voz larga leyo la direccion de IRQ */
+static uint32_t s_subido_ms[BLOQUES];              /* cuando subio el driver cada bloque */
 
 /* estadisticas, para el informe */
-static uint32_t s_keyons, s_bloques, s_largos;
+static uint32_t s_keyons, s_bloques, s_largos, s_sin_anillo, s_vacios, s_largas_max;
+static uint64_t s_hilo_us, s_bus_us, s_subida_us;
+static uint32_t s_n_subidas, s_saltados, s_n_registros, s_n_niveles, s_tarde;
+static uint32_t s_dist[6], s_irqs, s_tarde_ant, s_paradas;
 
 /* ---- muestras ---- */
 
-static void decodifica(const uint8_t *b, int32_t *s1, int32_t *s2, int16_t *out)
-{
-    int32_t shift = (b[0] & 0xFu) <= 12u ? (int32_t)(b[0] & 0xFu) : 9;
-    unsigned f = (unsigned)(b[0] >> 4) < 4u ? (unsigned)(b[0] >> 4) : 4u;
-    int32_t k0 = FILTROS[f][0], k1 = FILTROS[f][1];
+/* Una muestra: el nibble ya esta en los 4 bits altos de `n`, asi que `n >> (16 + shift)`
+ * es el `(nib << 12) >> shift` con signo del SPU, sin pasos intermedios. */
+#define MUESTRA(n)                                                       \
+    do {                                                                 \
+        int32_t v_ = ((int32_t)(n) >> sh) + ((s1 * k0 + s2 * k1 + 32) >> 6); \
+        v_ = v_ < -32768 ? -32768 : v_ > 32767 ? 32767 : v_;             \
+        s2 = s1;                                                         \
+        s1 = v_;                                                         \
+        *out++ = (int16_t)v_;                                            \
+    } while (0)
 
-    for (unsigned i = 0; i < 28u; i++) {
-        uint8_t byte = b[2 + i / 2u];
-        int32_t nib = (i & 1u) == 0u ? (byte & 0xF) : (byte >> 4);
-        int32_t raw = (int32_t)((uint32_t)((int32_t)((uint32_t)nib << 28) >> 28) << 12) >> shift;
-        int32_t v = raw + ((*s1 * k0 + *s2 * k1 + 32) >> 6);
-        v = v < -32768 ? -32768 : v > 32767 ? 32767 : v;
-        *s2 = *s1;
-        *s1 = v;
-        out[i] = (int16_t)v;
+static void decodifica(const uint8_t *b, int32_t *ps1, int32_t *ps2, int16_t *out)
+{
+    unsigned sh = (b[0] & 0xFu) <= 12u ? 16u + (b[0] & 0xFu) : 16u + 9u;
+    unsigned f = (unsigned)(b[0] >> 4) < 4u ? (unsigned)(b[0] >> 4) : 4u;
+    int32_t k0 = FILTROS[f][0], k1 = FILTROS[f][1], s1 = *ps1, s2 = *ps2;
+
+    for (unsigned i = 2; i < 16u; i++) {
+        uint32_t byte = b[i];
+        MUESTRA(byte << 28);
+        MUESTRA((byte & 0xF0u) << 24);
+    }
+    *ps1 = s1;
+    *ps2 = s2;
+}
+
+/* Los bloques [b0, b1) de la RAM de sonido, a PCM16 en el espejo (b1 puede pasar del final:
+ * da la vuelta). La historia del decodificador sale del bloque anterior (lo que el SPU haria
+ * al tocarlos seguidos).
+ *   - En una SUBIDA se saltan los bloques que esta leyendo una voz larga: la musica en
+ *     stream no se toca desde el espejo sino desde su anillo, asi que convertirlos seria
+ *     trabajo tirado (son casi todas las subidas en carrera). Quedan SUCIOS.
+ *   - En el KEY-ON de una voz normal (`solo_sucios`) se convierten los sucios que va a
+ *     tocar, por si alguna vez una muestra corta cae en esa zona. */
+static void espejo(const uint8_t *ram, uint32_t b0, uint32_t b1, int solo_sucios)
+{
+    uint32_t n = 0, inicio = 0;
+
+    for (uint32_t b = b0;; b++) {
+        uint32_t k = b % BLOQUES;
+        int va = b < b1 && (solo_sucios ? s_sucio[k] : !s_de_larga[k]);
+        if (n != 0u && (!va || n == 64u || k == 0u)) {
+            uint64_t t = timer_us_gettime64();
+            spu_memload(s_base + inicio * PCM_BLOQUE, s_pcm, n * PCM_BLOQUE);
+            s_bus_us += timer_us_gettime64() - t;
+            s_bloques += n;
+            n = 0;
+        }
+        if (b >= b1)
+            break;
+        if (va) {
+            uint32_t prev = (k + BLOQUES - 1u) % BLOQUES;
+            int32_t s1 = s_hist[prev][0], s2 = s_hist[prev][1];
+            if (n == 0u)
+                inicio = k;
+            decodifica(&ram[k * 16u], &s1, &s2, &s_pcm[n * 28u]);
+            s_hist[k][0] = (int16_t)s1;
+            s_hist[k][1] = (int16_t)s2;
+            s_sucio[k] = 0;
+            n++;
+        } else if (!solo_sucios) {
+            s_sucio[k] = 1;
+            s_saltados++;
+        }
     }
 }
 
-/* La RAM de sonido cambio: los bloques tocados, a PCM16 en el espejo. La historia del
- * decodificador sale del bloque anterior (lo que el SPU haria al tocarlos seguidos). */
+static void pisados(Voz *v, uint32_t b0, uint32_t b1);
+
 static void subida(void *ctx, const uint8_t *ram, uint32_t addr, uint32_t len)
 {
-    uint32_t b0 = addr / 16u, b1 = (addr + len + 15u) / 16u, b = b0;
+    uint64_t t;
+    uint32_t b0, b1;
 
     (void)ctx;
     if (s_base == 0u || len == 0u)
         return;
-    while (b < b1) {
-        uint32_t n = 0, inicio = b % BLOQUES;
-        while (b < b1 && n < 64u && (b % BLOQUES) >= inicio) {
-            uint32_t k = b % BLOQUES, prev = (k + BLOQUES - 1u) % BLOQUES;
-            int32_t s1 = s_hist[prev][0], s2 = s_hist[prev][1];
-            decodifica(&ram[k * 16u], &s1, &s2, &s_pcm[n * 28u]);
-            s_hist[k][0] = (int16_t)s1;
-            s_hist[k][1] = (int16_t)s2;
-            n++;
-            b++;
-            if (k == BLOQUES - 1u)
-                break;                                /* da la vuelta: otro tramo */
-        }
-        spu_memload(s_base + inicio * PCM_BLOQUE, s_pcm, n * PCM_BLOQUE);
-        s_bloques += n;
+    s_n_subidas++;
+    t = timer_us_gettime64();
+    b0 = addr / 16u;
+    b1 = (addr + len + 15u) / 16u;
+    {
+        uint32_t ms = (uint32_t)timer_ms_gettime64();
+        for (uint32_t b = b0; b < b1; b++)
+            s_subido_ms[b % BLOQUES] = ms;
     }
+    espejo(ram, b0, b1, 0);
+    /* Lo que una voz larga ya escribio en su anillo y aun no ha sonado no deberia cambiar
+     * (ver pisados()). */
+    mutex_lock(&s_mtx);
+    for (unsigned n = 0; n < VOCES; n++) {
+        Voz *v = &s_v[n];
+        if (!v->suena || !v->larga || v->anillo < 0)
+            continue;
+        /* DIAG: a cuantos bloques por delante de lo que suena escribe el driver */
+        if (v->lo < v->hi && b0 >= v->lo && b0 <= v->hi && v->tocadas < v->escritas) {
+            uint32_t p = s_tramo[v->anillo][(v->tocadas / 28u) % ANILLO_BLQ];
+            uint32_t largo = v->hi - v->lo + 1u;
+            if (p >= v->lo && p <= v->hi) {
+                uint32_t d = (b0 + largo - p) % largo;
+                s_dist[d < 128u ? 0u : d < 256u ? 1u : d < 512u ? 2u : d < 1024u ? 3u :
+                       d < 2048u ? 4u : 5u]++;
+            }
+        }
+        pisados(v, b0, b1);
+    }
+    mutex_unlock(&s_mtx);
+    s_subida_us += timer_us_gettime64() - t;
 }
 
 /* ---- canales ---- */
@@ -178,6 +280,266 @@ static uint32_t frecuencia(const uint16_t *regs, unsigned n)
     return (p * 44100u) / 4096u;
 }
 
+static SpuStub *s_spu;                             /* la RAM de sonido de PS1 */
+
+/* ---- voces largas: un anillo por voz ---- */
+
+/* Calla la voz (key-off, o un key-on encima) y suelta su anillo. */
+static void calla(Voz *v)
+{
+    if (v->suena && (!v->larga || v->anillo >= 0))
+        canal(v->canal, AICA_CH_CMD_STOP, 0, 0, 0, 0, 0, 0, 0);
+    if (v->larga && v->anillo >= 0) {
+        s_anillo_usado[v->anillo] = 0;
+        if (v->lo <= v->hi)                        /* su zona vuelve a ir al espejo */
+            memset(&s_de_larga[v->lo], 0, v->hi - v->lo + 1u);
+    }
+    v->suena = 0;
+    v->larga = 0;
+    v->anillo = -1;
+}
+
+/* El siguiente bloque que lee la voz larga, como el SPU (psxspu.c): la bandera 4 marca la
+ * repeticion (salvo que el driver la haya escrito en marcha) y la 1 salta a ella; sin la 2,
+ * la voz acaba al terminar el bloque. */
+static void bloque_larga(Voz *v, int16_t *out)
+{
+    uint16_t *t = &s_tramo[v->anillo][(v->escritas / 28u) % ANILLO_BLQ];
+    const uint8_t *blk;
+    uint8_t flags;
+    uint32_t k;
+
+    if (v->fin != NADA) {
+        *t = SIN_BLOQUE;
+        memset(out, 0, 56);                        /* acabo: silencio hasta que se calle */
+        v->escritas += 28u;
+        return;
+    }
+    k = (v->addr & (PS1_SPU_RAM_SIZE - 16u)) / 16u;
+    *t = (uint16_t)k;
+    s_de_larga[k] = 1;
+    if (k < v->lo)
+        v->lo = k;
+    if (k > v->hi)
+        v->hi = k;
+    blk = &s_spu->ram[k * 16u];
+    flags = blk[1];
+    decodifica(blk, &v->s1, &v->s2, out);
+    if ((flags & 4u) && !v->ignora_bucle)
+        v->repeat = v->addr;
+    if (flags & 1u) {
+        v->vueltas++;
+        v->addr = v->repeat;
+        if ((flags & 2u) == 0u)
+            v->fin = v->escritas + 28u;
+    } else {
+        v->addr = (v->addr + 16u) & (PS1_SPU_RAM_SIZE - 1u);
+    }
+    v->escritas += 28u;
+}
+
+/* Escribe en el anillo hasta `hasta` muestras (en bloques; el anillo es de bloques enteros,
+ * asi que ninguno queda partido en el borde). */
+/* El siguiente bloque de la voz larga ya lo escribio el driver para lo que toca ahora:
+ *   - para ESTE tema: subio despues de VALIDO_MS antes del key-on. En la primera vuelta el
+ *     driver escribe por delante de la voz, y si el AICA va algo adelantado (el juego se paro
+ *     abriendo el stream) leeria el tema anterior;
+ *   - y, pasada la primera vuelta, en la ULTIMA vuelta (mas VALIDO_MS de margen): en la PS1
+ *     el driver reescribe cada trozo justo despues de que suene, y si deja de hacerlo es que
+ *     el juego esta parado en una carga (aqui una llamada que no suelta el control); tocar
+ *     entonces repetiria la vuelta anterior.
+ * Si no vale, el canal espera (rellena()). */
+static int valido(const Voz *v)
+{
+    uint32_t k = (v->addr & (PS1_SPU_RAM_SIZE - 16u)) / 16u, cuando = s_subido_ms[k];
+
+    if (v->fin != NADA)
+        return 1;
+    if ((int32_t)(cuando - (v->keyon_ms - VALIDO_MS)) < 0)
+        return 0;
+    if (v->vueltas != 0u && v->freq != 0u) {
+        uint32_t vuelta = (v->hi - v->lo + 1u) * 28000u / v->freq;
+        uint32_t ahora = (uint32_t)timer_ms_gettime64();
+        if ((int32_t)(cuando - (ahora - vuelta - VALIDO_MS)) < 0)
+            return 0;
+    }
+    return 1;
+}
+
+static void escribe_larga(Voz *v, uint32_t hasta)
+{
+    while ((int32_t)(hasta - v->escritas) > 0 && valido(v)) {
+        uint32_t ini = v->escritas % ANILLO, n = 0;
+        while ((int32_t)(hasta - v->escritas) > 0 && n < DELANTE && ini + n < ANILLO && valido(v)) {
+            bloque_larga(v, &s_anpcm[n]);
+            n += 28u;
+        }
+        uint64_t t = timer_us_gettime64();
+        spu_memload(s_anillo[v->anillo] + ini * 2u, s_anpcm, n * 2u);
+        s_bus_us += timer_us_gettime64() - t;
+    }
+}
+
+/* El driver cambio los bloques [b0, b1): cuenta los que ya estaban escritos en el anillo y
+ * aun no han sonado. En la PS1 el driver rellena el trozo que la voz ACABA de tocar (unos 23 ms
+ * por detras de ella, medido en la referencia): si pisa lo que el AICA aun no toco, el AICA va
+ * desfasado de donde el driver cree que va la voz. Lo correcto entonces es lo ya escrito, asi
+ * que no se reescribe: solo se cuenta, y debe ser 0. */
+static void pisados(Voz *v, uint32_t b0, uint32_t b1)
+{
+    /* lo tocado se miro hace hasta ~20 ms (el hilo): se estima por donde va ahora */
+    uint32_t ahora = v->tocadas + (uint32_t)((timer_us_gettime64() - v->t_us) * v->freq / 1000000u);
+
+    if (v->parada)
+        return;                                    /* lo escrito no sonara: retoma() rehace */
+    for (uint32_t j = ahora / 28u; j < v->escritas / 28u; j++) {
+        uint32_t k = s_tramo[v->anillo][j % ANILLO_BLQ];
+        if (k != SIN_BLOQUE && ((k >= b0 && k < b1) || (k + BLOQUES >= b0 && k + BLOQUES < b1)))
+            s_tarde++;
+    }
+}
+
+/* Avanza la cuenta de lo tocado con la posicion del canal y escribe por delante. La posicion
+ * que publica el driver ARM se refresca cada ~2 ms y justo tras el key-on puede ser la del
+ * uso anterior del canal, asi que se contrasta con la que da el tiempo: si discrepa en mas de
+ * un cuarto de anillo, manda el tiempo. */
+/* Retoma el canal parado: las cuentas vuelven a 0 y el anillo se rellena desde donde iba la
+ * voz de PS1 (lo que quedaba escrito sin sonar, como mucho ~20 ms, se pierde). */
+static void retoma(Voz *v, uint64_t ahora)
+{
+    v->escritas = v->tocadas = 0;
+    v->ult_pos = 0;
+    escribe_larga(v, DELANTE);
+    canal(v->canal, AICA_CH_CMD_START, s_anillo[v->anillo], ANILLO, 1, 0, v->freq, v->vol, v->pan);
+    v->t_us = ahora;
+    v->parada = 0;
+}
+
+static void rellena(Voz *v, uint64_t ahora)
+{
+    if (v->parada) {
+        if (valido(v))
+            retoma(v, ahora);
+        return;
+    }
+    uint32_t pos = snd_get_pos((unsigned)v->canal) % ANILLO;
+    uint32_t esperado = (uint32_t)((ahora - v->t_us) * v->freq / 1000000u);
+    uint32_t d = (pos + ANILLO - v->ult_pos) % ANILLO, delta;
+
+    if (esperado > d)
+        d += (esperado - d + ANILLO / 2u) / ANILLO * ANILLO;
+    if ((d > esperado ? d - esperado : esperado - d) > ANILLO / 4u) {
+        delta = esperado;
+        v->ult_pos = (v->ult_pos + esperado) % ANILLO;
+    } else {
+        delta = d;
+        v->ult_pos = pos;
+    }
+    v->t_us = ahora;
+    /* La IRQ por direccion: el SPU la levanta cuando una voz lee el bloque de la direccion
+     * de IRQ. Con ella el driver de EA sabe por donde va su stream de musica (la pone al
+     * principio del anillo: una vez por vuelta) y lo rellena a ese paso. */
+    {
+        uint32_t irq = ((uint32_t)s_spu->reg[0x1A4u / 2u] << 3) / 16u;
+        for (uint32_t j = (v->tocadas + 27u) / 28u; j * 28u <= v->tocadas + delta && j < v->escritas / 28u; j++)
+            if (s_tramo[v->anillo][j % ANILLO_BLQ] == irq) {
+                s_irq = 1;
+                s_irqs++;
+            }
+    }
+    v->tocadas += delta;
+    if (v->fin != NADA && (int32_t)(v->tocadas - v->fin) >= 0) {
+        calla(v);                                  /* la muestra acabo */
+        return;
+    }
+    if (!valido(v) && (int32_t)(v->escritas - v->tocadas) < (int32_t)(v->freq * 30u / 1000u)) {
+        /* lo escrito se acaba y lo siguiente aun no lo ha escrito el driver: el canal espera
+           (antes de dar la vuelta al anillo y tocar lo de hace una vuelta) */
+        canal(v->canal, AICA_CH_CMD_STOP, 0, 0, 0, 0, 0, 0, 0);
+        v->parada = 1;
+        s_paradas++;
+        return;
+    }
+    if ((int32_t)(v->tocadas - v->escritas) > 0) {
+        /* el canal alcanzo lo escrito (el hilo no corrio a tiempo): la voz de PS1 tambien
+           avanzo, asi que se saltan esos bloques para seguir donde va */
+        s_vacios++;
+        while ((int32_t)(v->tocadas - v->escritas) > 0) {
+            int16_t basura[28];
+            bloque_larga(v, basura);
+        }
+    }
+    escribe_larga(v, v->tocadas + DELANTE);
+}
+
+static void key_on_larga(Voz *v, const uint16_t *regs, unsigned n, uint32_t sb)
+{
+    unsigned a, largas = 0;
+
+    s_largos++;
+    s_keyons++;
+    v->larga = 1;
+    v->freq = frecuencia(regs, n);
+    volumen(v, regs, n);
+    for (a = 0; a < s_nanillos && s_anillo_usado[a]; a++)
+        ;
+    if (v->freq == 0u)
+        return;
+    v->suena = 1;                                  /* para el driver suena, con anillo o sin el */
+    if (a == s_nanillos) {
+        s_sin_anillo++;
+        printf("audio: voz larga %u sin anillo libre: no suena\n", n);
+        return;
+    }
+    s_anillo_usado[a] = 1;
+    v->anillo = (int)a;
+    v->addr = sb * 16u;
+    v->repeat = (uint32_t)regs[n * 8u + 7u] << 3;
+    v->ignora_bucle = 0;
+    v->s1 = v->s2 = 0;
+    v->escritas = v->tocadas = 0;
+    v->fin = NADA;
+    v->ult_pos = 0;
+    v->lo = BLOQUES;
+    v->hi = 0;
+    v->parada = 0;
+    v->keyon_ms = (uint32_t)timer_ms_gettime64();
+    v->vueltas = 0;
+    escribe_larga(v, DELANTE);
+    if (v->escritas != 0u)
+        canal(v->canal, AICA_CH_CMD_START, s_anillo[a], ANILLO, 1, 0, v->freq, v->vol, v->pan);
+    else
+        v->parada = 1;                             /* aun no hay nada del tema: espera */
+    v->t_us = timer_us_gettime64();
+    for (unsigned i = 0; i < VOCES; i++)
+        largas += s_v[i].suena && s_v[i].larga;
+    if (largas > s_largas_max)
+        s_largas_max = largas;
+    printf("audio: voz larga %u en %#lx a %lu Hz, anillo %u (repeticion %#lx)\n", n,
+           (unsigned long)(sb * 16u), (unsigned long)v->freq, a, (unsigned long)v->repeat);
+}
+
+/* El hilo de las voces largas: corre aunque el juego este parado (cargando), como el SPU,
+ * que sigue leyendo su RAM pase lo que pase en la CPU. */
+static void *hilo_largas(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        uint64_t t0;
+        thd_sleep(20);
+        mutex_lock(&s_mtx);
+        t0 = timer_us_gettime64();
+        for (unsigned n = 0; n < VOCES; n++)
+            if (s_v[n].suena && s_v[n].larga && s_v[n].anillo >= 0)
+                rellena(&s_v[n], t0);
+        s_hilo_us += timer_us_gettime64() - t0;
+        mutex_unlock(&s_mtx);
+    }
+    return NULL;
+}
+
+/* ---- peticiones del driver ---- */
+
 static void key_on(const uint16_t *regs, unsigned n, const uint8_t *ram)
 {
     Voz *v = &s_v[n];
@@ -198,24 +560,9 @@ static void key_on(const uint16_t *regs, unsigned n, const uint8_t *ram)
         }
         eb = b;
     }
-    if (v->suena && !v->sw)
-        canal(v->canal, AICA_CH_CMD_STOP, 0, 0, 0, 0, 0, 0, 0);
-    v->sw = 0;
+    calla(v);
     if (k == LARGO_MAX / 28u) {
-        /* no cabe en un canal del AICA: a la mezcla del SH-4 */
-        s_largos++;
-        v->sw = 1;
-        v->addr = sb * 16u;
-        v->repeat = lb != BLOQUES ? lb * 16u : ((uint32_t)regs[n * 8u + 7u] << 3);
-        v->counter = 0;
-        v->tiene = 0;
-        v->s1 = v->s2 = 0;
-        volumen(v, regs, n);
-        v->suena = 1;
-        s_keyons++;
-        printf("audio: voz %u en %#lx sin fin en %u bloques (tono %#x, repeticion %#lx)\n", n,
-               (unsigned long)(sb * 16u), (unsigned)k, (unsigned)regs[n * 8u + 2u],
-               (unsigned long)((uint32_t)regs[n * 8u + 7u] << 3));
+        key_on_larga(v, regs, n, sb);
         return;
     }
     if (bucle && (lb == BLOQUES || lb < sb)) {
@@ -224,6 +571,7 @@ static void key_on(const uint16_t *regs, unsigned n, const uint8_t *ram)
     }
     if (eb < sb)
         eb = BLOQUES - 1u;                         /* no da la vuelta al final de la RAM */
+    espejo(ram, sb, eb + 1u, 1);                   /* lo que se dejo sin convertir */
     v->largo = (eb - sb + 1u) * 28u;
     if (v->largo > LARGO_MAX)
         v->largo = LARGO_MAX;
@@ -248,46 +596,45 @@ static void key_on(const uint16_t *regs, unsigned n, const uint8_t *ram)
 
 static void key_off(unsigned n)
 {
-    Voz *v = &s_v[n];
-
-    if (!v->suena)
-        return;
-    if (!v->sw)
-        canal(v->canal, AICA_CH_CMD_STOP, 0, 0, 0, 0, 0, 0, 0);
-    v->suena = 0;
+    calla(&s_v[n]);
 }
 
-static SpuStub *s_spu;                             /* para leer la RAM de sonido en el key-on */
-
-static void registro(void *ctx, const uint16_t *regs, uint32_t off, uint16_t val)
+/* El volumen o el panorama de una voz que suena, al canal si cambio. */
+static void revolumen(Voz *v, const uint16_t *regs, unsigned n)
 {
-    (void)ctx;
-    if (s_base == 0u)
-        return;
+    uint32_t vol = v->vol, pan = v->pan;
+
+    volumen(v, regs, n);
+    if (v->suena && (!v->larga || v->anillo >= 0) && (vol != v->vol || pan != v->pan))
+        canal(v->canal, AICA_CH_CMD_UPDATE | AICA_CH_UPDATE_SET_VOL | AICA_CH_UPDATE_SET_PAN,
+              0, 0, 0, 0, 0, v->vol, v->pan);
+}
+
+static void registro_(const uint16_t *regs, uint32_t off, uint16_t val)
+{
     if (off < 0x180u) {
         unsigned n = off >> 4;
         Voz *v = &s_v[n];
         switch (off & 0xFu) {
         case 0x0:
         case 0x2:
-            if (v->suena && v->sw) {
-                volumen(v, regs, n);
-            } else if (v->suena) {
-                uint32_t vol = v->vol, pan = v->pan;
-                volumen(v, regs, n);
-                if (vol != v->vol || pan != v->pan)
-                    canal(v->canal, AICA_CH_CMD_UPDATE | AICA_CH_UPDATE_SET_VOL | AICA_CH_UPDATE_SET_PAN,
-                          0, 0, 0, 0, 0, v->vol, v->pan);
-            }
+            if (v->suena)
+                revolumen(v, regs, n);
             break;
         case 0x4:
-            if (v->suena && !v->sw) {
+            if (v->suena && (!v->larga || v->anillo >= 0)) {
                 uint32_t f = frecuencia(regs, n);
                 if (f != v->freq && f != 0u) {
                     v->freq = f;
                     canal(v->canal, AICA_CH_CMD_UPDATE | AICA_CH_UPDATE_SET_FREQ, 0, 0, 0, 0, f, 0, 0);
                 }
             }
+            break;
+        case 0xE:
+            /* la repeticion escrita en marcha manda sobre la bandera 4 (como el SPU) */
+            v->repeat = (uint32_t)val << 3;
+            if (v->suena)
+                v->ignora_bucle = 1;
             break;
         default:
             break;
@@ -297,8 +644,12 @@ static void registro(void *ctx, const uint16_t *regs, uint32_t off, uint16_t val
     switch (off) {
     case 0x180:
     case 0x182:
-        if ((val & 0x8000u) == 0u)
+        if ((val & 0x8000u) == 0u) {
             s_main[(off - 0x180u) >> 1] = (uint16_t)mag(val, 0x7FFF);
+            for (unsigned n = 0; n < VOCES; n++)
+                if (s_v[n].suena)
+                    revolumen(&s_v[n], regs, n);
+        }
         break;
     case 0x188:
     case 0x18A:
@@ -323,105 +674,44 @@ static void registro(void *ctx, const uint16_t *regs, uint32_t off, uint16_t val
     }
 }
 
+static void registro(void *ctx, const uint16_t *regs, uint32_t off, uint16_t val)
+{
+    (void)ctx;
+    if (s_base == 0u)
+        return;
+    s_n_registros++;
+    mutex_lock(&s_mtx);
+    registro_(regs, off, val);
+    mutex_unlock(&s_mtx);
+}
+
 static uint16_t nivel(void *ctx, unsigned n)
 {
     Voz *v;
 
     (void)ctx;
+    s_n_niveles++;
     if (n >= VOCES)
         return 0;
     v = &s_v[n];
-    if (v->suena && !v->bucle && timer_us_gettime64() >= v->fin_us)
+    if (v->suena && !v->larga && !v->bucle && timer_us_gettime64() >= v->fin_us)
         v->suena = 0;                              /* la muestra ya acabo */
     return v->suena ? 0x7FFFu : 0u;
 }
 
-/* ---- voces largas: la mezcla del SH-4 ---- */
-
-/* Una muestra de la voz larga `n` (y avanza como el SPU: tono 0x1000 = una muestra por
- * cada una de salida a 44,1 kHz; al acabar el bloque, al siguiente o a la repeticion). */
-static int32_t muestra_larga(Voz *v, unsigned n)
+static int irq_voz(void *ctx)
 {
-    const uint8_t *ram = s_spu->ram;
-    uint32_t pitch = s_spu->reg[n * 8u + 2u], i, f;
-    int32_t a, b;
-
-    if (pitch > 0x4000u)
-        pitch = 0x4000u;
-    if (!v->tiene) {
-        const uint8_t *blk = &ram[v->addr & (PS1_SPU_RAM_SIZE - 16u)];
-        v->flags = blk[1];
-        decodifica(blk, &v->s1, &v->s2, v->buf);
-        if (v->flags & 4u)
-            v->repeat = v->addr;
-        v->tiene = 1;
-    }
-    i = v->counter >> 12;
-    f = v->counter & 0xFFFu;
-    a = v->buf[i];
-    b = i < 27u ? v->buf[i + 1] : a;
-    v->counter += pitch;
-    if ((v->counter >> 12) >= 28u) {
-        v->counter -= 28u << 12;
-        v->tiene = 0;
-        if (v->flags & 1u) {
-            v->addr = v->repeat;
-            if ((v->flags & 2u) == 0u)
-                v->suena = 0;
-        } else {
-            v->addr = (v->addr + 16u) & (PS1_SPU_RAM_SIZE - 1u);
-        }
-    }
-    return a + (((b - a) * (int32_t)f) >> 12);
-}
-
-static void *mezcla_cb(snd_stream_hnd_t hnd, int bytes, int *got)
-{
-    uint32_t pares = (uint32_t)bytes / 4u;
-    int32_t ml = s_main[0], mr = s_main[1];
-
-    unsigned lista[VOCES], nl = 0;
-
-    (void)hnd;
-    if (pares > 4096u)
-        pares = 4096u;
-    for (unsigned n = 0; n < VOCES; n++)
-        if (s_v[n].suena && s_v[n].sw)
-            lista[nl++] = n;
-    if (nl == 0u) {
-        memset(s_mez, 0, pares * 4u);
-        *got = (int)(pares * 4u);
-        return s_mez;
-    }
-    for (uint32_t k = 0; k < pares; k++) {
-        int32_t l = 0, r = 0;
-        for (unsigned j = 0; j < nl; j++) {
-            Voz *v = &s_v[lista[j]];
-            int32_t s;
-            if (!v->suena)
-                continue;
-            s = muestra_larga(v, lista[j]);
-            l += (s * (int32_t)v->vl) >> 15;
-            r += (s * (int32_t)v->vr) >> 15;
-        }
-        l = (l * ml) >> 15;
-        r = (r * mr) >> 15;
-        s_mez[2 * k] = (int16_t)(l < -32768 ? -32768 : l > 32767 ? 32767 : l);
-        s_mez[2 * k + 1] = (int16_t)(r < -32768 ? -32768 : r > 32767 ? 32767 : r);
-    }
-    *got = (int)(pares * 4u);
-    return s_mez;
-}
-
-void aica_spu_poll(void)
-{
-    if (s_mezcla != SND_STREAM_INVALID)
-        snd_stream_poll(s_mezcla);
+    (void)ctx;
+    if (!s_irq)
+        return 0;
+    s_irq = 0;
+    return 1;
 }
 
 int aica_spu_init(SpuStub *spu)
 {
     uint32_t libre;
+    kthread_attr_t attr = { 0 };
 
     if (!aica_listo()) {
         printf("audio: sin AICA, el juego va mudo\n");
@@ -435,27 +725,47 @@ int aica_spu_init(SpuStub *spu)
         return 0;
     for (unsigned n = 0; n < VOCES; n++) {
         s_v[n].canal = snd_sfx_chn_alloc();
+        s_v[n].anillo = -1;
         if (s_v[n].canal < 0) {
             printf("audio: sin canal del AICA para la voz %u\n", n);
             return 0;
         }
     }
+    /* los anillos de las voces largas, con lo que quede despues del sitio de las peliculas */
+    while (s_nanillos < ANILLOS && snd_mem_available() >= RESERVA + ANILLO * 2u) {
+        s_anillo[s_nanillos] = snd_mem_malloc(ANILLO * 2u);
+        if (s_anillo[s_nanillos] == 0u)
+            break;
+        s_nanillos++;
+    }
     s_spu = spu;
-    s_mezcla = snd_stream_alloc(mezcla_cb, 8192);
-    if (s_mezcla != SND_STREAM_INVALID)
-        snd_stream_start(s_mezcla, 44100, 1);
-    printf("audio: mezcla de voces largas %s; RAM del AICA que queda %lu\n",
-           s_mezcla != SND_STREAM_INVALID ? "lista" : "SIN STREAM", (unsigned long)snd_mem_available());
+    attr.prio = PRIO_DEFAULT - 2;                  /* por delante del juego cuando despierta */
+    attr.label = "audio";
+    thd_create_ex(&attr, hilo_largas, NULL);
+    printf("audio: %u anillos de %u muestras para las voces largas; RAM del AICA que queda %lu\n",
+           s_nanillos, (unsigned)ANILLO, (unsigned long)snd_mem_available());
     s_sink.ctx = NULL;
     s_sink.upload = subida;
     s_sink.reg = registro;
     s_sink.level = nivel;
+    s_sink.irq = irq_voz;
     spu->sink = &s_sink;
     return 1;
 }
 
 void aica_spu_report(void)
 {
-    printf("        audio: key-ons %lu  bloques convertidos %lu  muestras recortadas %lu\n",
-           (unsigned long)s_keyons, (unsigned long)s_bloques, (unsigned long)s_largos);
+    printf("        audio: key-ons %lu  bloques convertidos %lu  voces largas %lu (a la vez %lu, "
+           "sin anillo %lu, alcanzadas %lu, pisados %lu (+%lu), IRQ %lu, esperas %lu, hilo %lu ms)\n",
+           (unsigned long)s_keyons, (unsigned long)s_bloques, (unsigned long)s_largos,
+           (unsigned long)s_largas_max, (unsigned long)s_sin_anillo, (unsigned long)s_vacios, (unsigned long)s_tarde, (unsigned long)(s_tarde - s_tarde_ant), (unsigned long)s_irqs, (unsigned long)s_paradas,
+           (unsigned long)(s_hilo_us / 1000u));
+    s_tarde_ant = s_tarde;
+    printf("        audio: subidas %lu (bloques saltados %lu)  registros %lu  niveles %lu  subida %lu ms  bus %lu ms\n",
+           (unsigned long)s_n_subidas, (unsigned long)s_saltados,
+           (unsigned long)s_n_registros, (unsigned long)s_n_niveles,
+           (unsigned long)(s_subida_us / 1000u), (unsigned long)(s_bus_us / 1000u));
+    printf("        audio: rellenos por delante <128 %lu  <256 %lu  <512 %lu  <1024 %lu  <2048 %lu  mas %lu\n",
+           (unsigned long)s_dist[0], (unsigned long)s_dist[1], (unsigned long)s_dist[2],
+           (unsigned long)s_dist[3], (unsigned long)s_dist[4], (unsigned long)s_dist[5]);
 }

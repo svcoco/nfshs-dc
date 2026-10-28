@@ -10,7 +10,7 @@ de forma nativa con el PowerVR**.
 Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación como en los
 mensajes. Los identificadores de código van en inglés.
 
-Última actualización: 2026-10-26. Estado: **M0, M1a, M2 y M3 cerrados (M1b, M2 y M3, en
+Última actualización: 2026-10-27. Estado: **M0, M1a, M2 y M3 cerrados (M1b, M2 y M3, en
 emulador); el trabajo actual es M4 (audio).** M1b cumple su criterio
 funcional: el juego **arranca con la BIOS real** desde un CDI (`mkdisc.sh`, formato por
 omisión), el front end corre a 69–78 fps y la **carrera simula a 98–113 fps**, `ps1rt`
@@ -103,7 +103,9 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
   render (el juego decide qué suena; el middleware lo hace sonar con el hardware). Medido antes de
   decidir (`docs/hitos/M4.md`): un SPU de PS1 fiel por software cuesta el 196 % de la CPU del
   SH-4. Para el test diferencial, esas funciones se sustituyen en los dos lados, como hasta
-  ahora el SPU. (Sustituye a «se convierte antes de compilar».)
+  ahora el SPU. (Sustituye a «se convierte antes de compilar».) Las voces de más de 65 534 muestras
+  (la música en stream) también van a un canal del AICA, en bucle sobre un anillo que un hilo
+  rellena; la CPU no mezcla nada (`docs/hitos/M4.md`, sección 9).
 - **Vídeo (en M2a):** 480p a 31 kHz (VGA) y 480i a 15 kHz. Se renderiza a 640×480 en
   ambos y el modo se elige con `vid_check_cable` (se puede forzar con `/cd/VIDEO.TXT`).
   **Hecho el 2026-10-23** (`dc/src/platform/dc/video.c`), comprobado con los dos cables.
@@ -121,6 +123,11 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
     los 60 Hz del campo de vídeo, que es un límite de la pantalla, no nuestro.
   - Sigue sin haber **interpolación** ni frames inventados: los frames que se dibujen son
     pasos reales de la lógica del juego.
+  - **Reloj real en Dreamcast (decisión de Jorge, 2026-10-27):** el reloj del juego sigue al
+    tiempo real, como los temporizadores de la PS1: a 30 fps el juego avanza dos campos por
+    frame y va a su velocidad (antes avanzaba uno por frame y a 28 fps iba a la mitad). Con
+    un tope de 4 campos por frame: por debajo de 15 fps va más lento. El PC y el test
+    diferencial siguen con el reloj virtual (`docs/hitos/M4.md`, sección 9).
   - No se mide el fps del original: es un hecho conocido y medirlo no aporta (ver
     `docs/hitos/M0.md`).
 - **Datos:** el usuario siempre aporta su disco original. El repo no contiene datos de EA

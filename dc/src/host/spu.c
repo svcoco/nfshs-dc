@@ -299,8 +299,18 @@ static void bus_write(Cpu *c, void *self, uint32_t a, uint32_t v, uint32_t n)
 static uint32_t bus_take_irqs(Cpu *c, void *self)
 {
     SpuStub *s = (SpuStub *)self;
-    uint32_t irqs = s->irqs;
+    uint32_t irqs;
     (void)c;
+    /* M4: la IRQ por direccion tambien salta cuando una VOZ lee la direccion de IRQ (es
+     * como el driver de EA sabe por donde va el stream de musica); eso lo sabe quien hace
+     * sonar las voces. */
+    if (s->sink != NULL && s->sink->irq != NULL && s->sink->irq(s->sink->ctx) &&
+        (s->reg[0x1AAu / 2u] & 0x40u) != 0u && !s->irq_flag) {
+        s->irq_flag = 1;
+        s->irqs |= 1u << 9;
+        s->irqs_raised++;
+    }
+    irqs = s->irqs;
     s->irqs = 0;
     return irqs;
 }

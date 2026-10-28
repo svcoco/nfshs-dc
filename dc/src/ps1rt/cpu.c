@@ -341,7 +341,9 @@ void ps1_service_interrupts(Cpu *c)
     saved_lo = c->lo;
     saved_depth = c->stack_depth;
 
-    while (c->pending_ticks > 0) {
+    for (uint32_t hechos = 0; c->pending_ticks > 0; hechos++) {
+        if (c->ticks_per_service != 0 && hechos >= c->ticks_per_service)
+            break;                       /* el resto, en la siguiente vuelta al host */
         c->pending_ticks--;
         for (i = 0; i < c->timer_handler_n; i++) {
             /* pila de interrupcion por debajo del marco actual */

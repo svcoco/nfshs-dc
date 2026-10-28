@@ -43,6 +43,7 @@ static uint64_t last_report_ms;
    front end y la carrera cuestan cosas muy distintas y una media conjunta no dice
    nada util. */
 static uint64_t race_ms0, race_frame0;
+static uint64_t race600_ms;                 /* los primeros 600 frames de carrera */
 
 /* ---- entrada: mando de Dreamcast -> botones de PS1 ----
  *
@@ -83,10 +84,17 @@ static void on_frame(GameHost *h)
         race_ms0 = timer_ms_gettime64() - t_start;
         printf("--- CARRERA desde el frame %lu ---\n", (unsigned long)h->frames);
     }
+    /* Medida fija para comparar versiones: lo que tardan los primeros 600 frames de
+       carrera (las ventanas de 60 frames bailan con las cargas del stream de musica). */
+    if (race_frame0 != 0u && h->frames == race_frame0 + 600u) {
+        uint64_t ms = timer_ms_gettime64() - t_start - race_ms0;
+        race600_ms = ms;
+        printf("--- CARRERA: 600 frames en %lu ms = %lu.%02lu fps ---\n", (unsigned long)ms,
+               (unsigned long)(600000u / ms), (unsigned long)(60000000u / ms % 100u));
+    }
 
     if (h->pad_steps_n == 0u)
         h->pad_buttons[0] = dc_read_pad();
-    aica_spu_poll();
 
     /* Los primeros frames se anuncian de uno en uno: lo que hay que saber antes que
      * el rendimiento es si el juego ARRANCA. Despues, cada 60 frames. */
@@ -139,6 +147,7 @@ static uint32_t ultima_hle(void)
 static void *diag_thread(void *arg)
 {
     uint64_t prev_calls = 0;
+    uint64_t prev_frames = 0;
 
     (void)arg;
     while (diag_corriendo) {
@@ -148,10 +157,35 @@ static void *diag_thread(void *arg)
                (unsigned long)cpu.ticks, (unsigned long)cpu.calls,
                (unsigned long)(cpu.calls - prev_calls),
                (unsigned long)cpu.interpreted, (unsigned long)host.frames);
+        if (cpu.calls == prev_calls || host.frames == prev_frames) {
+            /* el juego gira sin llamar a nada: donde */
+            uint32_t d = cpu.stack_depth, k;
+            printf("        GIRA: irq %d  ticks pendientes %lu  pila (%lu):", cpu.in_irq,
+                   (unsigned long)cpu.pending_ticks, (unsigned long)d);
+            for (k = 0; k < 8u && k < d && d <= PS1_STACK_MAX; k++)
+                printf(" %08lx", (unsigned long)cpu.stack[d - 1u - k]);
+            printf("\n        ultimas al host:");
+            for (k = 0; k < 4u; k++) {
+                uint32_t i = (cpu.recent_at + 15u - k) % 16u;
+                printf(" %08lx<-%08lx", (unsigned long)cpu.recent[i][0], (unsigned long)cpu.recent[i][1]);
+            }
+            printf("\n");
+        }
+        prev_calls = cpu.calls;
+        prev_frames = host.frames;
         printf("        acumulado: video wall %lu ms (%lu frames)  texturas %lu ms  dibujo %lu ms\n",
                (unsigned long)(host.video_us / 1000u), (unsigned long)host.video_frames,
                (unsigned long)(host.tex_us / 1000u), (unsigned long)(host.draw_us / 1000u));
         aica_spu_report();
+        if (race600_ms)
+            printf("        carrera: 600 frames en %lu ms\n", (unsigned long)race600_ms);
+        /* el reloj del juego (unidades de 1/1920 s) frente al real desde la primera frontera
+           de frame: con reloj real, la diferencia no debe crecer */
+        if (host.real_us0 != 0u)
+            printf("        reloj del juego %lu ms frente al real %lu ms (desde el ancla); descartado %lu ms\n",
+                   (unsigned long)((host.clock - host.real_clock0) * 1000u / 1920u),
+                   (unsigned long)((timer_us_gettime64() - host.real_us0) / 1000u),
+                   (unsigned long)(host.real_dropped * 1000u / 1920u));
         printf("        archivos %lu ok / %lu fallidos  BIGF %lu ok / %lu fallidos\n",
                (unsigned long)host.files.opens, (unsigned long)host.files.opens_failed,
                (unsigned long)host.files.mounts_ok,
@@ -318,6 +352,9 @@ int main(int argc, char **argv)
 #endif
     cpu.tick_limit = TICK_LIMIT;
     cpu.spin_limit = SPIN_LIMIT;
+#ifndef NFSHS_RELOJ_VIRTUAL
+    cpu.ticks_per_service = 1;                   /* uno por interrupcion, como la PS1 */
+#endif
 
     /* NULL = tabla HLE horneada (gen/hle_table.c), no hay .txt que leer */
     if (!host_init(&host, NULL, GAMEDATA)) {
@@ -334,6 +371,9 @@ int main(int argc, char **argv)
     host.car_cone_width = 1u;
     host.poll_input = on_frame;
     host.now_us = timer_us_gettime64;
+#ifndef NFSHS_RELOJ_VIRTUAL
+    host.real_clock = 1;                         /* el juego a velocidad real, como en la PS1 */
+#endif
     /* El PVR: a partir de aqui el juego se DIBUJA, no solo se cuenta. */
     if (render_init()) {
         host.tex_buf = render_texbuf();

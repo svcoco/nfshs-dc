@@ -7,7 +7,7 @@ descartaron no se guardan aquí.
 Se actualiza al cerrar cada paso. El detalle largo vive en `docs/hitos/`; esto es el
 resumen que permite retomar el proyecto sin releerlo todo.
 
-**Última entrada: 2026-10-26** (cierre de M3 en emulador).
+**Última entrada: 2026-10-27** (M4: la música en el AICA y el reloj real).
 
 ---
 
@@ -23,7 +23,8 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M2c** Coches, objetos y efectos | **Criterio cumplido en emulador** (2026-10-26): una carrera completa idéntica a la referencia en 40 000 frames; showroom, pausa, policía y noche; 30–43 fps |
 | **M2** (a, b y c) | **Cerrado en emulador (2026-10-26)** |
 | **M3** FMV | **Cerrado en emulador (2026-10-26)**: películas con sonido a sus 15 fps y video wall idéntico a la referencia; menús a ~40 fps |
-| M4 Audio · M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables | Sin empezar (numeración del 2026-10-26) |
+| **M4** Audio | **En curso**: el middleware suena por el AICA (también la música en stream); reloj real en Dreamcast |
+| M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables | Sin empezar (numeración del 2026-10-26) |
 
 **Lo que hay hoy (M3 cerrado en emulador):** lo de M2, más los **vídeos**: la intro, el
 logo y las demos de atracción a pantalla completa, con sonido y a sus 15 fps (Start las
@@ -960,3 +961,18 @@ incompleta— los encontró el oráculo, no la lectura del código.
   plan** por decisión de Jorge. El formato `.CAR` ya se carga por código de coche, pero
   habría que resolver los 57 huecos de partes, los faros y abolladuras por triángulo, el
   presupuesto de triángulos en el SH-4 y el de VRAM.
+
+## M4: audio (en curso)
+
+- **El middleware atrapa las escrituras del driver de EA en el SPU** (`SpuSink`) y las hace
+  sonar con el AICA: muestras a PCM16 en un espejo en su RAM, una voz por canal. La música en
+  stream (voces de más de 65 534 muestras) va a un canal en bucle sobre un anillo que un hilo
+  rellena: **la CPU no mezcla**. Coste: +1,8 % en carrera (antes +8,0 % con la mezcla en CPU).
+- **Reloj real en Dreamcast** (decisión de Jorge, 2026-10-27): el juego iba a cámara lenta
+  (36,9 s de juego en 69,3 s reales) porque el reloj avanzaba un campo por frame. Ahora sigue
+  al tiempo real con un tope de 4 campos por frame, un tick por interrupción y esperas reales.
+  PC y test diferencial, con el reloj virtual: idénticos (120 y 900 frames).
+- **EA sincroniza su stream con la IRQ por dirección** (medido en la referencia): el
+  middleware la levanta cuando el canal del AICA pasa por ella. Bloques pisados (deben ser 0):
+  0 en el front end y en carrera; ~2 100 solo durante la carga de la carrera.
+- Detalle en `docs/hitos/M4.md` (secciones 8 y 9).

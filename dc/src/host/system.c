@@ -12,6 +12,17 @@
 /* El reloj avanza en unidades de 1/1920 s. Cada frontera de HOST_TICK encola una
  * interrupcion del root counter de 128 Hz (la que ps1_service_interrupts entrega), y
  * cada frontera de HOST_FIELD, la devolucion de VSync del campo de video. */
+uint64_t host_real_clock(GameHost *h)
+{
+    uint64_t ahora = h->now_us();
+
+    if (h->real_us0 == 0u) {
+        h->real_us0 = ahora;
+        h->real_clock0 = h->clock;
+    }
+    return h->real_clock0 + (ahora - h->real_us0) * 1920u / 1000000u;
+}
+
 void host_advance_to(GameHost *h, Cpu *c, uint64_t t)
 {
     uint64_t ticks_before = h->clock / HOST_TICK;
@@ -20,6 +31,14 @@ void host_advance_to(GameHost *h, Cpu *c, uint64_t t)
 
     if (t <= h->clock)
         return;
+    /* Con reloj real, el reloj del juego NUNCA adelanta al real: las esperas del juego
+     * (VSync, los bucles de espera activa, un frame mas rapido que el campo) duran lo que en
+     * la PS1. Si no, el driver de sonido cree que su stream va por delante de lo que el AICA
+     * esta tocando y rellena encima de lo que aun no ha sonado (en la PS1 rellena el trozo
+     * recien tocado, ~23 ms por detras de la voz; medido en la referencia, M4.md). */
+    if (h->real_clock && h->now_us != NULL)
+        while (host_real_clock(h) < t)
+            ;
 
     c->pending_ticks += (uint32_t)(ticks_after - ticks_before);
 

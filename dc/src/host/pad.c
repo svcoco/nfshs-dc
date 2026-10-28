@@ -289,8 +289,34 @@ void host_frame_top(GameHost *h, Cpu *c)
      * principal, que no mueve el reloj; los campos se quedaban clavados, el root
      * counter de 128 Hz no latia y la fisica no avanzaba: 0 paginas de RAM cambiaban
      * y el juego gastaba 2 ticks por frame contando frames para siempre. */
-    if (h->clock % HOST_FIELD != 0u || h->clock == h->last_top)
-        host_advance_to(h, c, (h->clock / HOST_FIELD + 1u) * HOST_FIELD);
+    {
+        uint64_t t = h->clock;
+        if (h->clock % HOST_FIELD != 0u || h->clock == h->last_top)
+            t = (h->clock / HOST_FIELD + 1u) * HOST_FIELD;
+        /* Con reloj real, ademas, hasta el ultimo campo que ya paso de verdad: si el frame
+         * tardo dos campos, el juego ve dos (asi va en la PS1 a 30 fps).
+         *
+         * Con un TOPE de HOST_REAL_MAX_FIELDS por frame. En la PS1 las interrupciones siguen
+         * llegando durante una carga del CD; aqui una carga (o una pelicula) es una llamada al
+         * host que no deja correr nada, y el tiempo que dura llegaria de golpe a la siguiente
+         * frontera: medido, 626 ticks tras cargar la carrera, y el driver de sonido se queda
+         * dentro de su interrupcion esperando 5 s de musica que nadie ha leido del CD. Lo que
+         * pasa del tope se descarta (el ancla se mueve): por debajo de 15 fps el juego va
+         * mas lento, no a saltos mayores. */
+        if (h->real_clock && h->now_us != NULL) {
+            uint64_t real = host_real_clock(h) / HOST_FIELD * HOST_FIELD, tope;
+            tope = (h->clock / HOST_FIELD + HOST_REAL_MAX_FIELDS) * HOST_FIELD;
+            if (real > tope) {
+                h->real_dropped += real - tope;
+                real = tope;
+                h->real_us0 = h->now_us();
+                h->real_clock0 = tope;
+            }
+            if (real > t)
+                t = real;
+        }
+        host_advance_to(h, c, t);
+    }
     h->last_top = h->clock;
     /* Las marcas de neumatico, de la RAM en este punto, como las lee la referencia al volcar
      * (read_skids en cada frame). Leerlas al preparar la vista dejaba las del frame anterior

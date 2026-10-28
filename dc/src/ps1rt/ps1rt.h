@@ -125,6 +125,12 @@ struct Cpu {
     uint32_t timer_handlers[16];         /* root counter de 128 Hz (via OpenEvent) */
     uint32_t timer_handler_n;
     uint32_t pending_ticks;
+    /* Ticks que se entregan como mucho cada vez (0: todos, como la referencia). En la PS1
+     * cada tick es una interrupcion aparte y entre una y otra corre el juego; con el reloj
+     * real (Dreamcast) un frame lento deja varios pendientes, y entregarlos todos seguidos
+     * deja al driver de sonido sin los datos del CD que pidio en el primero: su stream gira
+     * para siempre dentro de la interrupcion (0x800E9730). */
+    uint32_t ticks_per_service;
     uint32_t irq_callbacks[11];          /* InterruptCallback, por linea de I_STAT */
     uint32_t dma_callbacks[7];           /* DMACallback, por canal */
     int      in_irq;

@@ -236,7 +236,7 @@ impl Spu {
             self.irq_flag = true;
             self.irqs |= 1 << 9;
             if std::env::var_os("PS1_SNDLOG").is_some() {
-                eprintln!("spu irq at {irq:#x}");
+                eprintln!("spu irq at {irq:#x} (acceso {addr:#x}+{len}) v0 {:#x} v1 {:#x}", self.voices[0].addr, self.voices[1].addr);
             }
         }
     }
@@ -377,7 +377,7 @@ impl Spu {
         self.check_irq(start, (words * 4) as u32);
         self.stats.dma_bytes += (words * 4) as u64;
         if std::env::var_os("PS1_DMALOG").is_some() {
-            eprintln!("dma4 {:#x} -> spu {start:#x}: {} bytes ({})", madr, words * 4, if chcr & 1 != 0 { "write" } else { "read" });
+            eprintln!("dma4 {:#x} -> spu {start:#x}: {} bytes ({}) v0 {:#x} v1 {:#x}", madr, words * 4, if chcr & 1 != 0 { "write" } else { "read" }, self.voices[0].addr, self.voices[1].addr);
         }
         if chcr >> 9 & 3 == 1 {
             self.dma4[0] = src as u32;

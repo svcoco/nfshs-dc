@@ -77,6 +77,39 @@ static void pc_on_frame(GameHost *h)
 }
 static Cpu cpu;
 static GameHost host;
+
+/* M5 (prueba, NFSHS_PAD): los ejes del mando del puerto 1 desde el frame s_pad_desde. */
+static uint8_t  s_pad_ejes[4];
+static uint64_t s_pad_desde;
+
+/* M5 (diagnostico, NFSHS_ESTADO): cada cambio de (modo, pausa, HUD, vistas 3D), para
+   saber cuando se conduce y cuando hay pantallas de fin de carrera. */
+static void estado_log(GameHost *h)
+{
+    static int ant = -1;
+    int e = (int)h->mode | (h->paused ? 2 : 0) | (h->hud_lists ? 4 : 0) | (h->views_n ? 8 : 0);
+    if (e != ant)
+        fprintf(stderr, "estado %llu: modo %d pausa %d hud %u vistas %u\n",
+                (unsigned long long)h->frames, (int)h->mode, h->paused,
+                (unsigned)h->hud_lists, (unsigned)h->views_n);
+    ant = e;
+}
+
+static void pad_prueba(GameHost *h)
+{
+    static uint32_t ant = 0xFFFFFFFFu;
+
+    if (h->frames >= s_pad_desde)
+        memcpy(h->pad_ejes[0], s_pad_ejes, sizeof s_pad_ejes);
+    /* los motores del DualShock (PadSetAct), cuando cambian */
+    if (h->actuators[0] != 0u) {
+        uint32_t v = ps1_r16(&cpu, h->actuators[0]);
+        if (v != ant)
+            fprintf(stderr, "motores %llu: %#06x (en %#x)\n", (unsigned long long)h->frames,
+                    (unsigned)v, (unsigned)h->actuators[0]);
+        ant = v;
+    }
+}
 static SpuStub spu;
 
 static uint8_t *read_file(const char *path, size_t *len)
@@ -298,6 +331,22 @@ int main(int argc, char **argv)
     cpu.r[28] = ADDR_GP;
     cpu.r[31] = 0;
     cpu.stack_depth = 0;
+    /* M5 (prueba): el mando del puerto 1 como otro tipo, con ejes fijos desde un frame
+       (antes, centrados: en los menus el stick hace de cruceta).
+       NFSHS_PAD=tipo,e0,e1,e2,e3 en hexadecimal (p. ej. 73,80,80,ff,80); NFSHS_PAD_DESDE=frame. */
+    if (getenv("NFSHS_PAD") != NULL) {
+        unsigned v[5] = { 0x41, 0x80, 0x80, 0x80, 0x80 };
+        sscanf(getenv("NFSHS_PAD"), "%x,%x,%x,%x,%x", &v[0], &v[1], &v[2], &v[3], &v[4]);
+        host.pad_tipo[0] = (uint8_t)v[0];
+        for (unsigned k = 0; k < 4u; k++) {
+            s_pad_ejes[k] = (uint8_t)v[1 + k];
+            host.pad_ejes[0][k] = 0x80u;
+        }
+        s_pad_desde = getenv("NFSHS_PAD_DESDE") ? strtoull(getenv("NFSHS_PAD_DESDE"), NULL, 0) : 0;
+        host.poll_input = pad_prueba;
+    }
+    if (getenv("NFSHS_ESTADO") != NULL)
+        host.poll_input = estado_log;
     if (getenv("NFSHS_SNDAPI") != NULL && (s_sndapi = fopen(getenv("NFSHS_SNDAPI"), "w")) != NULL) {
         s_sndapi_host = &host;
         ps1_on_enter = sndapi_enter;

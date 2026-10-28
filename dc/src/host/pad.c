@@ -377,10 +377,17 @@ void pad_write(GameHost *h, Cpu *c)
         uint32_t b = h->pad_buffers[port];
         if (b == 0u)
             continue;
+        if (h->pad_ausente[port]) {
+            ps1_w8(c, b, 0xFFu);                   /* sin mando */
+            continue;
+        }
         ps1_w8(c, b, 0x00u);                       /* estado correcto */
-        ps1_w8(c, b + 1u, 0x41u);                  /* mando digital */
+        ps1_w8(c, b + 1u, h->pad_tipo[port] ? h->pad_tipo[port] : 0x41u);
         /* los botones van invertidos: 0xFFFF = ninguno pulsado */
         ps1_w16(c, b + 2u, (uint32_t)(uint16_t)~h->pad_buttons[port]);
+        if (h->pad_tipo[port] != 0u && h->pad_tipo[port] != 0x41u)
+            for (unsigned k = 0; k < 4u; k++)
+                ps1_w8(c, b + 4u + k, h->pad_ejes[port][k]);
     }
     h->pad_writes++;
 }

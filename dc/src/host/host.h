@@ -300,6 +300,12 @@ typedef struct GameHost {
     uint32_t next_event;     /* descriptores de OpenEvent */
     uint32_t pad_buffers[2];
     uint16_t pad_buttons[2];  /* botones pulsados, logica normal */
+    /* M5: el mando que ve el juego. Tipo de libpad (0: 0x41, digital, como la referencia y
+     * el test diferencial; 0x73 DualShock analogico; 0x23 NeGcon) y sus cuatro bytes
+     * analogicos (+4..+7 del buffer; 0x80 = centro). */
+    uint8_t  pad_tipo[2];
+    uint8_t  pad_ejes[2][4];
+    uint8_t  pad_ausente[2];  /* sin mando en ese puerto (0: hay, como la referencia) */
     /* La plataforma rellena pad_buttons aqui, una vez por frame, justo antes de que
      * se escriban los buffers de libpad. En Dreamcast lee el mando por maple; en el
      * host de PC es NULL y manda el guion de pad_steps. */
@@ -431,6 +437,7 @@ typedef struct GameHost {
     uint64_t last_top;        /* reloj en la frontera de frame anterior */
     uint64_t frames;          /* frames del juego (frame_top), la clave del volcado */
     uint32_t actuators[2];   /* motores del DualShock (PadSetAct) */
+    uint64_t vibraciones;    /* cambios de vibracion mandados al Jump Pack */
     uint32_t cb_vsync;       /* VSyncCallback */
     int32_t  draw_origin[2]; /* esquina del buffer de dibujo (PutDrawEnv) */
 

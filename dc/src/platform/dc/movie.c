@@ -28,6 +28,7 @@
 #include "host.h"
 #include "mdec.h"
 #include "movie.h"
+#include "mando.h"
 #include "aica.h"
 
 #define LEE        16u                  /* sectores por lectura del disco */
@@ -313,8 +314,11 @@ uint16_t movie_play(GameHost *h, const char *name)
     s_bytes = 0;
     s_llamadas = 0;
     if (aica_listo()) {
+        /* el hueco lo deja aica_spu_init (RESERVA en aica_spu.c) */
         snd = snd_stream_alloc(audio_cb, SND_STREAM_BUFFER_MAX / 4);
-        if (snd != SND_STREAM_INVALID)
+        if (snd == SND_STREAM_INVALID)
+            printf("pelicula %s: sin stream de audio\n", name);
+        else
             snd_stream_start(snd, p->dmx.rate, 1);
     }
 

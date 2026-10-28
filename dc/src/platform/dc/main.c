@@ -18,6 +18,7 @@
 #include "ps1rt.h"
 #include "spu.h"
 #include "aica_spu.h"
+#include "mando.h"
 #include "render.h"
 #include "video.h"
 #include "movie.h"
@@ -45,31 +46,6 @@ static uint64_t last_report_ms;
 static uint64_t race_ms0, race_frame0;
 static uint64_t race600_ms;                 /* los primeros 600 frames de carrera */
 
-/* ---- entrada: mando de Dreamcast -> botones de PS1 ----
- *
- * Los bits son los del mando digital de PS1 (ver PAD_NAMES en host/pad.c). El
- * Dreamcast no tiene SELECT, asi que no se mapea; lo demas va uno a uno. */
-uint16_t dc_read_pad(void)
-{
-    maple_device_t *dev = maple_enum_type(0, MAPLE_FUNC_CONTROLLER);
-    cont_state_t *st = dev ? (cont_state_t *)maple_dev_status(dev) : NULL;
-    uint16_t b = 0;
-
-    if (st == NULL)
-        return 0;
-    if (st->buttons & CONT_DPAD_UP)    b |= 1u << 4;
-    if (st->buttons & CONT_DPAD_RIGHT) b |= 1u << 5;
-    if (st->buttons & CONT_DPAD_DOWN)  b |= 1u << 6;
-    if (st->buttons & CONT_DPAD_LEFT)  b |= 1u << 7;
-    if (st->buttons & CONT_START)      b |= 1u << 3;
-    if (st->buttons & CONT_A)          b |= 1u << 14;   /* CROSS */
-    if (st->buttons & CONT_B)          b |= 1u << 13;   /* CIRCLE */
-    if (st->buttons & CONT_X)          b |= 1u << 15;   /* SQUARE */
-    if (st->buttons & CONT_Y)          b |= 1u << 12;   /* TRIANGLE */
-    if (st->ltrig > 128)               b |= 1u << 10;   /* L1 */
-    if (st->rtrig > 128)               b |= 1u << 11;   /* R1 */
-    return b;
-}
 
 /* Se llama una vez por frame del juego, desde host_frame_top. Es ademas el unico sitio
  * donde el host recupera el control mientras el juego corre, asi que aqui va tambien el
@@ -94,7 +70,7 @@ static void on_frame(GameHost *h)
     }
 
     if (h->pad_steps_n == 0u)
-        h->pad_buttons[0] = dc_read_pad();
+        mando_lee(h, &cpu);
 
     /* Los primeros frames se anuncian de uno en uno: lo que hay que saber antes que
      * el rendimiento es si el juego ARRANCA. Despues, cada 60 frames. */

@@ -973,6 +973,7 @@ incompleta— los encontró el oráculo, no la lectura del código.
   al tiempo real con un tope de 4 campos por frame, un tick por interrupción y esperas reales.
   PC y test diferencial, con el reloj virtual: idénticos (120 y 900 frames).
 - **EA sincroniza su stream con la IRQ por dirección** (medido en la referencia): el
-  middleware la levanta cuando el canal del AICA pasa por ella. Bloques pisados (deben ser 0):
-  0 en el front end y en carrera; ~2 100 solo durante la carga de la carrera.
+  middleware la levanta cuando el canal del AICA pasa por ella, y corrige el canal con los
+  rellenos del propio driver (espera si va adelantado, salta si va retrasado). Bloques
+  pisados (deben ser 0): 0 en una carrera entera con su carga, 1 en 80 s de front end.
 - Detalle en `docs/hitos/M4.md` (secciones 8 y 9).

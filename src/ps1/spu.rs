@@ -154,6 +154,8 @@ pub struct Spu {
     /// M4: NFSHS_SPUTRACE=archivo graba las escrituras y las muestras producidas, para
     /// reproducirlas contra el SPU en C (dc/test/diff/spureplay.c).
     trace: Option<std::io::BufWriter<std::fs::File>>,
+    /// M4 (diagnostico): muestras producidas desde el arranque, para fechar PS1_SNDLOG/PS1_DMALOG.
+    muestras: u64,
 }
 
 /// Registros del rastro (little-endian): `W` a:u32 v:u32 n:u8 (escritura de la CPU);
@@ -209,6 +211,7 @@ impl Default for Spu {
             out: Vec::new(),
             keyons: 0,
             stats: SpuStats::default(),
+            muestras: 0,
             trace: trace_open(),
         }
     }
@@ -236,7 +239,7 @@ impl Spu {
             self.irq_flag = true;
             self.irqs |= 1 << 9;
             if std::env::var_os("PS1_SNDLOG").is_some() {
-                eprintln!("spu irq at {irq:#x} (acceso {addr:#x}+{len}) v0 {:#x} v1 {:#x}", self.voices[0].addr, self.voices[1].addr);
+                eprintln!("[{}] spu irq at {irq:#x} (acceso {addr:#x}+{len}) v0 {:#x} v1 {:#x}", self.muestras, self.voices[0].addr, self.voices[1].addr);
             }
         }
     }
@@ -258,9 +261,15 @@ impl Spu {
         self.endx &= !(1 << v);
         self.keyons |= 1 << v;
         self.stats.keyon_events += 1;
+        if v < 2 && std::env::var_os("PS1_SNDLOG").is_some() {
+            eprintln!("[{}] key-on v{v} en {start:#x}", self.muestras);
+        }
     }
 
     fn key_off(&mut self, v: usize) {
+        if v < 2 && std::env::var_os("PS1_SNDLOG").is_some() {
+            eprintln!("[{}] key-off v{v} en {:#x}", self.muestras, self.voices[v].addr);
+        }
         let voice = &mut self.voices[v];
         if voice.phase != Phase::Off {
             voice.phase = Phase::Release;
@@ -377,7 +386,7 @@ impl Spu {
         self.check_irq(start, (words * 4) as u32);
         self.stats.dma_bytes += (words * 4) as u64;
         if std::env::var_os("PS1_DMALOG").is_some() {
-            eprintln!("dma4 {:#x} -> spu {start:#x}: {} bytes ({}) v0 {:#x} v1 {:#x}", madr, words * 4, if chcr & 1 != 0 { "write" } else { "read" }, self.voices[0].addr, self.voices[1].addr);
+            eprintln!("[{}] dma4 {:#x} -> spu {start:#x}: {} bytes ({}) v0 {:#x} v1 {:#x}", self.muestras, madr, words * 4, if chcr & 1 != 0 { "write" } else { "read" }, self.voices[0].addr, self.voices[1].addr);
         }
         if chcr >> 9 & 3 == 1 {
             self.dma4[0] = src as u32;
@@ -661,6 +670,7 @@ impl Spu {
             }
             self.out.push(ol.clamp(-32768, 32767) as i16);
             self.out.push(or.clamp(-32768, 32767) as i16);
+            self.muestras += 1;
             self.stat_sample();
         }
     }

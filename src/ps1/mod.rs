@@ -22,8 +22,11 @@ pub fn new_cpu(m: Mem) -> Cpu {
     // En modo diff (NFSHS_DIFF_OUT) se usa el mismo stub que el port en C: el modelo
     // fiel reproduce voces y ENDX, el driver de sonido los lee y programa el chip segun
     // lo que encuentra, y con un stub a un lado y el modelo al otro el juego toma
-    // caminos distintos. Ver src/ps1/diffspu.rs.
-    c.m.bus = if std::env::var_os("NFSHS_DIFF_OUT").is_some() {
+    // caminos distintos. Ver src/ps1/diffspu.rs. NFSHS_SPU_FIEL fuerza el modelo fiel en modo
+    // diff (M4: para ver el sonido con los guiones, que cuentan los frames como en modo diff).
+    c.m.bus = if std::env::var_os("NFSHS_DIFF_OUT").is_some()
+        && std::env::var_os("NFSHS_SPU_FIEL").is_none()
+    {
         Some(Box::new(diffspu::DiffSpu::default()))
     } else {
         Some(Box::new(spu::Spu::default()))

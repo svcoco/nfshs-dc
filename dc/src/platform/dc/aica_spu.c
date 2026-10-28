@@ -50,7 +50,10 @@
 #define DELANTE    (96u * 28u)                     /* por delante del canal: 122 ms a 22 050 Hz */
 #define ANILLOS    4u
 #define NADA       0xFFFFFFFFu
-#define VALIDO_MS  2000u                           /* ver valido() */
+#define VALIDO_MS  250u                            /* ver valido() */
+#define VUELTA_MS  1000u                           /* ver valido() */
+#define ADELANTO_MS 750u                           /* ver sigue_al_driver() */
+#define DETRAS_BLQ 18u                             /* el driver termina de rellenar tan por detras de la voz */
 /* Las peliculas piden su stream (2 x 16 KB) mientras suenan: se deja sitio. */
 #define RESERVA    (2u * (SND_STREAM_BUFFER_MAX / 4u) + 2048u)
 
@@ -77,7 +80,11 @@ typedef struct {
     uint32_t lo, hi;                               /* bloques que ha leido (para s_de_larga) */
     uint64_t t_us;                                 /* cuando se miro */
     uint8_t  parada;                               /* espera a que el driver escriba */
+    uint8_t  adelantada;                           /* espera a que el driver la alcance */
     uint32_t keyon_ms;
+    uint32_t sb;                                   /* bloque del key-on (principio del anillo) */
+    uint32_t drv_hi;                               /* hasta donde ha escrito el driver */
+    uint8_t  drv_vuelta;                           /* el driver ya dio la vuelta al anillo */
     uint32_t vueltas;                              /* saltos a la repeticion (vueltas al anillo) */
 } Voz;
 
@@ -106,7 +113,7 @@ static uint32_t s_subido_ms[BLOQUES];              /* cuando subio el driver cad
 static uint32_t s_keyons, s_bloques, s_largos, s_sin_anillo, s_vacios, s_largas_max;
 static uint64_t s_hilo_us, s_bus_us, s_subida_us;
 static uint32_t s_n_subidas, s_saltados, s_n_registros, s_n_niveles, s_tarde;
-static uint32_t s_dist[6], s_irqs, s_tarde_ant, s_paradas;
+static uint32_t s_dist[4], s_irqs, s_tarde_ant, s_paradas, s_adelantos, s_atrasos;
 
 /* ---- muestras ---- */
 
@@ -178,6 +185,8 @@ static void espejo(const uint8_t *ram, uint32_t b0, uint32_t b1, int solo_sucios
 }
 
 static void pisados(Voz *v, uint32_t b0, uint32_t b1);
+static void sigue_al_driver(Voz *v, uint32_t b0, uint32_t b1);
+static void retoma(Voz *v, uint64_t ahora);
 
 static void subida(void *ctx, const uint8_t *ram, uint32_t addr, uint32_t len)
 {
@@ -191,11 +200,6 @@ static void subida(void *ctx, const uint8_t *ram, uint32_t addr, uint32_t len)
     t = timer_us_gettime64();
     b0 = addr / 16u;
     b1 = (addr + len + 15u) / 16u;
-    {
-        uint32_t ms = (uint32_t)timer_ms_gettime64();
-        for (uint32_t b = b0; b < b1; b++)
-            s_subido_ms[b % BLOQUES] = ms;
-    }
     espejo(ram, b0, b1, 0);
     /* Lo que una voz larga ya escribio en su anillo y aun no ha sonado no deberia cambiar
      * (ver pisados()). */
@@ -204,19 +208,15 @@ static void subida(void *ctx, const uint8_t *ram, uint32_t addr, uint32_t len)
         Voz *v = &s_v[n];
         if (!v->suena || !v->larga || v->anillo < 0)
             continue;
-        /* DIAG: a cuantos bloques por delante de lo que suena escribe el driver */
-        if (v->lo < v->hi && b0 >= v->lo && b0 <= v->hi && v->tocadas < v->escritas) {
-            uint32_t p = s_tramo[v->anillo][(v->tocadas / 28u) % ANILLO_BLQ];
-            uint32_t largo = v->hi - v->lo + 1u;
-            if (p >= v->lo && p <= v->hi) {
-                uint32_t d = (b0 + largo - p) % largo;
-                s_dist[d < 128u ? 0u : d < 256u ? 1u : d < 512u ? 2u : d < 1024u ? 3u :
-                       d < 2048u ? 4u : 5u]++;
-            }
-        }
+        sigue_al_driver(v, b0, b1);
         pisados(v, b0, b1);
     }
     mutex_unlock(&s_mtx);
+    {
+        uint32_t ms = (uint32_t)timer_ms_gettime64();
+        for (uint32_t b = b0; b < b1; b++)
+            s_subido_ms[b % BLOQUES] = ms;
+    }
     s_subida_us += timer_us_gettime64() - t;
 }
 
@@ -341,10 +341,11 @@ static void bloque_larga(Voz *v, int16_t *out)
 /* Escribe en el anillo hasta `hasta` muestras (en bloques; el anillo es de bloques enteros,
  * asi que ninguno queda partido en el borde). */
 /* El siguiente bloque de la voz larga ya lo escribio el driver para lo que toca ahora:
- *   - para ESTE tema: subio despues de VALIDO_MS antes del key-on. En la primera vuelta el
- *     driver escribe por delante de la voz, y si el AICA va algo adelantado (el juego se paro
- *     abriendo el stream) leeria el tema anterior;
- *   - y, pasada la primera vuelta, en la ULTIMA vuelta (mas VALIDO_MS de margen): en la PS1
+ *   - para ESTE tema: subio despues de VALIDO_MS antes del key-on. El driver precarga dos
+ *     trozos (256 bloques) ~16 ms antes del key-on y luego llena el resto del anillo por
+ *     delante de la voz (medido en la referencia); el tema anterior se ha estado rellenando
+ *     hasta un instante antes, asi que el margen tiene que ser corto;
+ *   - y, pasada la primera vuelta, en la ULTIMA vuelta (mas VUELTA_MS de margen): en la PS1
  *     el driver reescribe cada trozo justo despues de que suene, y si deja de hacerlo es que
  *     el juego esta parado en una carga (aqui una llamada que no suelta el control); tocar
  *     entonces repetiria la vuelta anterior.
@@ -360,7 +361,7 @@ static int valido(const Voz *v)
     if (v->vueltas != 0u && v->freq != 0u) {
         uint32_t vuelta = (v->hi - v->lo + 1u) * 28000u / v->freq;
         uint32_t ahora = (uint32_t)timer_ms_gettime64();
-        if ((int32_t)(cuando - (ahora - vuelta - VALIDO_MS)) < 0)
+        if ((int32_t)(cuando - (ahora - vuelta - VUELTA_MS)) < 0)
             return 0;
     }
     return 1;
@@ -399,6 +400,78 @@ static void pisados(Voz *v, uint32_t b0, uint32_t b1)
     }
 }
 
+/* Donde cree el driver que va la voz, por sus propios rellenos: en regimen escribe el trozo
+ * que la voz acaba de tocar, y lo termina ~18 bloques por detras de ella (medido en la
+ * referencia, M4.md seccion 9). El canal del AICA se corrige hacia esa posicion:
+ *   - si va mas de ADELANTO_MS por delante, espera a que el driver lo alcance: pasa cuando el
+ *     juego se para (una carga es una llamada al host que no deja correr al driver) y el
+ *     reloj del juego descarta ese tiempo; sin esto acaba una vuelta por delante;
+ *   - si va mas de DETRAS_BLQ por detras, salta adelante: el driver ya esta escribiendo lo
+ *     que el canal aun no ha tocado. Pasa al empezar un tema justo despues de una carga: los
+ *     ticks que pone al dia el reloj llegan uno a uno despues del key-on, y el driver los
+ *     cuenta como tiempo del tema (medido: ~60 bloques).
+ * Solo cuando el driver ya escribe por detras de la voz: desde que da la primera vuelta
+ * (vuelve a escribir el principio del anillo); antes llena el anillo por delante. */
+static void sigue_al_driver(Voz *v, uint32_t b0, uint32_t b1)
+{
+    uint32_t base, largo, p, p_drv, j;
+    int32_t x, max;
+
+    if (!v->drv_vuelta && b0 >= v->sb && b0 < v->sb + 8192u) {
+        if (b0 == v->sb && v->drv_hi > v->sb + 256u)
+            v->drv_vuelta = 1;                     /* el driver dio la vuelta al anillo */
+        else if (b1 - 1u > v->drv_hi)
+            v->drv_hi = b1 - 1u;
+    }
+    if (v->vueltas != 0u && v->lo < v->hi) {
+        base = v->lo;
+        largo = v->hi - v->lo + 1u;
+    } else if (v->drv_vuelta) {
+        base = v->sb;
+        largo = v->drv_hi - v->sb + 1u;
+    } else {
+        return;
+    }
+    if (b0 < base || b1 - 1u >= base + largo)
+        return;
+    if (v->adelantada) {
+        j = v->tocadas / 28u;                      /* parado: donde se quedo */
+    } else {
+        j = (v->tocadas + (uint32_t)((timer_us_gettime64() - v->t_us) * v->freq / 1000000u)) / 28u;
+        if (j >= v->escritas / 28u)
+            return;
+    }
+    p = s_tramo[v->anillo][j % ANILLO_BLQ];
+    if (p < base || p >= base + largo)
+        return;
+    p_drv = (b1 - 1u - base + DETRAS_BLQ) % largo + base;
+    x = (int32_t)((p + largo - p_drv) % largo);
+    if (x > (int32_t)largo / 2)
+        x -= (int32_t)largo;
+    max = (int32_t)(v->freq * ADELANTO_MS / 1000u / 28u);
+    s_dist[x < -(int32_t)DETRAS_BLQ ? 0u : x < max / 3 ? 1u : x <= max ? 2u : 3u]++;
+    if (!v->adelantada && x > max) {
+        canal(v->canal, AICA_CH_CMD_STOP, 0, 0, 0, 0, 0, 0, 0);
+        v->tocadas = v->escritas;                  /* lo escrito sin sonar se pierde */
+        v->parada = v->adelantada = 1;
+        s_adelantos++;
+    } else if (v->adelantada && x <= max / 3) {
+        v->adelantada = 0;
+        retoma(v, timer_us_gettime64());
+    } else if (!v->adelantada && !v->parada && x < -(int32_t)DETRAS_BLQ) {
+        /* salta adelante: lo escrito por delante del canal ya cubre parte; el resto se
+           decodifica y se tira (la voz de PS1 tiene que pasar por esos bloques) */
+        int32_t falta = -x - (int32_t)(v->escritas / 28u - j);
+        canal(v->canal, AICA_CH_CMD_STOP, 0, 0, 0, 0, 0, 0, 0);
+        while (falta-- > 0) {
+            int16_t basura[28];
+            bloque_larga(v, basura);
+        }
+        retoma(v, timer_us_gettime64());
+        s_atrasos++;
+    }
+}
+
 /* Avanza la cuenta de lo tocado con la posicion del canal y escribe por delante. La posicion
  * que publica el driver ARM se refresca cada ~2 ms y justo tras el key-on puede ser la del
  * uso anterior del canal, asi que se contrasta con la que da el tiempo: si discrepa en mas de
@@ -418,7 +491,7 @@ static void retoma(Voz *v, uint64_t ahora)
 static void rellena(Voz *v, uint64_t ahora)
 {
     if (v->parada) {
-        if (valido(v))
+        if (!v->adelantada && valido(v))
             retoma(v, ahora);
         return;
     }
@@ -494,6 +567,9 @@ static void key_on_larga(Voz *v, const uint16_t *regs, unsigned n, uint32_t sb)
     s_anillo_usado[a] = 1;
     v->anillo = (int)a;
     v->addr = sb * 16u;
+    v->sb = sb;
+    v->drv_hi = sb;
+    v->drv_vuelta = 0;
     v->repeat = (uint32_t)regs[n * 8u + 7u] << 3;
     v->ignora_bucle = 0;
     v->s1 = v->s2 = 0;
@@ -503,6 +579,7 @@ static void key_on_larga(Voz *v, const uint16_t *regs, unsigned n, uint32_t sb)
     v->lo = BLOQUES;
     v->hi = 0;
     v->parada = 0;
+    v->adelantada = 0;
     v->keyon_ms = (uint32_t)timer_ms_gettime64();
     v->vueltas = 0;
     escribe_larga(v, DELANTE);
@@ -765,7 +842,7 @@ void aica_spu_report(void)
            (unsigned long)s_n_subidas, (unsigned long)s_saltados,
            (unsigned long)s_n_registros, (unsigned long)s_n_niveles,
            (unsigned long)(s_subida_us / 1000u), (unsigned long)(s_bus_us / 1000u));
-    printf("        audio: rellenos por delante <128 %lu  <256 %lu  <512 %lu  <1024 %lu  <2048 %lu  mas %lu\n",
+    printf("        audio: AICA frente al driver: retrasado %lu  al dia %lu  adelantado %lu  demasiado %lu  (esperas %lu, saltos %lu)\n",
            (unsigned long)s_dist[0], (unsigned long)s_dist[1], (unsigned long)s_dist[2],
-           (unsigned long)s_dist[3], (unsigned long)s_dist[4], (unsigned long)s_dist[5]);
+           (unsigned long)s_dist[3], (unsigned long)s_adelantos, (unsigned long)s_atrasos);
 }

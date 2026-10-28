@@ -49,15 +49,19 @@
 #define ANILLO_BLQ 256u                            /* bloques del anillo de una voz larga */
 #define ANILLO     (ANILLO_BLQ * 28u)              /* 7 168 muestras: 325 ms a 22 050 Hz */
 #define DELANTE    (96u * 28u)                     /* por delante del canal: 122 ms a 22 050 Hz */
-#define ANILLOS    4u
+#define ANILLOS    2u                              /* medido: nunca suenan mas de 2 voces largas a la vez */
 #define NADA       0xFFFFFFFFu
 #define AICA_REG(o) (0xA0700000u + (uint32_t)(o))      /* registros del AICA desde el SH-4 */
 #define VALIDO_MS  250u                            /* ver valido() */
 #define VUELTA_MS  1000u                           /* ver valido() */
 #define ADELANTO_MS 750u                           /* ver sigue_al_driver() */
 #define DETRAS_BLQ 18u                             /* el driver termina de rellenar tan por detras de la voz */
-/* Las peliculas piden su stream (2 x 16 KB) mientras suenan: se deja sitio. */
-#define RESERVA    (2u * (SND_STREAM_BUFFER_MAX / 4u) + 2048u)
+/* Las peliculas piden su stream (2 x 16 KB, movie.c) mientras suenan: se les deja el hueco.
+ * OJO: en nuestro KOS snd_mem_available() da el bloque MAS GRANDE de la lista, libre o no
+ * (siempre el espejo), asi que no sirve para medir lo que queda; y si la reserva del stream
+ * falla, snd_stream_alloc no lo dice y pone el bufer en la direccion 0 del AICA, encima del
+ * driver del ARM (Flycast se cierra). Por eso el hueco se reserva de verdad (aica_spu_init). */
+#define RESERVA    (2u * (SND_STREAM_BUFFER_MAX / 4u))
 
 static const int32_t FILTROS[5][2] = { {0, 0}, {60, 0}, {115, -52}, {98, -55}, {122, -60} };
 
@@ -967,20 +971,26 @@ int aica_spu_init(SpuStub *spu)
             return 0;
         }
     }
-    /* los anillos de las voces largas, con lo que quede despues del sitio de las peliculas */
-    while (s_nanillos < ANILLOS && snd_mem_available() >= RESERVA + ANILLO * 2u) {
-        s_anillo[s_nanillos] = snd_mem_malloc(ANILLO * 2u);
-        if (s_anillo[s_nanillos] == 0u)
-            break;
-        s_nanillos++;
+    /* los anillos de las voces largas, despues de apartar el hueco de las peliculas */
+    {
+        uint32_t hueco = snd_mem_malloc(RESERVA);
+        while (s_nanillos < ANILLOS) {
+            s_anillo[s_nanillos] = snd_mem_malloc(ANILLO * 2u);
+            if (s_anillo[s_nanillos] == 0u)
+                break;
+            s_nanillos++;
+        }
+        if (hueco != 0u)
+            snd_mem_free(hueco);
+        else
+            printf("audio: SIN SITIO para el audio de las peliculas\n");
     }
     s_spu = spu;
     rev_programa();
     attr.prio = PRIO_DEFAULT - 2;                  /* por delante del juego cuando despierta */
     attr.label = "audio";
     thd_create_ex(&attr, hilo_largas, NULL);
-    printf("audio: %u anillos de %u muestras para las voces largas; RAM del AICA que queda %lu\n",
-           s_nanillos, (unsigned)ANILLO, (unsigned long)snd_mem_available());
+    printf("audio: %u anillos de %u muestras para las voces largas\n", s_nanillos, (unsigned)ANILLO);
     s_sink.ctx = NULL;
     s_sink.upload = subida;
     s_sink.reg = registro;

@@ -10,8 +10,8 @@ de forma nativa con el PowerVR**.
 Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación como en los
 mensajes. Los identificadores de código van en inglés.
 
-Última actualización: 2026-10-27. Estado: **M0, M1a, M2, M3 y M4 cerrados (M1b, M2, M3 y
-M4, en emulador); el siguiente es M5 (controles y 2 jugadores).** M1b cumple su criterio
+Última actualización: 2026-10-28. Estado: **M0, M1a, M2, M3, M4 y M5 cerrados (M1b a M5, en
+emulador); el siguiente es M6 (guardado y VMU).** M1b cumple su criterio
 funcional: el juego **arranca con la BIOS real** desde un CDI (`mkdisc.sh`, formato por
 omisión), el front end corre a 69–78 fps y la **carrera simula a 98–113 fps**, `ps1rt`
 pasa **227/227** en SH-4 y el código generado ocupa **3,43 MB** con `-Os` (sin overlays).
@@ -45,7 +45,7 @@ todo el trabajo del port va en la rama **`dc`**. El C vive en el árbol **`dc/`*
 3. Corre `python -I dc/tools/recomp/m0_stats.py`. Si los números no coinciden con la
    sección 6, para y avisa antes de seguir. (`codegen_metrics.py` da las cifras del
    dimensionado del backend C.)
-4. El siguiente hito es **M5** (controles y 2 jugadores). M4 está cerrado en emulador (`docs/hitos/M4.md`). Mantén la lista de tareas y deja
+4. El siguiente hito es **M6** (guardado y VMU). M5 está cerrado en emulador (`docs/hitos/M5.md`). Mantén la lista de tareas y deja
    las cifras nuevas en `docs/hitos/`; cada hito tiene su archivo.
 
 ## 2. Qué es la recompilación estática (resumen)
@@ -155,7 +155,7 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 | M2c | Coches, props y efectos | **Criterio cumplido en emulador (2026-10-26).** Carrera completa de un jugador idéntica a la referencia en 40 000 frames (`carrera_completa.txt`, con el piloto de pruebas de la referencia); showroom, pausa, policía y noche. 30-43 fps en Flycast (`docs/hitos/M2c.md`) |
 | M3 | FMV: los vídeos del juego (STR/MDEC de PS1) | **Hecho en emulador (2026-10-26).** Las 5 películas se ven y suenan en Flycast a sus 15 fps (MDEC en SH-4, conversor YUV del PVR, audio XA por el AICA), leídas de los datos del juego; Start las salta. El video wall de los menús, idéntico a la referencia en 40 000 frames; menús a ~40 fps (`docs/hitos/M3.md`) |
 | M4 | Middleware de audio: SPU → AICA | **Hecho en emulador (2026-10-27).** Música, motor y efectos en el front end y en carrera por el AICA: cada voz de EA a un canal, la música en stream en anillos que sigue al driver (0 bloques pisados en front end y carrera), la reverb en el DSP del AICA (dentro de ~0,5 dB de la de PS1) y el reloj real. Audio ~1,4 % de CPU (`docs/hitos/M4.md`) |
-| M5 | Middleware de IO: controles (mando de Dreamcast, analógicos, gatillos, vibración) y 2 jugadores | Front end y carrera jugables con el mando de Dreamcast, también a pantalla partida con dos mandos |
+| M5 | Middleware de IO: controles (mando de Dreamcast, analógicos, gatillos, vibración) y 2 jugadores | **Hecho en emulador (2026-10-28).** El mando de Dreamcast como DualShock analógico (dirección proporcional, gatillos de acelerador y freno, vibración en el Jump Pack), botones según el contexto. Carrera y selección de coche a dos jugadores a pantalla partida, idénticas a la referencia en 2 500 frames; ~18 fps en Flycast. Falta la prueba a mano de Jorge (`docs/hitos/M5.md`) |
 | M6 | Middleware de IO: guardado y VMU (memory card de PS1 → VMU) | Guardar y cargar la partida en la VMU |
 | M7 | Prueba en consola real: el CDI quemado en CD-R, vídeo en 480i (tele) y 480p (VGA). **Primera tarea: que el CDI quepa en un CD-R de 80 min** (725 MB con las películas de M3, el límite ronda 703; decisión de Jorge, 2026-10-26: no se optimiza antes) | Arranca en una Dreamcast real; front end legible y carrera jugable en 480i y 480p; fps y costes del PVR medidos en consola |
 | M8 | Revisión, optimización (codegen, SH-4 a mano en hooks, FTRV, LOD) y pulido final | **30 fps sostenidos** en carrera como mínimo **en consola**, sin tope por arriba (60 es el objetivo ideal); el port pulido de punta a punta |

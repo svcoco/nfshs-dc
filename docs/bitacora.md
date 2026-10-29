@@ -7,7 +7,7 @@ descartaron no se guardan aquí.
 Se actualiza al cerrar cada paso. El detalle largo vive en `docs/hitos/`; esto es el
 resumen que permite retomar el proyecto sin releerlo todo.
 
-**Última entrada: 2026-10-27** (cierre de M4 en emulador).
+**Última entrada: 2026-10-28** (cierre de M5 en emulador).
 
 ---
 
@@ -24,12 +24,15 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M2** (a, b y c) | **Cerrado en emulador (2026-10-26)** |
 | **M3** FMV | **Cerrado en emulador (2026-10-26)**: películas con sonido a sus 15 fps y video wall idéntico a la referencia; menús a ~40 fps |
 | **M4** Audio | **Cerrado en emulador (2026-10-27)**: música, motor y efectos por el AICA; reverb en su DSP; reloj real en Dreamcast |
-| M10 Polishing | Sin empezar: primero, la herramienta de espectrogramas contra el original |
-| M5 Controles y 2P · M6 Guardado y VMU · M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables | Sin empezar (numeración del 2026-10-26) |
+| **M5** Controles y 2 jugadores | **Cerrado en emulador (2026-10-28)**: el mando de Dreamcast como DualShock analógico, con vibración; pantalla partida idéntica a la referencia. Falta que Jorge lo pruebe a mano con dos mandos |
+| M6 Guardado y VMU | Siguiente |
+| M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables · M10 Polishing | Sin empezar |
 
-**Lo que hay hoy (M3 cerrado en emulador):** lo de M2, más los **vídeos**: la intro, el
-logo y las demos de atracción a pantalla completa, con sonido y a sus 15 fps (Start las
-salta), y el **video wall** de los menús (el mosaico de «game setup», el mapa de cada pista).
+**Lo que hay hoy (M5 cerrado en emulador):** lo de M2 y M3, más el **audio** (M4: música,
+motor y efectos por el AICA, con la reverb en su DSP, y el reloj del juego siguiendo al
+tiempo real) y los **controles** (M5: el mando de Dreamcast hace de DualShock analógico,
+con dirección proporcional, pedales en los gatillos y vibración en el Jump Pack), también
+**a dos jugadores**: selección de coche y carrera a pantalla partida.
 
 **Lo de M2:** un CDI que arranca en Dreamcast con la BIOS
 real, lee sus datos del disco y dibuja con el PVR tanto el **front end** (~60 fps, completo
@@ -796,6 +799,53 @@ Trampas que costaron y conviene recordar:
 
 ---
 
+## M4 — Audio (cerrado en emulador 2026-10-27)
+
+- **El middleware atrapa las escrituras del driver de EA en el SPU** (`SpuSink`) y las hace
+  sonar con el AICA: muestras a PCM16 en un espejo en su RAM, una voz por canal. La música en
+  stream (voces de más de 65 534 muestras) va a un canal en bucle sobre un anillo que un hilo
+  rellena: **la CPU no mezcla**. Coste: +1,8 % en carrera (antes +8,0 % con la mezcla en CPU).
+- **Reloj real en Dreamcast** (decisión de Jorge, 2026-10-27): el juego iba a cámara lenta
+  (36,9 s de juego en 69,3 s reales) porque el reloj avanzaba un campo por frame. Ahora sigue
+  al tiempo real con un tope de 4 campos por frame, un tick por interrupción y esperas reales.
+  PC y test diferencial, con el reloj virtual: idénticos (120 y 900 frames).
+- **EA sincroniza su stream con la IRQ por dirección** (medido en la referencia): el
+  middleware la levanta cuando el canal del AICA pasa por ella, y corrige el canal con los
+  rellenos del propio driver (espera si va adelantado, salta si va retrasado). Bloques
+  pisados (deben ser 0): 0 en una carrera entera con su carga, 1 en 80 s de front end.
+- **Envolventes y barridos, medidos:** el juego solo usa una puerta (ataque inmediato, 1,5 ms
+  de release) y ningún barrido; el AICA ya lo hace.
+- **La reverb va en el DSP del AICA:** microprograma generado y probado contra la reverb de PS1
+  (`dc/tools/dsp/reverb_aica.py`, dentro de ~0,5 dB). En Flycast hay que activar el DSP
+  (`aica.DSPEnabled`, apagado por omisión).
+- Detalle en `docs/hitos/M4.md` (secciones 8 a 10).
+
+## M5 — Controles y dos jugadores (cerrado en emulador 2026-10-28)
+
+Detalle en `docs/hitos/M5.md`.
+
+- **El mando** (`dc/src/platform/dc/mando.c`): el juego ve un **DualShock analógico** (tipo
+  `0x73`, decisión de Jorge) con la dirección proporcional en el stick y la vibración en el
+  Jump Pack (477 cambios de motor en una carrera de 2 000 frames). Botones **según el
+  contexto**: en menús, A/B/X/Y son ✕/○/□/△; conduciendo (`0x80113A04` del jugador a 1),
+  **gatillos R/L = acelerar/frenar** (decisión de Jorge), B freno de mano, Y cámaras, A/X
+  marchas. Es la configuración 1 de serie del juego (tabla en `0x801220EC`), la estándar de
+  PS1 según Jorge.
+- **Dos jugadores:** los guiones aceptan una columna para el mando 2 (`<frame> <b1> | <b2>`).
+  `dos_jugadores.txt` sale **idéntico a la referencia en 2 500 frames** (RAM, 2D, vistas y
+  lo que se dibuja en cada una). Lo que faltaba era todo del port:
+  - la grabación era por frame y no por **vista** (`ViewCap`, como el `ViewCapture` de la
+    referencia) y el renderer solo dibujaba la primera;
+  - cada vista va a su franja, y el 3D se **recorta en geometría** contra sus bordes, como
+    el plano cercano, porque el PVR recorta a tiles de 32 y la frontera cae en y = 240;
+  - los entornos de `SetDrawEnv` se guardan todos (tabla hash), como el `HashMap` de la
+    referencia;
+  - en la selección de coche a dos, una franja de profundidad por coche.
+- **Rendimiento (Flycast):** carrera a dos ~18 fps (56 ms, 24,7 de dibujo) frente a ~21 de un
+  jugador con tráfico (47 ms, 14,1 de dibujo). Subirlos va al **M10** (decisión de Jorge).
+
+---
+
 ## Decisiones vigentes
 
 Las de `CLAUDE.md` §3 siguen en pie. Lo que ha cambiado o se ha precisado:
@@ -835,7 +885,14 @@ produce lo mismo que el port, así que se compara en vez de opinar.
 - `make -C dc test` son las 227 pruebas unitarias de `ps1rt`.
 - `make -C dc dc` construye el ELF de Dreamcast; `mkdisc.sh` la imagen.
 - Guiones de entrada en `dc/test/diff/scripts/`: el disco puede llevar uno como
-  `/cd/SCRIPT.TXT` y el juego se conduce solo hasta donde diga.
+  `/cd/SCRIPT.TXT` y el juego se conduce solo hasta donde diga. `<frame> <b1> | <b2>` da
+  también los botones del mando 2. A `make -C dc diff` el guion se le pasa con **ruta
+  absoluta**.
+- El test compara también **cada vista de carrera** (volcado de vista, versión 6):
+  cámara, trozos, objetos, destellos, sol y clima de cada una, más los coches y las marcas.
+- **Compilar para Dreamcast** desde el entorno UCRT64 de MSYS2:
+  `MSYSTEM=UCRT64 bash -lc 'cd <repo> && source /opt/toolchains/dc/kos/environ.sh && make -C dc dc'`.
+  Sin `MSYSTEM=UCRT64`, `sh-elf-gcc` no encuentra `libwinpthread-1.dll`.
 
 Los dos problemas más caros del proyecto —la carrera congelada y una lista de dibujo
 incompleta— los encontró el oráculo, no la lectura del código.
@@ -910,6 +967,21 @@ incompleta— los encontró el oráculo, no la lectura del código.
   el rectángulo del cliente en píxeles lógicos y `PrintWindow` dibuja en físicos: con
   Windows al 125 % hay que crear el mapa de bits a ×1,25 o se pierde la derecha y el
   fondo. No es un desplazamiento del render.
+- **`snd_mem_available()` de nuestro KOS da el bloque más grande de la lista, libre o no.**
+  Repartir la RAM del AICA fiándose de él se llevó el hueco del stream de las películas, y
+  `snd_stream_alloc` no avisa: escribe en la dirección 0 del AICA (el driver del ARM) y
+  Flycast se cierra en la intro.
+- **Un guion se salta la película de introducción.** El fallo anterior solo se veía con el
+  CDI sin guion: hay que probar también ese.
+- **En el formato de coma flotante del DSP del AICA, el cero es `0x6000`**, no `0`. Y en
+  Flycast el DSP viene **apagado** por omisión (`aica.DSPEnabled`): sin él no hay reverb.
+- **El PVR solo recorta a tiles de 32 píxeles** (user clip). Una frontera que no cae en
+  múltiplo de 32 (la pantalla partida, en y = 240) se recorta en geometría, en espacio de
+  cámara, como el plano cercano.
+- **La lista 2D se dibuja del final al principio** (como la referencia, que la recorre con
+  `rev()`). En ese orden el suelo del showroom va **antes** de su coche; leída en el otro
+  sentido, parece al revés. Dos supuestos falsos sobre esto se resolvieron leyendo la
+  referencia, no mirando capturas.
 - **La consola serie de Flycast es una ventana propia** («Flycast Serial Output»), no la
   salida estándar: en Windows el proceso es de interfaz gráfica y `stdout` no va a
   ninguna parte.
@@ -918,6 +990,15 @@ incompleta— los encontró el oráculo, no la lectura del código.
 
 ## Abierto
 
+- **Probar el mando a mano (Jorge):** menús, carrera, pausa, fin de carrera y vibración, y a
+  dos jugadores con dos mandos (`dc/build/dc/disc/nfshs.cdi`, sin guion).
+- **M10:** la herramienta de espectrogramas, la **reverb en estéreo** (hoy entra mono al DSP)
+  y **subir los fps a dos jugadores**.
+- **Un bloque de la música pisado** al cambiar de tema en el front end (1 en 80 s; en carrera,
+  0). Sin oído que lo note; se mide con la herramienta de M10.
+- **Los fps de un jugador con el reloj real** (M4) quedan por debajo de los 30–43 de M2c,
+  que se midieron con el reloj virtual: un frame lento simula ahora dos campos. Llegar a 30
+  sostenidos es M8.
 - **Probar en una consola real (M7).** El CDI es grabable y arranca con la BIOS real en
   emulador, pero nadie lo ha quemado. Hasta entonces los fps son de Flycast.
 - **El CDI no cabe en un CD-R de 80 minutos** desde que lleva las películas (M3): 725 MB
@@ -930,7 +1011,8 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **M9:** factor de escala de las texturas, método y formato.
 - **Hitos renumerados (2026-10-26, decisiones de Jorge):** M3 FMV, M4 audio, M5 controles
   y 2 jugadores, M6 guardado y VMU, **M7 prueba en consola real (480i y 480p)**, M8
-  optimización, M9 enhancements con los packs de texturas. En los `docs/hitos/` anteriores,
+  optimización, M9 enhancements con los packs de texturas; y desde el 2026-10-27, **M10
+  "Polishing"**, el pulido con medidas. En los `docs/hitos/` anteriores,
   «M3» como optimización es el M8 y como audio el M4, y «M4» como escalado de texturas es el
   M9. El pulido final va en M8. **M9 admite objetivos descartables** (se desechan si la
   plataforma no lo permite o el rendimiento se resiente mucho): salida en 720p, resolución
@@ -962,24 +1044,3 @@ incompleta— los encontró el oráculo, no la lectura del código.
   plan** por decisión de Jorge. El formato `.CAR` ya se carga por código de coche, pero
   habría que resolver los 57 huecos de partes, los faros y abolladuras por triángulo, el
   presupuesto de triángulos en el SH-4 y el de VRAM.
-
-## M4: audio (cerrado en emulador, 2026-10-27)
-
-- **El middleware atrapa las escrituras del driver de EA en el SPU** (`SpuSink`) y las hace
-  sonar con el AICA: muestras a PCM16 en un espejo en su RAM, una voz por canal. La música en
-  stream (voces de más de 65 534 muestras) va a un canal en bucle sobre un anillo que un hilo
-  rellena: **la CPU no mezcla**. Coste: +1,8 % en carrera (antes +8,0 % con la mezcla en CPU).
-- **Reloj real en Dreamcast** (decisión de Jorge, 2026-10-27): el juego iba a cámara lenta
-  (36,9 s de juego en 69,3 s reales) porque el reloj avanzaba un campo por frame. Ahora sigue
-  al tiempo real con un tope de 4 campos por frame, un tick por interrupción y esperas reales.
-  PC y test diferencial, con el reloj virtual: idénticos (120 y 900 frames).
-- **EA sincroniza su stream con la IRQ por dirección** (medido en la referencia): el
-  middleware la levanta cuando el canal del AICA pasa por ella, y corrige el canal con los
-  rellenos del propio driver (espera si va adelantado, salta si va retrasado). Bloques
-  pisados (deben ser 0): 0 en una carrera entera con su carga, 1 en 80 s de front end.
-- **Envolventes y barridos, medidos:** el juego solo usa una puerta (ataque inmediato, 1,5 ms
-  de release) y ningun barrido; el AICA ya lo hace.
-- **La reverb va en el DSP del AICA:** microprograma generado y probado contra la reverb de PS1
-  (`dc/tools/dsp/reverb_aica.py`, dentro de ~0,5 dB). En Flycast hay que activar el DSP
-  (`aica.DSPEnabled`, apagado por omision).
-- Detalle en `docs/hitos/M4.md` (secciones 8 a 10).

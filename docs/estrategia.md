@@ -20,20 +20,23 @@ Por eso el plan las separa en el tiempo:
 - **M2** añade el renderer, que es trabajo nuevo y no una traducción.
 - **M3** pone los vídeos (FMV). **Cerrado en emulador (2026-10-26).**
 - **M4 a M6** completan el middleware que falta: audio, controles (con los dos jugadores) y
-  guardado con la VMU. **M4 cerrado en emulador (2026-10-27).**
+  guardado con la VMU. **M4 y M5 cerrados en emulador (2026-10-27 y 2026-10-28).**
 - **M7** lleva el port a una **consola real** (CD-R, 480i y 480p): hasta ahí todo se ha
   validado en emulador, y es la primera vez que hay cifras del hardware de verdad. Empieza
   por que el CDI quepa en un CD-R de 80 minutos (con las películas de M3 se pasa).
 - **M8** es el único hito donde el rendimiento es el criterio. Va después del middleware y
   de la consola (decisiones de Jorge, 2026-10-26): se optimiza el port completo, midiendo
-  en el hardware real y no en Flycast.
-- **M8** incluye además el pulido final.
+  en el hardware real y no en Flycast. Incluye además el pulido final: dejar el port
+  terminado de punta a punta.
 - **M9** mejora el código y los assets actuales (texturas escaladas), admite packs de
   texturas externos y reúne **objetivos descartables** (salida en 720p, resolución interna
   3×, widescreen y un disco de arranque que lee el disco original de PS1): se estudian y se
   desechan si la plataforma no los permite o cuestan demasiado.
-- **M10 "Polishing"** pule con medidas; empieza por la herramienta de espectrogramas que compara
-  el audio con el original (DuckStation) tramo a tramo.
+- **M10 "Polishing"** (2026-10-27) pule con medidas lo que ya funciona, comparándolo con el
+  original: empieza por la herramienta de espectrogramas que compara el audio con
+  DuckStation tramo a tramo, y recoge la reverb en estéreo y los fps a dos jugadores. La
+  diferencia con el pulido de M8: M8 deja el port completo; M10 lo acerca al original con
+  cifras.
 
 El coste de este orden es que se tarda más en ver algo en pantalla. El beneficio quedó
 demostrado en M1a, y está documentado abajo.
@@ -265,3 +268,35 @@ fps son de Flycast. Por eso la consola real (M7) va antes de optimizar (M8).
 - **Quitar un stub despierta código que no corría.** Con el video wall de verdad el juego
   compone el mosaico; el coste nuevo era del juego, y el que era nuestro (intérprete,
   texturas) se pudo quitar.
+
+## Lo que se aprendió en M4 (cerrado en emulador, 2026-10-27)
+
+- **Usar el hardware de destino, no imitar el de origen en la CPU.** Un SPU fiel por software
+  costaba el 196 % del SH-4. Atrapar las peticiones del driver de EA y hacerlas sonar con el
+  AICA cuesta ~1,4 %. Cuando un límite del AICA (las voces de más de 65 534 muestras) empujó la
+  música a la CPU (+8 %), la salida no fue aceptarlo sino buscar la técnica del AICA (canal
+  en bucle sobre un anillo). La reverb, igual: al DSP del AICA.
+- **Lo que hace el original se mide en la referencia, no se deduce.** La sincronización
+  del stream de EA (la IRQ por dirección, los rellenos por detrás de la voz) solo salió
+  midiendo. Dos arreglos razonables sobre el papel (rehacer bloques ya escritos, frenar el
+  canal con el reloj del juego) empeoraron el contador de bloques pisados y se descartaron.
+- **El reloj virtual escondía que el juego iba a cámara lenta** (36,9 s de juego en 69,3 s
+  reales). No se vio hasta que hubo música. El reloj real (decisión de Jorge) cambia también
+  lo que significan los fps: un frame lento simula dos campos.
+- **Probar también sin guion.** El cierre de Flycast en la intro (un fallo de reparto de la
+  RAM del AICA) no salía con ningún guion, porque todos saltan la película.
+
+## Lo que se aprendió en M5 (cerrado en emulador, 2026-10-28)
+
+- **RAM idéntica no es imagen correcta.** La carrera a dos salía idéntica en RAM desde el
+  primer guion, pero el port grababa una sola vista por frame y la referencia solo volcaba
+  la primera: el oráculo no miraba la segunda. Ampliar el oráculo (el volcado de vista por
+  vista) fue lo que hizo visible el fallo y lo que demuestra el arreglo.
+- **Los topes que la referencia no tiene fallan en estados nuevos.** El anillo de 64
+  entornos de dibujo bastaba con un jugador; a dos, el primer frame ya buscaba uno expulsado.
+  Lo que la referencia guarda sin límite, el port lo guarda entero.
+- **El orden de dibujo se lee en la referencia.** Dos versiones del showroom a dos jugadores
+  partían de un supuesto falso sobre el orden de la lista. Lo resolvió leer cómo la recorre
+  la referencia, no mirar más capturas.
+- **Lo que el PVR no recorta, se recorta en geometría,** igual que el plano cercano y sin
+  salirse de la arquitectura: solo los polígonos que cruzan la frontera de la vista.

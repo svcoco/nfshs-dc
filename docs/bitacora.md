@@ -26,7 +26,7 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M4** Audio | **Cerrado en emulador (2026-10-27)**: música, motor y efectos por el AICA; reverb en su DSP; reloj real en Dreamcast |
 | **M5** Controles y 2 jugadores | **Cerrado en emulador (2026-10-28)**: el mando de Dreamcast como DualShock analógico, con vibración; pantalla partida idéntica a la referencia. Falta que Jorge lo pruebe a mano con dos mandos |
 | M6 Guardado y VMU | Siguiente |
-| M7 Consola real · M8 Optimización y pulido · M9 Enhancements, packs de texturas y objetivos descartables · M10 Polishing | Sin empezar |
+| M7 Consola real · M8 Optimización · M9 Enhancements · M10 Polishing | Sin empezar (plan de Jorge del 2026-10-28 en CLAUDE.md §4) |
 
 **Lo que hay hoy (M5 cerrado en emulador):** lo de M2 y M3, más el **audio** (M4: música,
 motor y efectos por el AICA, con la reverb en su DSP, y el reloj del juego siguiendo al
@@ -1002,13 +1002,14 @@ incompleta— los encontró el oráculo, no la lectura del código.
 - **Probar en una consola real (M7).** El CDI es grabable y arranca con la BIOS real en
   emulador, pero nadie lo ha quemado. Hasta entonces los fps son de Flycast.
 - **El CDI no cabe en un CD-R de 80 minutos** desde que lleva las películas (M3): 725 MB
-  frente a ~703. Es la **primera tarea de M7** (decisión de Jorge, 2026-10-26); hasta
+  frente a ~703. Es la **primera tarea de M10** (plan de Jorge, 2026-10-28); hasta
   entonces no se dedica esfuerzo al tamaño. En Flycast no importa.
 - **El bit STP de PS1 no cabe en ARGB1555.** PS1 marca por texel los que se mezclan en
   las primitivas semitransparentes; ARGB1555 tiene **un solo bit** de alfa. Hoy se
   resuelve por modo de mezcla del cuadro entero, no por texel.
 - **Leer el front end en 480i (M7).** Está probado el modo, no la legibilidad en una tele.
-- **M9:** factor de escala de las texturas, método y formato.
+- **M8:** factor de escala de las texturas, método y formato (solo si el escalado mejora el
+  rendimiento).
 - **Hitos renumerados (2026-10-26, decisiones de Jorge):** M3 FMV, M4 audio, M5 controles
   y 2 jugadores, M6 guardado y VMU, **M7 prueba en consola real (480i y 480p)**, M8
   optimización, M9 enhancements con los packs de texturas; y desde el 2026-10-27, **M10
@@ -1040,7 +1041,7 @@ incompleta— los encontró el oráculo, no la lectura del código.
   dos rectángulos translúcidos sobre la caja de los efectos. En pantalla completa serían
   ~0,6 M de píxeles por frame; la caja es mucho menor, pero el coste real en un Dreamcast
   está sin medir (no hay consola).
-- **Modelos y texturas sustituibles** (p. ej. un coche de mayor resolución): **fuera del
-  plan** por decisión de Jorge. El formato `.CAR` ya se carga por código de coche, pero
+- **Modelos de coche de mayor calidad:** entran en **M9** (plan de Jorge, 2026-10-28; antes
+  estaban fuera del plan). El formato `.CAR` ya se carga por código de coche, pero
   habría que resolver los 57 huecos de partes, los faros y abolladuras por triángulo, el
   presupuesto de triángulos en el SH-4 y el de VRAM.

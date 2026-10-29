@@ -163,15 +163,18 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 | M4 | Middleware de audio: SPU → AICA | **Hecho en emulador (2026-10-27).** Música, motor y efectos en el front end y en carrera por el AICA: cada voz de EA a un canal, la música en stream en anillos que sigue al driver (0 bloques pisados en front end y carrera), la reverb en el DSP del AICA (dentro de ~0,5 dB de la de PS1) y el reloj real. Audio ~1,4 % de CPU (`docs/hitos/M4.md`) |
 | M5 | Middleware de IO: controles (mando de Dreamcast, analógicos, gatillos, vibración) y 2 jugadores | **Hecho en emulador (2026-10-28).** El mando de Dreamcast como DualShock analógico (dirección proporcional, gatillos de acelerador y freno, vibración en el Jump Pack), botones según el contexto. Carrera y selección de coche a dos jugadores a pantalla partida, idénticas a la referencia en 2 500 frames; ~18 fps en Flycast. Falta la prueba a mano de Jorge (`docs/hitos/M5.md`) |
 | M6 | Middleware de IO: guardado y VMU (memory card de PS1 → VMU) | Guardar y cargar la partida en la VMU |
-| M7 | Prueba en consola real: el CDI quemado en CD-R, vídeo en 480i (tele) y 480p (VGA). **Primera tarea: que el CDI quepa en un CD-R de 80 min** (725 MB con las películas de M3, el límite ronda 703; decisión de Jorge, 2026-10-26: no se optimiza antes) | Arranca en una Dreamcast real; front end legible y carrera jugable en 480i y 480p; fps y costes del PVR medidos en consola |
-| M8 | Revisión, optimización (codegen, SH-4 a mano en hooks, FTRV, LOD) y pulido final | **30 fps sostenidos** en carrera como mínimo **en consola**, sin tope por arriba (60 es el objetivo ideal); el port pulido de punta a punta |
-| M9 "Enhancements" | Mejoras del código y de los assets actuales (escalado de texturas horneado en el PC, mejoras de la referencia como opción) y packs de texturas externos. Más **objetivos descartables** (ver abajo) | Texturas de pista, coches y HUD escaladas dentro del presupuesto de VRAM, con respaldo a las originales; un pack de texturas distribuido aparte se carga por nombre |
-| M10 "Polishing" | Pulido con medidas (decisión de Jorge, 2026-10-27). Primera tarea: **la herramienta de espectrogramas** de Jorge: grabar el audio del juego en DuckStation (el original) y en Dreamcast, alinear tramos y medir el % de desviación, con el SPU de la referencia como base exacta. También **la reverb en estéreo**: en el AICA cada canal tiene un solo envío al DSP, así que hoy entra mono; con tres buses (izquierda, derecha y centro, según el panorama de cada canal) sería estéreo (medido: el ~87 % de los sonidos con reverb van panoramizados, `docs/hitos/M4.md` sección 10). Y **subir los fps a dos jugadores** (decisión de Jorge, 2026-10-28): la pantalla partida va a ~18 fps en Flycast frente a ~21 de un jugador con tráfico (`docs/hitos/M5.md` sección 5) | El audio comparado con cifras contra el original, tramo a tramo |
+| M7 | Prueba en consola real (plan de Jorge, 2026-10-28): **contador de fps en la pantalla de la VMU** y **apagar los mensajes de depuración por el puerto serie** (pueden afectar al rendimiento); probarlo en una Dreamcast real en 480i (tele) y 480p (VGA); medir fps y coste del PVR; comprobar en consola el driver ARM del AICA y `PVR_YUV_STAT` | Arranca en una Dreamcast real; front end legible y carrera jugable en 480i y 480p; fps y costes del PVR medidos en consola |
+| M8 | Optimización (plan de Jorge, 2026-10-28): optimizar el código generado, SH-4 a mano en hooks, FTRV y LOD; **texturas escaladas horneadas en el PC, solo si mejoran el rendimiento** | **30 fps sostenidos** en carrera con un jugador como mínimo **en consola**, sin tope por arriba (60 es el objetivo ideal) |
+| M9 "Enhancements" | Mejoras (plan de Jorge, 2026-10-28): **widescreen**, **salida en 720p**, **resolución interna 3×**, **disco de arranque** (analizar antes si es posible, porque contradice puntos ya hechos y pendientes), **modelos de coche de mayor calidad** y **packs de texturas externos**. Los cuatro primeros son **objetivos descartables** (ver abajo) | Cada objetivo hecho o descartado por Jorge con cifras; un pack de texturas distribuido aparte se carga por nombre |
+| M10 "Polishing" | Pulido con medidas (decisión de Jorge, 2026-10-27; plan del 2026-10-28). **Primera tarea: que el CDI quepa en un CD-R de 80 min** (725 MB con las películas de M3, el límite ronda 703; no se optimiza antes). Después **la herramienta de espectrogramas** de Jorge: grabar el audio del juego en DuckStation (el original) y en Dreamcast, alinear tramos y medir el % de desviación, con el SPU de la referencia como base exacta. También **la reverb en estéreo**: en el AICA cada canal tiene un solo envío al DSP, así que hoy entra mono; con tres buses (izquierda, derecha y centro, según el panorama de cada canal) sería estéreo (medido: el ~87 % de los sonidos con reverb van panoramizados, `docs/hitos/M4.md` sección 10). Y **subir los fps a dos jugadores** (decisión de Jorge, 2026-10-28): la pantalla partida va a ~18 fps en Flycast frente a ~21 de un jugador con tráfico (`docs/hitos/M5.md` sección 5). **Decidir el FSAA horizontal** (`docs/resolucion.md`) y **dejar el port terminado de punta a punta** | El CDI cabe en un CD-R de 80 min; el audio comparado con cifras contra el original, tramo a tramo; el port terminado |
 
 Numeración vigente desde el **2026-10-26 (decisiones de Jorge)**. En los `docs/hitos/` de
 antes de esa fecha: «M3» como optimización es el **M8** de ahora, y como audio el **M4**;
 «M4» como escalado de texturas es el **M9**; la prueba en consola que M1b y M2a dejaron
-pendiente es el **M7**. El pulido final va en **M8**.
+pendiente es el **M7**. Desde el **2026-10-28** (plan de Jorge): el escalado de texturas va
+en **M8** (solo si mejora el rendimiento); el CDI en un CD-R, el FSAA y el pulido final van
+en **M10**, y los modelos de coche de mayor calidad entran en **M9** (antes, fuera del plan).
+«Mejoras de la referencia como opción» ya no está en ningún hito.
 
 **Objetivos descartables de M9 (decisión de Jorge, 2026-10-26).** M9 admite objetivos que se
 **desechan** si la arquitectura o la plataforma no lo permiten, o si el rendimiento se resiente
@@ -460,11 +463,12 @@ Detalle en `docs/hitos/M1b.md`. Tres cosas que conviene saber antes de empezar:
     dinámica.
   - **Audio:** hay que mapear las subidas DMA del driver EA a las muestras convertidas.
 - **Abiertas:**
-  - **M9:** factor de escala de las texturas (2× como base), método y formato.
+  - **M8:** factor de escala de las texturas (2× como base), método y formato, si el escalado
+    mejora el rendimiento.
   - **Objetivos descartables de M9:** salida en 720p, resolución interna 3×, widescreen y
     disco de arranque para usar el disco original de PS1 (ver §4).
-    *(Todo tiene hito desde el 2026-10-26: FMV es el M3, los dos jugadores van con los
-    controles en M5, el pulido final en M8 y los packs de texturas en M9.)*
+    *(Todo tiene hito: FMV es el M3, los dos jugadores van con los controles en M5, los packs
+    de texturas en M9 y el pulido final en M10.)*
   - *(cerrada 2026-10-23: el arranque con BIOS real funciona desde un **CDI** con
     disposición MIL-CD, que genera `dc/tools/mkdisc/mkdisc.sh` por omisión. El GDI solo
     arrancaba con REIOS.)*

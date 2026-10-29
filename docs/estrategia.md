@@ -21,22 +21,22 @@ Por eso el plan las separa en el tiempo:
 - **M3** pone los vídeos (FMV). **Cerrado en emulador (2026-10-26).**
 - **M4 a M6** completan el middleware que falta: audio, controles (con los dos jugadores) y
   guardado con la VMU. **M4 y M5 cerrados en emulador (2026-10-27 y 2026-10-28).**
-- **M7** lleva el port a una **consola real** (CD-R, 480i y 480p): hasta ahí todo se ha
-  validado en emulador, y es la primera vez que hay cifras del hardware de verdad. Empieza
-  por que el CDI quepa en un CD-R de 80 minutos (con las películas de M3 se pasa).
+- **M7** lleva el port a una **consola real** (480i y 480p): hasta ahí todo se ha validado en
+  emulador, y es la primera vez que hay cifras del hardware de verdad. Antes de medir, un
+  contador de fps en la pantalla de la VMU y sin mensajes por el puerto serie, que pueden
+  costar rendimiento.
 - **M8** es el único hito donde el rendimiento es el criterio. Va después del middleware y
   de la consola (decisiones de Jorge, 2026-10-26): se optimiza el port completo, midiendo
-  en el hardware real y no en Flycast. Incluye además el pulido final: dejar el port
-  terminado de punta a punta.
-- **M9** mejora el código y los assets actuales (texturas escaladas), admite packs de
-  texturas externos y reúne **objetivos descartables** (salida en 720p, resolución interna
-  3×, widescreen y un disco de arranque que lee el disco original de PS1): se estudian y se
-  desechan si la plataforma no los permite o cuestan demasiado.
-- **M10 "Polishing"** (2026-10-27) pule con medidas lo que ya funciona, comparándolo con el
-  original: empieza por la herramienta de espectrogramas que compara el audio con
-  DuckStation tramo a tramo, y recoge la reverb en estéreo y los fps a dos jugadores. La
-  diferencia con el pulido de M8: M8 deja el port completo; M10 lo acerca al original con
-  cifras.
+  en el hardware real y no en Flycast. Las texturas escaladas entran aquí solo si mejoran
+  el rendimiento.
+- **M9** reúne mejoras: widescreen, 720p, resolución interna 3×, disco de arranque, modelos
+  de coche de mayor calidad y packs de texturas externos. Los cuatro primeros son
+  **descartables**: se estudian y se desechan si la plataforma no los permite o cuestan
+  demasiado; el disco de arranque se analiza antes, porque contradice cosas ya hechas.
+- **M10 "Polishing"** (2026-10-27) cierra el port: que el CDI quepa en un CD-R de 80
+  minutos, la herramienta de espectrogramas que compara el audio con DuckStation, la reverb
+  en estéreo, los fps a dos jugadores, el FSAA horizontal y dejar el port terminado de punta
+  a punta (plan de Jorge, 2026-10-28).
 
 El coste de este orden es que se tarda más en ver algo en pantalla. El beneficio quedó
 demostrado en M1a, y está documentado abajo.

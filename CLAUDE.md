@@ -108,6 +108,12 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
   rellena; la CPU no mezcla nada (`docs/hitos/M4.md`, sección 9). La reverb del SPU la hace
   el **DSP del AICA** con un microprograma generado (sección 10); en Flycast el DSP viene
   apagado por omisión (`aica.DSPEnabled`).
+- **Guardado (decisiones de Jorge, 2026-10-28, M6):** la memory card de PS1 va a la VMU
+  **archivo por archivo**: cada archivo de la tarjeta es un archivo VMS con la descripción y
+  el icono del juego, visible en el gestor de memoria de la Dreamcast (no cabe la tarjeta
+  entera: 128 KB frente a 100 KB útiles). La ranura 1 es la VMU del puerto A y la ranura 2
+  la del puerto B. En PC la tarjeta sigue siendo un `.mcd` como en la referencia
+  (`docs/hitos/M6.md`).
 - **Vídeo (en M2a):** 480p a 31 kHz (VGA) y 480i a 15 kHz. Se renderiza a 640×480 en
   ambos y el modo se elige con `vid_check_cable` (se puede forzar con `/cd/VIDEO.TXT`).
   **Hecho el 2026-10-23** (`dc/src/platform/dc/video.c`), comprobado con los dos cables.

@@ -190,9 +190,9 @@ static void *diag_thread(void *arg)
                host.track_name[0] != '\0' ? host.track_name : "(ninguna)",
                (unsigned long long)render_tris(),
                (unsigned long long)render_tri_frames());
-        printf("        coches: %lu vistos, %llu triangulos   objetos %lu\n",
-               (unsigned long)host.cars_n, (unsigned long long)render_car_tris(),
-               (unsigned long)host.objects_n);
+        printf("        coches: %lu vistos (vista 0), %llu triangulos   objetos %lu\n",
+               (unsigned long)host.cap[0].cars_n, (unsigned long long)render_car_tris(),
+               (unsigned long)host.cap[0].objects_n);
         printf("        efectos restados: %llu triangulos\n",
                (unsigned long long)render_fx_tris());
         printf("        destellos: %llu cuadros dibujados en total; reflejos %llu triangulos\n",

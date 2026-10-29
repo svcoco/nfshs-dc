@@ -198,7 +198,15 @@ typedef struct ShowroomCar {
 #define HUD_CMDS_MAX   256u   /* comandos de la pausa por frame */
 #define HUD_KEPT_MAX   768u   /* el HUD que se conserva en pausa (~176 cuadros por frame) */
 #define MENU_KEPT_MAX  512u   /* el menu de pausa que se conserva */
-#define DRAW_ENVS_MAX  64u
+#define DRAW_ENVS_MAX  2048u   /* potencia de 2: es una tabla hash (ver draw_envs) */
+
+/* Lo que SetDrawEnv dejo en un paquete de entorno: su recorte y su desplazamiento. */
+typedef struct DrawEnvRec {
+    uint32_t pkt;              /* direccion del paquete; 0 = hueco libre */
+    uint32_t seq;              /* orden de registro: el mayor es el mas reciente */
+    int16_t  clip[4];
+    int16_t  ofs[2];
+} DrawEnvRec;
 
 typedef struct ObjectDraw {
     uint16_t model;
@@ -237,7 +245,32 @@ typedef struct RaceView {
      * el showroom lo fija con OFX/OFY del GTE. */
     uint8_t  centre_on;
     int32_t  centre[2];
+    /* M5: a pantalla partida, el renderer recorta el 3D a la franja de la vista (su copia
+     * de la vista lo pone; el host lo deja a 0). */
+    uint8_t  split;
 } RaceView;
+
+/* Lo que el juego decide dibujar en UNA vista (M5): a pantalla partida, cada jugador ve sus
+ * objetos, sus coches, sus destellos, su sol, su clima y su haz de noche, como el
+ * ViewCapture de la referencia. cap[k] va con view[k]; la grabacion escribe en `vc`, la
+ * de la vista que se esta preparando. Objetos y coches duran hasta la siguiente grabacion
+ * (en pausa se siguen viendo); los destellos, el sol y el clima son de un frame. */
+typedef struct ViewCap {
+    ObjectDraw  objects[OBJECTS_MAX];
+    uint32_t    objects_n;
+    CarDraw     car_draw[CARS_MAX];
+    uint32_t    cars_n;            /* coches anotados */
+    /* los destellos, en el orden de la referencia: farolas, humo y los halos de los coches */
+    Glow        glows[GLOWS_MAX];
+    uint32_t    glows_n;
+    OverlayQuad glow_quad[GLOW_QUADS_MAX];
+    uint32_t    glow_quads_n;
+    OverlayQuad sky_quad[SKY_QUADS_MAX];        /* el flare del sol */
+    uint32_t    sky_quads_n;
+    OverlayQuad weather_quad[WEATHER_QUADS_MAX];
+    uint32_t    weather_quads_n;
+    NightBeam   beam;
+} ViewCap;
 
 typedef struct GameHost {
     Ps1Host  iface;          /* lo que ve ps1rt; `self` apunta a este struct */
@@ -368,23 +401,12 @@ typedef struct GameHost {
     uint32_t light_ptr;
     SkyData  sky;
 
-    /* Lo que el juego decide dibujar de cada coche, como lista de palabras (99 por
-     * coche; ver cars.c para el orden). Se guarda en crudo para poder compararla palabra
-     * a palabra con la referencia. */
-    CarDraw  car_draw[CARS_MAX];
+    /* Lo que se graba de cada vista (ver ViewCap) y el hueco de la que se esta preparando. */
+    ViewCap  cap[VIEWS_MAX];
+    ViewCap *vc;
     SkidQuad skids[SKIDS_MAX];
     uint32_t skids_n, skids_max;
     uint64_t skids_lost;
-    /* Los destellos del frame (ver Glow), en el orden de la referencia: farolas, humo y
-     * despues los halos de los coches. El flare del sol y el clima son 2D sin ancla. */
-    Glow        glows[GLOWS_MAX];
-    uint32_t    glows_n;
-    OverlayQuad glow_quad[GLOW_QUADS_MAX];
-    uint32_t    glow_quads_n;
-    OverlayQuad sky_quad[SKY_QUADS_MAX];
-    uint32_t    sky_quads_n;
-    OverlayQuad weather_quad[WEATHER_QUADS_MAX];
-    uint32_t    weather_quads_n;
     uint64_t    glows_lost;   /* cuadros que no cupieron; si no es 0, suben los topes */
     /* Los tramos del buffer de primitivas con los halos de cada coche: se graban todos al
      * terminar los coches, como la referencia, porque el orden fija el modo de dibujo. */
@@ -401,9 +423,11 @@ typedef struct GameHost {
     int8_t      sroom_type;               /* DrawCar: el tipo de coche que se ensena */
     uint8_t     sroom_paint;
     uint8_t     sroom_type_ok;
+    /* Lo que el juego decide dibujar de cada coche en la ultima vista, como lista de
+     * palabras (99 por coche; ver cars.c para el orden). Se guarda en crudo para poder
+     * compararla palabra a palabra con la referencia. */
     uint32_t cars_cap_buf[CAR_CAPTURE_MAX];
     uint32_t cars_cap;        /* palabras escritas */
-    uint32_t cars_n;          /* coches anotados */
     uint64_t cars_sum, cars_lost;
     uint32_t cars_max;
     /* Ancho del cono de visibilidad de los coches. 1 es el original (4:3 de PS1); 2 es
@@ -411,9 +435,7 @@ typedef struct GameHost {
      * comparar. Ver docs/hitos/M1a.md. */
     uint32_t car_cone_width;
 
-    /* Los objetos del escenario del frame en curso. */
-    ObjectDraw objects[OBJECTS_MAX];
-    uint32_t   objects_n;
+    /* La tabla de modelos de los objetos del escenario (ver objects.c). */
     uint32_t   obj_models[OBJ_MODELS_MAX];
     uint64_t   objects_sum, objects_lost;
     uint32_t   objects_max;
@@ -421,7 +443,6 @@ typedef struct GameHost {
     /* El nombre base del ultimo .GRP que el juego abrio: es como el port sabe QUE pista
      * tiene que cargar horneada, sin tener que leerselo al juego por otro sitio. */
     char     track_name[16];
-    NightBeam beam;          /* el de la ultima vista grabada (ver NightBeam) */
     /* La letra de region de la ultima librea de policia que el juego abrio, por modelo (ver
      * host_car_file): `zzzgbmws.viv` deja 'G' para el BMW. 0 si no abrio ninguna. */
     char     police[5];
@@ -478,8 +499,8 @@ typedef struct GameHost {
     int         paused;                   /* este frame es de pausa (host_frame_top) */
     uint8_t     cams_held[2u * 0x110u];   /* Camera_gInfo al pausar (hold_cameras) */
     int         cams_held_ok;
-    OverlayQuad sky_kept[SKY_QUADS_MAX];
-    uint32_t    sky_kept_n;
+    OverlayQuad sky_kept[VIEWS_MAX][SKY_QUADS_MAX];
+    uint32_t    sky_kept_n[VIEWS_MAX];
     RaceView    views_kept[VIEWS_MAX];
     uint32_t    views_kept_n;
     OverlayQuad hud_kept[HUD_KEPT_MAX];
@@ -489,15 +510,21 @@ typedef struct GameHost {
     uint64_t    hud_kept_lost;            /* cuadros que no cupieron; si no es 0, sube el tope */
     int32_t  area_tl[2];                  /* esquina del ultimo E3 */
     /* SetDrawEnv: el recorte y el desplazamiento de cada paquete de entorno, para
-     * recortar las vistas de HUD al grabarlas. */
-    /* Es un ANILLO: el front end llama a SetDrawEnv con decenas de paquetes distintos
-     * y una tabla fija se llenaba de ellos antes de la carrera (en la referencia es un
-     * HashMap sin limite). Se busca del mas reciente al mas antiguo. */
-    struct { uint32_t pkt; int16_t clip[4]; int16_t ofs[2]; } draw_envs[DRAW_ENVS_MAX];
-    uint32_t draw_envs_n;     /* entradas validas */
-    uint32_t draw_envs_next;  /* donde va la siguiente nueva */
+     * recortar las vistas de HUD al grabarlas. Como el HashMap de la referencia, se guardan
+     * TODOS los paquetes, sin expulsar ninguno: el juego registra cientos de direcciones
+     * distintas (468 en la carrera completa, 545 en 2 250 frames a dos), y con el anillo de
+     * 64 que habia, el primer frame a pantalla partida ya no encontraba el del HUD (M5).
+     * Tabla hash por direccion (host_draw_env); `seq` ordena por antiguedad. */
+    DrawEnvRec draw_envs[DRAW_ENVS_MAX];
+    uint32_t draw_envs_n;     /* entradas ocupadas */
+    uint32_t draw_envs_seq;
+    uint64_t draw_envs_lost;  /* registros que no cupieron; si no es 0, sube el tope */
     uint16_t display[4];                  /* area de pantalla del ultimo PutDispEnv */
 } GameHost;
+
+/* La entrada de SetDrawEnv del paquete `pkt` (NULL si no se registro). Con `nueva`, la
+ * crea si no estaba (NULL si la tabla esta llena). */
+DrawEnvRec *host_draw_env(GameHost *h, uint32_t pkt, int nueva);
 
 /* Mueve el reloj virtual hasta t, encolando las interrupciones de timer que caen en
  * medio y la devolucion de VSync de cada campo. */

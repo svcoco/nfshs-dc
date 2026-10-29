@@ -501,8 +501,7 @@ void overlay_record_ot(GameHost *h, Cpu *c, uint32_t start)
                 }
                 if (hay_e5) {
                     int32_t ofs[2], ox = h->draw_origin[0], oy = h->draw_origin[1];
-                    uint32_t j = 0, jj;
-                    int hallado = 0;
+                    const DrawEnvRec *e;
 
                     ofs[0] = sx11(e5 & 0x7FFu);
                     ofs[1] = sx11((e5 >> 11) & 0x7FFu);
@@ -510,27 +509,23 @@ void overlay_record_ot(GameHost *h, Cpu *c, uint32_t start)
                      * que se le dio a SetDrawEnv, sin ambiguedad. Buscar solo por el
                      * desplazamiento era ambiguo (el front end deja entradas viejas con el
                      * mismo) y en la referencia daba una respuesta distinta en cada
-                     * ejecucion. El desplazamiento queda de respaldo. */
-                    for (jj = 0; jj < h->draw_envs_n; jj++)
-                        if (h->draw_envs[jj].pkt == a) {
-                            j = jj;
-                            overlay_clip(h, (int16_t)(h->draw_envs[j].clip[0] - ox),
-                                         (int16_t)(h->draw_envs[j].clip[1] - oy),
-                                         h->draw_envs[j].clip[2], h->draw_envs[j].clip[3]);
-                            hallado = 1;
-                            break;
+                     * ejecucion. El desplazamiento queda de respaldo, el mas reciente. */
+                    e = host_draw_env(h, a, 0);
+                    if (e == NULL) {
+                        uint32_t jj;
+
+                        for (jj = 0; jj < DRAW_ENVS_MAX; jj++) {
+                            const DrawEnvRec *r = &h->draw_envs[jj];
+
+                            if (r->pkt != 0u && r->ofs[0] == ofs[0] && r->ofs[1] == ofs[1] &&
+                                (e == NULL || r->seq > e->seq))
+                                e = r;
                         }
-                    /* del mas reciente al mas antiguo del anillo */
-                    for (jj = 0; !hallado && jj < h->draw_envs_n; jj++)
-                        if ((j = (h->draw_envs_next + DRAW_ENVS_MAX - 1u - jj) % DRAW_ENVS_MAX),
-                            h->draw_envs[j].ofs[0] == ofs[0] && h->draw_envs[j].ofs[1] == ofs[1]) {
-                            overlay_clip(h, (int16_t)(h->draw_envs[j].clip[0] - ox),
-                                         (int16_t)(h->draw_envs[j].clip[1] - oy),
-                                         h->draw_envs[j].clip[2], h->draw_envs[j].clip[3]);
-                            hallado = 1;
-                            break;
-                        }
-                    if (!hallado)
+                    }
+                    if (e != NULL)
+                        overlay_clip(h, (int16_t)(e->clip[0] - ox), (int16_t)(e->clip[1] - oy),
+                                     e->clip[2], e->clip[3]);
+                    else
                         overlay_clip(h, 0, 0, 1024, 512);
                     h->overlay.prim_offset[0] = (int16_t)(ofs[0] - ox);
                     h->overlay.prim_offset[1] = (int16_t)(ofs[1] - oy);
@@ -612,10 +607,14 @@ void host_build_textures(GameHost *h)
         return;
     tex_begin_frame(&h->texcache);
     necesita(h, h->overlay.quad, h->overlay.n);
-    /* y las de los destellos, el flare del sol y el clima de la carrera */
-    necesita(h, h->glow_quad, h->glow_quads_n);
-    necesita(h, h->sky_quad, h->sky_quads_n);
-    necesita(h, h->weather_quad, h->weather_quads_n);
+    /* y las de los destellos, el flare del sol y el clima de cada vista de la carrera */
+    for (i = 0; i < VIEWS_MAX; i++) {
+        const ViewCap *vc = &h->cap[i];
+
+        necesita(h, vc->glow_quad, vc->glow_quads_n);
+        necesita(h, vc->sky_quad, vc->sky_quads_n);
+        necesita(h, vc->weather_quad, vc->weather_quads_n);
+    }
     necesita(h, h->sroom_floor, h->sroom_floor_n);
     /* y el mapa A del reflejo de los coches del showroom: 128 x 65 texeles desde su esquina,
      * como lo lee la referencia (FeScene::build) */

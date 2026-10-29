@@ -58,8 +58,8 @@ static int object_hook(Cpu *c, uint32_t addr)
         objdef = c->r[7];
         pos = ps1_r32(c, c->r[29] + 16u);
         modelo = modelo_de(h, objdef);
-        if (modelo != 0xFFFFFFFFu && h->objects_n < OBJECTS_MAX) {
-            d = &h->objects[h->objects_n++];
+        if (modelo != 0xFFFFFFFFu && h->vc->objects_n < OBJECTS_MAX) {
+            d = &h->vc->objects[h->vc->objects_n++];
             d->model = (uint16_t)modelo;
             /* el bit 0 del byte 5 del registro: el motor lo gira hacia la camara */
             d->billboard = (c->r[31] == ADDR_CHUNK_OBJECT_DRAW_RA &&
@@ -77,10 +77,10 @@ static int object_hook(Cpu *c, uint32_t addr)
         objdef = c->r[6];
         pos = c->r[7];
         modelo = modelo_de(h, objdef);
-        if (modelo != 0xFFFFFFFFu && h->objects_n < OBJECTS_MAX) {
+        if (modelo != 0xFFFFFFFFu && h->vc->objects_n < OBJECTS_MAX) {
             static const int32_t ident[9] = { 0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x10000 };
 
-            d = &h->objects[h->objects_n++];
+            d = &h->vc->objects[h->vc->objects_n++];
             d->model = (uint16_t)modelo;
             d->billboard = 0;
             for (i = 0; i < 9u; i++)
@@ -103,7 +103,7 @@ void host_record_objects(GameHost *h, Cpu *c)
     uint32_t tabla = ps1_r32(c, ADDR_OBJECT_DEFS);
     uint32_t args[2], i;
 
-    h->objects_n = 0;
+    h->vc->objects_n = 0;
     for (i = 0; i < OBJ_MODELS_MAX; i++)
         h->obj_models[i] = tabla != 0u ? ps1_r32(c, tabla + 4u * i) : 0u;
 
@@ -114,7 +114,7 @@ void host_record_objects(GameHost *h, Cpu *c)
     (void)ps1_call_nested(c, ADDR_DRAWW_DO_OBJECTS, args, 2u);
     c->inner_hook = NULL;
     s_host = NULL;
-    h->objects_sum += h->objects_n;
-    if (h->objects_n > h->objects_max)
-        h->objects_max = h->objects_n;
+    h->objects_sum += h->vc->objects_n;
+    if (h->vc->objects_n > h->objects_max)
+        h->objects_max = h->vc->objects_n;
 }

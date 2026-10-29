@@ -334,17 +334,19 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
             // NFSHS_DIFF_VIEW: dumps the RACE VIEW per frame, to compare the C port's
             // capture (dc/src/host/game.c) against this one. The game does not build the
             // world's mesh in RAM: this is all a renderer gets from it. Little-endian:
-            //   header: "NFSV" u32 version=1
+            //   header: "NFSV" u32 version=6
             //   per frame: u32 frame, u32 views, and per view u32 player, i16 rect[4],
             //              i32 camera_pos[3], i32 camera_rot[9], u32 projection,
-            //              u16 chunks, then per chunk i16 block, u16 detail
+            //              u16 chunks, then per chunk i16 block, u16 detail, then the
+            //              view's objects, glows, sun's flare and weather; after the
+            //              views the last view's cars (raw) and the frame's tyre marks
             let mut view_out: Option<std::io::BufWriter<std::fs::File>> = std::env::var("NFSHS_DIFF_VIEW")
                 .ok()
                 .map(|path| {
                     use std::io::Write;
                     let mut f = std::io::BufWriter::new(std::fs::File::create(&path).expect("NFSHS_DIFF_VIEW"));
                     f.write_all(b"NFSV").expect("cabecera");
-                    f.write_all(&5u32.to_le_bytes()).expect("cabecera");
+                    f.write_all(&6u32.to_le_bytes()).expect("cabecera");
                     f
                 });
             let mut diff_steps: Vec<(u32, u16, u16)> = Vec::new();
@@ -599,23 +601,37 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                             rec.extend_from_slice(&block.to_le_bytes());
                             rec.extend_from_slice(&detail.to_le_bytes());
                         }
-                    }
-                    // the scenery objects the original draws, after the views
-                    let objs: &[ps1::host::ObjectDraw] =
-                        info.views.first().map_or(&[], |v| v.objects.as_slice());
-                    rec.extend_from_slice(&(objs.len() as u32).to_le_bytes());
-                    for o in objs {
-                        rec.extend_from_slice(&o.model.to_le_bytes());
-                        rec.push(o.billboard as u8);
-                        rec.push(0);
-                        for t in o.matrix {
-                            rec.extend_from_slice(&t.to_le_bytes());
+                        // (version 6, M5) what the original draws in this view: the scenery
+                        // objects, the glows (anchor, car, smoke, quads), the sun's flare and
+                        // the weather, as loose quads; each quad as in NFSHS_DIFF_OVERLAY
+                        rec.extend_from_slice(&(v.objects.len() as u32).to_le_bytes());
+                        for o in &v.objects {
+                            rec.extend_from_slice(&o.model.to_le_bytes());
+                            rec.push(o.billboard as u8);
+                            rec.push(0);
+                            for t in o.matrix {
+                                rec.extend_from_slice(&t.to_le_bytes());
+                            }
+                            for t in o.pos {
+                                rec.extend_from_slice(&t.to_le_bytes());
+                            }
                         }
-                        for t in o.pos {
-                            rec.extend_from_slice(&t.to_le_bytes());
+                        rec.extend_from_slice(&(v.glows.len() as u32).to_le_bytes());
+                        for g in &v.glows {
+                            for t in g.anchor {
+                                rec.extend_from_slice(&t.to_le_bytes());
+                            }
+                            rec.extend_from_slice(&g.car.unwrap_or(0).to_le_bytes());
+                            rec.extend_from_slice(&[u8::from(g.smoke), 0]);
+                            rec.extend_from_slice(&(n_quads(&g.cmds) as u16).to_le_bytes());
+                            rec.extend_from_slice(&quads(&g.cmds));
                         }
+                        rec.extend_from_slice(&(n_quads(&v.sky_overlay) as u32).to_le_bytes());
+                        rec.extend_from_slice(&quads(&v.sky_overlay));
+                        rec.extend_from_slice(&(n_quads(&v.weather) as u32).to_le_bytes());
+                        rec.extend_from_slice(&quads(&v.weather));
                     }
-                    // the cars, as raw capture words (99 per car), after the objects
+                    // the last view's cars, as raw capture words (99 per car)
                     let cap = &c.capture;
                     rec.extend_from_slice(&(cap.len() as u32).to_le_bytes());
                     for w in cap {
@@ -636,8 +652,6 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                         rec.extend_from_slice(&(q.tex as u16).to_le_bytes());
                         rec.extend_from_slice(&q.slice.to_le_bytes());
                     }
-                    // the glows (anchor, car, smoke, quads), then the sun's flare and the
-                    // weather, as loose quads; each quad as in NFSHS_DIFF_OVERLAY
                     fn quads(cmds: &[ps1::host::OverlayCmd]) -> Vec<u8> {
                         use ps1::host::OverlayCmd;
                         let mut r = Vec::new();
@@ -679,20 +693,6 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     fn n_quads(cmds: &[ps1::host::OverlayCmd]) -> usize {
                         cmds.iter().filter(|c| matches!(c, ps1::host::OverlayCmd::Quad { .. } | ps1::host::OverlayCmd::Clip { .. })).count()
                     }
-                    rec.extend_from_slice(&(info.glows.len() as u32).to_le_bytes());
-                    for g in &info.glows {
-                        for v in g.anchor {
-                            rec.extend_from_slice(&v.to_le_bytes());
-                        }
-                        rec.extend_from_slice(&g.car.unwrap_or(0).to_le_bytes());
-                        rec.extend_from_slice(&[u8::from(g.smoke), 0]);
-                        rec.extend_from_slice(&(n_quads(&g.cmds) as u16).to_le_bytes());
-                        rec.extend_from_slice(&quads(&g.cmds));
-                    }
-                    rec.extend_from_slice(&(n_quads(&info.sky_overlay) as u32).to_le_bytes());
-                    rec.extend_from_slice(&quads(&info.sky_overlay));
-                    rec.extend_from_slice(&(n_quads(&info.weather) as u32).to_le_bytes());
-                    rec.extend_from_slice(&quads(&info.weather));
                     out.write_all(&rec).expect("NFSHS_DIFF_VIEW");
                 }
                 if let Some(out) = diff_out.as_mut() {

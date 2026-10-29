@@ -1,0 +1,34 @@
+# M5: carrera a dos jugadores a pantalla partida, en unidades de FRAME.
+# Formato: "<frame> <botones mando 1> | <botones mando 2>"; sin '|', el mando 2 no pulsa.
+# Navegacion (derivada con --textlog y screens.py, como into_race.txt):
+#
+#   [game setup]   arranca en "game options" -> UP x1 -> "two player"
+#   [race type]    test drive                -> aceptar (ver into_race.txt: sin coche propio)
+#   [track select] germany / landstrasse     -> aceptar
+#   [car select]   el mando 1 elige          -> aceptar; sale "waiting for player2"
+#                  el mando 2 elige          -> aceptar -> carrera a pantalla partida
+#
+# En carrera: los dos aceleran (CROSS); el mando 2 ademas gira a ratos, para que los
+# dos coches no hagan lo mismo y las dos vistas difieran.
+0   -
+20  UP
+26  -
+60  CROSS
+66  -
+210 CROSS
+216 -
+300 CROSS
+306 -
+400 CROSS
+406 -
+500 CROSS
+506 -
+650 - | CROSS
+656 -
+900 CROSS | CROSS
+1300 CROSS | CROSS+RIGHT
+1340 CROSS | CROSS
+1700 CROSS | CROSS+LEFT
+1730 CROSS | CROSS
+
+#end 2500

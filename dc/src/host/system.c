@@ -59,6 +59,30 @@ void host_advance_to(GameHost *h, Cpu *c, uint64_t t)
     h->clock = t;
 }
 
+
+/* Tabla hash de direccion abierta: la direccion del paquete, mezclada, da el primer hueco y
+ * se sigue hasta encontrarlo o un hueco libre. Nunca se borra, asi que no hay lapidas. */
+DrawEnvRec *host_draw_env(GameHost *h, uint32_t pkt, int nueva)
+{
+    uint32_t i = ((pkt >> 2) * 2654435761u) & (DRAW_ENVS_MAX - 1u), k;
+
+    for (k = 0; k < DRAW_ENVS_MAX; k++, i = (i + 1u) & (DRAW_ENVS_MAX - 1u)) {
+        DrawEnvRec *e = &h->draw_envs[i];
+
+        if (e->pkt == pkt)
+            return e;
+        if (e->pkt == 0u) {
+            /* deja siempre un hueco, para que una busqueda sin exito termine */
+            if (!nueva || h->draw_envs_n + 1u >= DRAW_ENVS_MAX)
+                return NULL;
+            e->pkt = pkt;
+            h->draw_envs_n++;
+            return e;
+        }
+    }
+    return NULL;
+}
+
 int host_system_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
 {
     uint32_t a0 = c->r[4], a1 = c->r[5], a2 = c->r[6], a3 = c->r[7];
@@ -228,7 +252,7 @@ void host_hook(GameHost *h, Cpu *c, uint32_t addr)
         /* SetDrawEnv(paquete, entorno): se apunta el recorte y el desplazamiento de cada
          * paquete, para recortar las vistas de HUD al grabarlas (overlay_record_ot). Uno
          * a pantalla completa, o el de la primera vista, es el buffer donde estan. */
-        uint32_t pkt = c->r[4], env = c->r[5], j, k;
+        uint32_t pkt = c->r[4], env = c->r[5], k;
         int16_t clip[4], ofs[2];
         int primera = 0;
 
@@ -236,22 +260,18 @@ void host_hook(GameHost *h, Cpu *c, uint32_t addr)
             clip[k] = (int16_t)ps1_r16(c, env + 2u * k);
         ofs[0] = (int16_t)ps1_r16(c, env + 8u);
         ofs[1] = (int16_t)ps1_r16(c, env + 10u);
-        for (j = 0; j < h->draw_envs_n; j++)
-            if (h->draw_envs[j].pkt == pkt)
-                break;
-        if (j == h->draw_envs_n) {
-            /* nuevo: al hueco siguiente del anillo, pisando el mas antiguo si esta lleno */
-            j = h->draw_envs_next;
-            h->draw_envs_next = (h->draw_envs_next + 1u) % DRAW_ENVS_MAX;
-            if (h->draw_envs_n < DRAW_ENVS_MAX)
-                h->draw_envs_n++;
-        }
         {
-            h->draw_envs[j].pkt = pkt;
-            for (k = 0; k < 4u; k++)
-                h->draw_envs[j].clip[k] = clip[k];
-            h->draw_envs[j].ofs[0] = ofs[0];
-            h->draw_envs[j].ofs[1] = ofs[1];
+            DrawEnvRec *e = host_draw_env(h, pkt, 1);
+
+            if (e != NULL) {
+                e->seq = ++h->draw_envs_seq;
+                for (k = 0; k < 4u; k++)
+                    e->clip[k] = clip[k];
+                e->ofs[0] = ofs[0];
+                e->ofs[1] = ofs[1];
+            } else {
+                h->draw_envs_lost++;
+            }
         }
         for (k = 0; k < 2u; k++) {
             int16_t v0 = (int16_t)ps1_r16(c, ADDR_DRAW_VIEWS + 8u + 92u * k);

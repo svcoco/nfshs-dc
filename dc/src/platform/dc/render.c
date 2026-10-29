@@ -172,6 +172,53 @@ static void modo_pon(int modo)
 
 /* El sumidero. El PVR dibuja TIRAS: para el abanico (0,1,2,3) que emite track_draw, la
  * tira equivalente es 0, 1, 3, 2. */
+typedef struct { float x0, y0, x1, y1; } Rect;
+
+/* ---- la vista que se dibuja (M5) ----
+ *
+ * A pantalla partida el juego prepara dos vistas, y cada una se dibuja en su franja con su
+ * camara y con lo que el juego grabo en ella (ViewCap): sus coches, sus objetos, sus
+ * destellos, su sol y su clima. El 3D se recorta a la franja en track.c (triangulo); el 2D
+ * de la vista, que el juego dibuja relativo a ella, se desplaza a su sitio y se recorta
+ * aqui. Con un jugador la vista es la pantalla entera y nada cambia. */
+static RaceView       s_rv;
+static const ViewCap *s_vc;
+static float          s_sw = 640.0f, s_sh = 480.0f;   /* su tamano en pantalla */
+static float          s_ox2, s_oy2;                   /* el origen de su 2D (pixeles de PS1) */
+static Rect           s_banda = { 0.0f, 0.0f, 640.0f, 480.0f };
+
+static void vista_pon(GameHost *h, uint32_t k)
+{
+    float dw = (float)h->display[2], dh = (float)h->display[3];
+
+    s_rv = h->view[k];
+    s_rv.split = h->views_n > 1u;
+    s_vc = &h->cap[k];
+    view_size(&s_rv, dw, dh, 640.0f, 480.0f, &s_sw, &s_sh);
+    s_ox2 = s_rv.split ? (float)s_rv.rect[0] : 0.0f;
+    s_oy2 = s_rv.split ? (float)s_rv.rect[1] : 0.0f;
+    s_banda.x0 = 0.0f;
+    s_banda.y0 = 0.0f;
+    s_banda.x1 = 640.0f;
+    s_banda.y1 = 480.0f;
+    if (s_rv.split && dw > 0.0f && dh > 0.0f) {
+        s_banda.x0 = s_ox2 * 640.0f / dw;
+        s_banda.y0 = s_oy2 * 480.0f / dh;
+        s_banda.x1 = s_banda.x0 + s_sw;
+        s_banda.y1 = s_banda.y0 + s_sh;
+    }
+}
+
+/* Lleva una caja de pantalla a la franja de la vista; 0 si no queda nada. */
+static int a_la_banda(float *x0, float *y0, float *x1, float *y1)
+{
+    if (*x0 < s_banda.x0) *x0 = s_banda.x0;
+    if (*y0 < s_banda.y0) *y0 = s_banda.y0;
+    if (*x1 > s_banda.x1) *x1 = s_banda.x1;
+    if (*y1 > s_banda.y1) *y1 = s_banda.y1;
+    return *x1 > *x0 && *y1 > *y0;
+}
+
 static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
 {
     pvr_vertex_t pv;
@@ -183,7 +230,9 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
     pv.flags = PVR_CMD_VERTEX;
     pv.oargb = 0;
     for (k = 0; k < n; k++) {
-        uint32_t i = (n == 4u && k >= 2u) ? (5u - k) : k;
+        /* el poligono como tira en zigzag: p0, p1, p(n-1), p2, p(n-2)... (con 4, la de
+         * siempre: 0, 1, 3, 2) */
+        uint32_t i = (k == 0u) ? 0u : ((k & 1u) ? (k + 1u) / 2u : n - k / 2u);
 
         if (k == n - 1u)
             pv.flags = PVR_CMD_VERTEX_EOL;
@@ -327,8 +376,8 @@ static void coches_dibuja(GameHost *h)
 {
     uint32_t ci;
 
-    for (ci = 0; ci < h->cars_n && ci < CARS_MAX; ci++) {
-        const CarDraw *d = &h->car_draw[ci];
+    for (ci = 0; ci < s_vc->cars_n && ci < CARS_MAX; ci++) {
+        const CarDraw *d = &s_vc->car_draw[ci];
         pvr_poly_cxt_t cxt;
         pvr_poly_hdr_t hdr;
         TrackStats cst;
@@ -351,7 +400,7 @@ static void coches_dibuja(GameHost *h)
         cxt.gen.culling = PVR_CULLING_NONE;
         pvr_poly_compile(&hdr, &cxt);
         pvr_prim(&hdr, sizeof(hdr));
-        car_draw(&s_coches[k].modelo, d, &h->view[0], 0, 640.0f, 480.0f,
+        car_draw(&s_coches[k].modelo, d, &s_rv, 0, s_sw, s_sh,
                  pista_emite, NULL, &cst);
         s_tri_coches += cst.quads_out;
     }
@@ -419,12 +468,12 @@ static void efectos_recorre(GameHost *h, TrackEmit emit, int dibuja)
     if (dibuja)
         efecto_ctx(s_atlas, s_track.atlas_w, s_track.atlas_h);
     /* las marcas de neumatico: en el suelo, asi que van antes que las sombras */
-    skids_draw(&s_track, h->skids, h->skids_n, &h->view[0], 640.0f, 480.0f, emit, NULL, &kst);
+    skids_draw(&s_track, h->skids, h->skids_n, &s_rv, s_sw, s_sh, emit, NULL, &kst);
     if (dibuja)
         s_tri_efectos += kst.quads_out;
 
-    for (ci = 0; ci < h->cars_n && ci < CARS_MAX; ci++) {
-        const CarDraw *d = &h->car_draw[ci];
+    for (ci = 0; ci < s_vc->cars_n && ci < CARS_MAX; ci++) {
+        const CarDraw *d = &s_vc->car_draw[ci];
         TrackStats est;
         uint32_t k;
 
@@ -433,7 +482,7 @@ static void efectos_recorre(GameHost *h, TrackEmit emit, int dibuja)
         /* la sombra del suelo usa SHAD, que vive en el atlas de la pista */
         if (dibuja)
             efecto_ctx(s_atlas, s_track.atlas_w, s_track.atlas_h);
-        car_shadow(&s_track, d, &h->view[0], 640.0f, 480.0f, emit, NULL, &est);
+        car_shadow(&s_track, d, &s_rv, s_sw, s_sh, emit, NULL, &est);
         if (dibuja)
             s_tri_efectos += est.quads_out;
 
@@ -444,7 +493,7 @@ static void efectos_recorre(GameHost *h, TrackEmit emit, int dibuja)
             if (dibuja)
                 efecto_ctx(coche_textura(k, d->paint), s_coches[k].modelo.atlas_w,
                            s_coches[k].modelo.atlas_h);
-            car_draw(&s_coches[k].modelo, d, &h->view[0], CAR_PASS_SUBTRACT, 640.0f, 480.0f,
+            car_draw(&s_coches[k].modelo, d, &s_rv, CAR_PASS_SUBTRACT, s_sw, s_sh,
                      emit, NULL, &est);
             if (dibuja)
                 s_tri_efectos += est.quads_out;
@@ -452,7 +501,7 @@ static void efectos_recorre(GameHost *h, TrackEmit emit, int dibuja)
             if (s_refl != NULL && car_env_abr(d, CAR_PASS_ENV_B) == 2) {
                 if (dibuja)
                     efecto_ctx(s_refl, CAR_REFL_SIZE, CAR_REFL_SIZE);
-                car_draw(&s_coches[k].modelo, d, &h->view[0], CAR_PASS_ENV_B, 640.0f, 480.0f,
+                car_draw(&s_coches[k].modelo, d, &s_rv, CAR_PASS_ENV_B, s_sw, s_sh,
                          emit, NULL, &est);
                 if (dibuja)
                     s_tri_reflejo += est.quads_out;
@@ -522,8 +571,8 @@ static void reflejos_dibuja(GameHost *h)
     if (s_refl == NULL || h->views_n == 0u)
         return;
     s_fase = FASE_RESTO;
-    for (ci = 0; ci < h->cars_n && ci < CARS_MAX; ci++) {
-        const CarDraw *d = &h->car_draw[ci];
+    for (ci = 0; ci < s_vc->cars_n && ci < CARS_MAX; ci++) {
+        const CarDraw *d = &s_vc->car_draw[ci];
         int abr = car_env_abr(d, CAR_PASS_ENV_A);
         pvr_poly_cxt_t cxt;
         pvr_poly_hdr_t hdr;
@@ -546,7 +595,7 @@ static void reflejos_dibuja(GameHost *h)
         cxt.blend.dst = abr == 0 ? PVR_BLEND_INVSRCALPHA : PVR_BLEND_ONE;
         pvr_poly_compile(&hdr, &cxt);
         pvr_prim(&hdr, sizeof(hdr));
-        car_draw(&s_coches[k].modelo, d, &h->view[0], CAR_PASS_ENV_A, 640.0f, 480.0f,
+        car_draw(&s_coches[k].modelo, d, &s_rv, CAR_PASS_ENV_A, s_sw, s_sh,
                  pista_emite, NULL, &est);
         s_tri_reflejo += est.quads_out;
     }
@@ -568,11 +617,7 @@ static void efectos_dibuja(GameHost *h)
         float x0 = floorf(s_bx0) - 1.0f, y0 = floorf(s_by0) - 1.0f;
         float x1 = ceilf(s_bx1) + 1.0f, y1 = ceilf(s_by1) + 1.0f;
 
-        if (x0 < 0.0f) x0 = 0.0f;
-        if (y0 < 0.0f) y0 = 0.0f;
-        if (x1 > 640.0f) x1 = 640.0f;
-        if (y1 > 480.0f) y1 = 480.0f;
-        if (x1 > x0 && y1 > y0) {
+        if (a_la_banda(&x0, &y0, &x1, &y1)) {
             /* 2. invertir, 3. sumar los efectos, 4. invertir otra vez: B - F */
             inversion(x0, y0, x1, y1);
             efectos_recorre(h, pista_emite, 1);
@@ -585,6 +630,7 @@ static void efectos_dibuja(GameHost *h)
 static void pista_dibuja(GameHost *h)
 {
     TrackStats st, sst, ost;
+    uint32_t k;
 
     if (strncmp(h->track_name, s_track_cargada, sizeof s_track_cargada) != 0)
         pista_carga(h->track_name);
@@ -602,22 +648,25 @@ static void pista_dibuja(GameHost *h)
     }
 
     pvr_list_begin(PVR_LIST_PT_POLY);
+    for (k = 0; k < h->views_n && k < VIEWS_MAX; k++) {
+    vista_pon(h, k);
     /* El cielo primero, sin escribir profundidad; la pista despues, con Z. Sin descarte
      * de caras, porque el horneado no normaliza el sentido de giro (hay materiales de
      * doble cara) y del resto se encarga el Z-buffer. */
     s_modo = -1;
     s_fase = FASE_CIELO;
-    sky_draw(&s_track, &h->sky, &h->view[0], 640.0f, 480.0f, pista_emite, NULL, &sst);
+    sky_draw(&s_track, &h->sky, &s_rv, s_sw, s_sh, pista_emite, NULL, &sst);
     s_fase = FASE_RESTO;
     modo_pon(MODO_PISTA);
-    track_draw(&s_track, &h->view[0], h->light_ok ? h->light_table : NULL,
-               640.0f, 480.0f, pista_emite, NULL, &st);
+    track_draw(&s_track, &s_rv, h->light_ok ? h->light_table : NULL,
+               s_sw, s_sh, pista_emite, NULL, &st);
     /* Los objetos van en la misma pasada: mismos materiales y mismo atlas. */
-    objects_draw(&s_track, h->objects, h->objects_n, &h->view[0],
+    objects_draw(&s_track, s_vc->objects, s_vc->objects_n, &s_rv,
                  h->light_ok ? h->light_table : NULL,
-                 640.0f, 480.0f, pista_emite, NULL, &ost);
+                 s_sw, s_sh, pista_emite, NULL, &ost);
     /* y los coches, cada uno con su atlas */
     coches_dibuja(h);
+    }
     s_tri_frames++;
     pvr_list_finish();
 }
@@ -659,8 +708,6 @@ int render_init(void)
 
 /* ---- recorte ---- */
 
-typedef struct { float x0, y0, x1, y1; } Rect;
-
 /* Recorta un cuadro alineado a los ejes, moviendo tambien sus texeles. Devuelve 0 si
  * no queda nada. Los que no estan alineados se dejan pasar: en el front end no los usa
  * nadie con recorte activo. */
@@ -696,12 +743,13 @@ static int recorta(float *x0, float *y0, float *x1, float *y1,
  * del tacometro es una linea inclinada que el HUD recorta a su esfera de 28x28, y sin
  * recortarla se salia por debajo. Sutherland-Hodgman contra los cuatro bordes del
  * rectangulo, interpolando UV y color: de un cuadro salen hasta 8 vertices. */
-typedef struct { float x, y, u, v, a, r, g, b; } P2;
+typedef struct { float x, y, z, u, v, a, r, g, b; } P2;
 
 static void p2_mezcla(P2 *o, const P2 *p, const P2 *q, float s)
 {
     o->x = p->x + (q->x - p->x) * s;
     o->y = p->y + (q->y - p->y) * s;
+    o->z = p->z + (q->z - p->z) * s;
     o->u = p->u + (q->u - p->u) * s;
     o->v = p->v + (q->v - p->v) * s;
     o->a = p->a + (q->a - p->a) * s;
@@ -838,19 +886,50 @@ static void destello_quad(GameHost *h, const OverlayQuad *q, float sx, float sy,
     pvr_poly_compile(&hdr, &cxt);
     pvr_prim(&hdr, sizeof(hdr));
 
-    /* el orden de PS1 (TL, TR, BL, BR) ya es el de una tira */
-    v.flags = PVR_CMD_VERTEX;
-    v.oargb = 0;
-    for (k = 0; k < 4; k++) {
-        if (k == 3)
-            v.flags = PVR_CMD_VERTEX_EOL;
-        v.x = (float)q->pts[k][0] * sx;
-        v.y = (float)q->pts[k][1] * sy;
-        v.z = z != NULL ? z[k] : pintor ? s_z_pintor : Z_FONDO;
-        v.u = e != NULL ? ((float)q->tex.uv[k][0] - (float)e->u0) / (float)e->w : 0.0f;
-        v.v = e != NULL ? ((float)q->tex.uv[k][1] - (float)e->v0) / (float)e->h : 0.0f;
-        v.argb = color_de(q, k, q->semi);
-        pvr_prim(&v, sizeof(v));
+    /* El poligono en orden de perimetro (la tira TL, TR, BL, BR da 0, 1, 3, 2), en el sitio
+     * de la vista; a pantalla partida, recortado a su franja como la PS1 lo recorta a su
+     * area de dibujo. */
+    {
+        static const int per[4] = { 0, 1, 3, 2 };
+        P2 pol[16];
+        int npol = 4, fuera = 0;
+
+        for (k = 0; k < 4; k++) {
+            int c = per[k];
+            uint32_t col = color_de(q, c, q->semi);
+
+            pol[k].x = ((float)q->pts[c][0] + s_ox2) * sx;
+            pol[k].y = ((float)q->pts[c][1] + s_oy2) * sy;
+            pol[k].z = z != NULL ? z[c] : pintor ? s_z_pintor : Z_FONDO;
+            pol[k].u = e != NULL ? ((float)q->tex.uv[c][0] - (float)e->u0) / (float)e->w : 0.0f;
+            pol[k].v = e != NULL ? ((float)q->tex.uv[c][1] - (float)e->v0) / (float)e->h : 0.0f;
+            pol[k].a = (float)(col >> 24);
+            pol[k].r = (float)((col >> 16) & 0xFFu);
+            pol[k].g = (float)((col >> 8) & 0xFFu);
+            pol[k].b = (float)(col & 0xFFu);
+            fuera |= pol[k].x < s_banda.x0 || pol[k].x > s_banda.x1 ||
+                     pol[k].y < s_banda.y0 || pol[k].y > s_banda.y1;
+        }
+        if (s_rv.split && fuera) {
+            npol = p2_recorta(pol, 4, &s_banda);
+            if (npol < 3)
+                return;
+        }
+        v.flags = PVR_CMD_VERTEX;
+        v.oargb = 0;
+        for (k = 0; k < npol; k++) {
+            int i = (k == 0) ? 0 : ((k & 1) ? (k + 1) / 2 : npol - k / 2);
+
+            if (k == npol - 1)
+                v.flags = PVR_CMD_VERTEX_EOL;
+            v.x = pol[i].x;
+            v.y = pol[i].y;
+            v.z = pol[i].z;
+            v.u = pol[i].u;
+            v.v = pol[i].v;
+            v.argb = p2_argb(&pol[i]);
+            pvr_prim(&v, sizeof(v));
+        }
     }
     s_quads_destellos++;
 }
@@ -872,15 +951,15 @@ static void destellos_dibuja(GameHost *h, float sx, float sy)
 
     if (h->views_n == 0u)
         return;
-    for (i = 0; i < h->glows_n; i++) {
-        const Glow *g = &h->glows[i];
+    for (i = 0; i < s_vc->glows_n; i++) {
+        const Glow *g = &s_vc->glows[i];
 
-        vale[i] = (uint8_t)glow_depth(&h->view[0], g, &h->glow_quad[g->first],
+        vale[i] = (uint8_t)glow_depth(&s_rv, g, &s_vc->glow_quad[g->first],
                                       &z[(uint32_t)g->first * 4u]);
         if (!vale[i])
             continue;
         for (k = 0; k < g->n; k++) {
-            const OverlayQuad *q = &h->glow_quad[g->first + k];
+            const OverlayQuad *q = &s_vc->glow_quad[g->first + k];
 
             if (!resta(q)) {
                 destello_quad(h, q, sx, sy, &z[(g->first + k) * 4u], 0, 0);
@@ -888,7 +967,7 @@ static void destellos_dibuja(GameHost *h, float sx, float sy)
             }
             hay_resta = 1;
             for (c = 0; c < 4u; c++) {
-                float x = (float)q->pts[c][0] * sx, y = (float)q->pts[c][1] * sy;
+                float x = ((float)q->pts[c][0] + s_ox2) * sx, y = ((float)q->pts[c][1] + s_oy2) * sy;
 
                 if (x < bx0) bx0 = x;
                 if (x > bx1) bx1 = x;
@@ -901,21 +980,17 @@ static void destellos_dibuja(GameHost *h, float sx, float sy)
         return;
     bx0 = floorf(bx0) - 1.0f; by0 = floorf(by0) - 1.0f;
     bx1 = ceilf(bx1) + 1.0f;  by1 = ceilf(by1) + 1.0f;
-    if (bx0 < 0.0f) bx0 = 0.0f;
-    if (by0 < 0.0f) by0 = 0.0f;
-    if (bx1 > 640.0f) bx1 = 640.0f;
-    if (by1 > 480.0f) by1 = 480.0f;
-    if (bx1 <= bx0 || by1 <= by0)
+    if (!a_la_banda(&bx0, &by0, &bx1, &by1))
         return;
     inversion(bx0, by0, bx1, by1);
-    for (i = 0; i < h->glows_n; i++) {
-        const Glow *g = &h->glows[i];
+    for (i = 0; i < s_vc->glows_n; i++) {
+        const Glow *g = &s_vc->glows[i];
 
         if (!vale[i])
             continue;
         for (k = 0; k < g->n; k++)
-            if (resta(&h->glow_quad[g->first + k]))
-                destello_quad(h, &h->glow_quad[g->first + k], sx, sy,
+            if (resta(&s_vc->glow_quad[g->first + k]))
+                destello_quad(h, &s_vc->glow_quad[g->first + k], sx, sy,
                               &z[(g->first + k) * 4u], 1, 0);
     }
     inversion(bx0, by0, bx1, by1);
@@ -932,11 +1007,11 @@ static void clima_dibuja(GameHost *h, float sx, float sy)
     uint32_t i, c;
     int hay_resta = 0;
 
-    if (h->views_n == 0u || h->weather_quads_n == 0u)
+    if (h->views_n == 0u || s_vc->weather_quads_n == 0u)
         return;
     s_z_pintor = 1.0f;
-    for (i = 0; i < h->weather_quads_n; i++) {
-        const OverlayQuad *q = &h->weather_quad[i];
+    for (i = 0; i < s_vc->weather_quads_n; i++) {
+        const OverlayQuad *q = &s_vc->weather_quad[i];
 
         if (!resta(q)) {
             destello_quad(h, q, sx, sy, NULL, 0, 1);
@@ -945,7 +1020,7 @@ static void clima_dibuja(GameHost *h, float sx, float sy)
         }
         hay_resta = 1;
         for (c = 0; c < 4u; c++) {
-            float x = (float)q->pts[c][0] * sx, y = (float)q->pts[c][1] * sy;
+            float x = ((float)q->pts[c][0] + s_ox2) * sx, y = ((float)q->pts[c][1] + s_oy2) * sy;
 
             if (x < bx0) bx0 = x;
             if (x > bx1) bx1 = x;
@@ -957,16 +1032,12 @@ static void clima_dibuja(GameHost *h, float sx, float sy)
         return;
     bx0 = floorf(bx0) - 1.0f; by0 = floorf(by0) - 1.0f;
     bx1 = ceilf(bx1) + 1.0f;  by1 = ceilf(by1) + 1.0f;
-    if (bx0 < 0.0f) bx0 = 0.0f;
-    if (by0 < 0.0f) by0 = 0.0f;
-    if (bx1 > 640.0f) bx1 = 640.0f;
-    if (by1 > 480.0f) by1 = 480.0f;
-    if (bx1 <= bx0 || by1 <= by0)
+    if (!a_la_banda(&bx0, &by0, &bx1, &by1))
         return;
     inversion(bx0, by0, bx1, by1);
-    for (i = 0; i < h->weather_quads_n; i++)
-        if (resta(&h->weather_quad[i]))
-            destello_quad(h, &h->weather_quad[i], sx, sy, NULL, 1, 1);
+    for (i = 0; i < s_vc->weather_quads_n; i++)
+        if (resta(&s_vc->weather_quad[i]))
+            destello_quad(h, &s_vc->weather_quad[i], sx, sy, NULL, 1, 1);
     inversion(bx0, by0, bx1, by1);
 }
 
@@ -1108,9 +1179,29 @@ static void dibuja_2d(GameHost *h, const OverlayQuad *q, const Rect *clip, float
  *   - el suelo va a Z_SUELO con GEQUAL: tapa el reflejo y no el coche;
  *   - el 2D de encima, sin prueba.
  *
+ * M5: la seleccion de coche a dos jugadores ensena DOS coches, cada uno en su vista (la
+ * referencia los separa por su vista: OFX, OFY, H y camara), y el 2D que va entre los dos
+ * esta encima del primero y debajo del segundo (el panel de abajo tapaba el segundo coche).
+ * Cada vista de coche, en el orden en que se dibuja, tiene su FRANJA de profundidad
+ * (Z_BANDA * k mas lo de arriba), y el 2D que va detras del coche k se prueba con GEQUAL a la
+ * altura de Z_FRANJA_2D de esa franja: encima de los coches anteriores y debajo de los
+ * siguientes. En el orden de dibujo cada suelo va antes de su coche (con uno y con dos
+ * jugadores): se guarda al pasar y se dibuja justo antes del coche, entre su reflejo y el,
+ * con la profundidad de suelo de su franja y el recorte que tenia en su sitio. Es lo que
+ * hace la referencia con el primer coche (game/fe.rs, floor_at), llevado a cada coche.
+ *
  * Proyecta como el GTE del juego: su distancia H y su centro OFX/OFY (ver RaceView). */
 #define Z_SUELO   0.0005f
 #define Z_REFLEJO 0.0007f     /* 1/w del reflejo -> Z_FONDO + 1/w * Z_REFLEJO (< Z_SUELO) */
+#define Z_BANDA     4.0f      /* la franja de cada coche (su 1/w, a mas de 0,25 m, es < 4) */
+#define Z_FRANJA_2D 3.9f      /* el 2D de detras de un coche, dentro de su franja */
+#define SR_SUELOS   16u
+
+static uint8_t  s_sr_vista[SROOM_MAX];     /* la vista (en orden de dibujo) de cada coche */
+static uint32_t s_sr_vistas;               /* cuantas vistas de coche hay en el frame */
+static uint32_t s_suelo_i[SR_SUELOS];      /* los suelos que esperan a su coche (entrada */
+static Rect     s_suelo_r[SR_SUELOS];      /* de la lista) y el recorte de su sitio */
+static uint32_t s_suelos;
 
 static int showroom_hay(const GameHost *h)
 {
@@ -1120,6 +1211,35 @@ static int showroom_hay(const GameHost *h)
         if (h->overlay.quad[i].kind == OVL_SR_CAR)
             return 1;
     return 0;
+}
+
+static int misma_vista(const ShowroomCar *a, const ShowroomCar *b)
+{
+    return a->ofx == b->ofx && a->ofy == b->ofy && a->h == b->h &&
+           a->cam_pos[0] == b->cam_pos[0] && a->cam_pos[1] == b->cam_pos[1] &&
+           a->cam_pos[2] == b->cam_pos[2];
+}
+
+/* Reparte los coches en vistas, en el orden de dibujo (la lista va del final al
+ * principio). */
+static void showroom_vistas(const GameHost *h)
+{
+    uint32_t i, j, primero[SROOM_MAX];
+
+    s_sr_vistas = 0;
+    for (i = h->overlay.n; i > 0u; i--) {
+        const OverlayQuad *q = &h->overlay.quad[i - 1u];
+        uint32_t c = (uint16_t)q->pts[0][0];
+
+        if (q->kind == OVL_SR_CAR && c < SROOM_MAX) {
+            for (j = 0; j < s_sr_vistas; j++)
+                if (misma_vista(&h->sroom[primero[j]], &h->sroom[c]))
+                    break;
+            if (j == s_sr_vistas && s_sr_vistas < SROOM_MAX)
+                primero[s_sr_vistas++] = c;
+            s_sr_vista[c] = (uint8_t)(j < SROOM_MAX ? j : SROOM_MAX - 1u);
+        }
+    }
 }
 
 /* La vista y el coche de un ShowroomCar: la camara y la proyeccion del GTE del juego, y el
@@ -1178,7 +1298,7 @@ static void showroom_coches(GameHost *h)
         pvr_prim(&hdr, sizeof(hdr));
         s_fase = FASE_RESTO;
         s_zmul = s->mirrored ? Z_REFLEJO : 1.0f;
-        s_zadd = s->mirrored ? Z_FONDO : 0.0f;
+        s_zadd = (s->mirrored ? Z_FONDO : 0.0f) + Z_BANDA * (float)s_sr_vista[(uint16_t)q->pts[0][0]];
         car_draw(&s_coches[k].modelo, &d, &rv, CAR_PASS_BODY, 640.0f, 480.0f,
                  pista_emite, NULL, &cst);
         s_tri_coches += cst.quads_out;
@@ -1192,7 +1312,7 @@ static void showroom_coches(GameHost *h)
  * VRAM de PS1 (lo pide host_build_textures) y no en la pagina de la pista; se suma, como
  * en la referencia, y se prueba contra la profundidad del coche sin escribirla. Va en la
  * lista translucida: el del reflejo antes del suelo, que lo tapa, y el del coche despues. */
-static void showroom_reflejos(GameHost *h, int espejo)
+static void showroom_reflejos(GameHost *h, int espejo, uint32_t vista)
 {
     static RaceView rv;
     uint32_t i;
@@ -1210,7 +1330,8 @@ static void showroom_reflejos(GameHost *h, int espejo)
         if (q->kind != OVL_SR_CAR || (uint16_t)q->pts[0][0] >= SROOM_MAX)
             continue;
         s = &h->sroom[(uint16_t)q->pts[0][0]];
-        if ((s->mirrored != 0) != (espejo != 0) || car_env_abr(&s->d, CAR_PASS_ENV_SR) < 0)
+        if ((s->mirrored != 0) != (espejo != 0) || car_env_abr(&s->d, CAR_PASS_ENV_SR) < 0 ||
+            s_sr_vista[(uint16_t)q->pts[0][0]] != vista)
             continue;
         e = tex_find(&h->texcache, (uint16_t)(s->d.env_a[1] >> 16), (uint16_t)(s->d.env_a[0] >> 16));
         k = coche_de(h, s->d.code);
@@ -1236,7 +1357,7 @@ static void showroom_reflejos(GameHost *h, int espejo)
         s_vadd = -(float)e->v0 / (float)e->h;
         s_fase = FASE_RESTO;
         s_zmul = s->mirrored ? Z_REFLEJO : 1.0f;
-        s_zadd = s->mirrored ? Z_FONDO : 0.0f;
+        s_zadd = (s->mirrored ? Z_FONDO : 0.0f) + Z_BANDA * (float)vista;
         car_draw(&s_coches[k].modelo, &d, &rv, CAR_PASS_ENV_SR, 640.0f, 480.0f,
                  pista_emite, NULL, &cst);
         s_tri_reflejo += cst.quads_out;
@@ -1249,28 +1370,30 @@ static void showroom_reflejos(GameHost *h, int espejo)
     s_zadd = 0.0f;
 }
 
-/* El suelo: los cuadros de todos los suelos del frame, cada uno al reves (como la referencia
- * los coloca justo antes del coche), con la profundidad del suelo. */
-static void showroom_suelo(GameHost *h, const Rect *clip, float sx, float sy)
+/* Los suelos que esperaban a su coche: sus cuadros al reves (como la referencia), a la
+ * profundidad del suelo de la franja `vista`. */
+static void showroom_suelos(GameHost *h, float sx, float sy, uint32_t vista)
 {
-    uint32_t i, k;
+    uint32_t j, k;
 
-    for (i = 0; i < h->overlay.n; i++) {
-        const OverlayQuad *q = &h->overlay.quad[i];
+    for (j = 0; j < s_suelos; j++) {
+        const OverlayQuad *q = &h->overlay.quad[s_suelo_i[j]];
         uint32_t ini = (uint16_t)q->pts[0][0], n = (uint16_t)q->pts[0][1];
 
-        if (q->kind != OVL_SR_FLOOR || ini + n > SROOM_FLOOR_MAX)
+        if (ini + n > SROOM_FLOOR_MAX)
             continue;
         for (k = n; k > 0u; k--)
-            dibuja_2d(h, &h->sroom_floor[ini + k - 1u], clip, sx, sy, Z_SUELO, 1);
+            dibuja_2d(h, &h->sroom_floor[ini + k - 1u], &s_suelo_r[j], sx, sy,
+                      Z_SUELO + Z_BANDA * (float)vista, 1);
     }
+    s_suelos = 0;
 }
 
 void render_frame(GameHost *h)
 {
-    float sx, sy, z = 1.0f;
+    float sx, sy, z = 1.0f, z_prueba = Z_FONDO;
     Rect clip;
-    uint32_t i;
+    uint32_t i, k, vista_sig = 0;
     int hay_coche, prueba;
 
     if (h->display[2] == 0u || h->display[3] == 0u)
@@ -1300,24 +1423,33 @@ void render_frame(GameHost *h)
     pista_dibuja(h);
     /* el showroom del front end: sus coches son 3D con profundidad */
     hay_coche = h->views_n == 0u && showroom_hay(h);
+    s_suelos = 0;
+    if (hay_coche)
+        showroom_vistas(h);
     if (hay_coche) {
         pvr_list_begin(PVR_LIST_PT_POLY);
         showroom_coches(h);
         pvr_list_finish();
     }
     pvr_list_begin(PVR_LIST_TR_POLY);
-    /* el flare del sol: sobre el cielo y debajo del mundo */
-    if (h->views_n != 0u)
-        for (i = 0; i < h->sky_quads_n; i++)
-            destello_quad(h, &h->sky_quad[i], sx, sy, NULL, 0, 0);
-    /* el mapa A del reflejo de los coches, que va antes que el B */
-    reflejos_dibuja(h);
-    /* lo que se resta, antes del 2D para que este quede encima */
-    efectos_dibuja(h);
-    /* los destellos, encima de lo restado y debajo del HUD, como en la referencia */
-    destellos_dibuja(h, sx, sy);
-    /* y el clima, encima de todo el 3D y debajo del HUD */
-    clima_dibuja(h, sx, sy);
+    for (k = 0; k < h->views_n && k < VIEWS_MAX; k++) {
+        vista_pon(h, k);
+        /* el flare del sol: sobre el cielo y debajo del mundo */
+        for (i = 0; i < s_vc->sky_quads_n; i++)
+            destello_quad(h, &s_vc->sky_quad[i], sx, sy, NULL, 0, 0);
+        /* el mapa A del reflejo de los coches, que va antes que el B */
+        reflejos_dibuja(h);
+        /* lo que se resta, antes del 2D para que este quede encima */
+        efectos_dibuja(h);
+        /* los destellos, encima de lo restado y debajo del HUD, como en la referencia */
+        destellos_dibuja(h, sx, sy);
+        /* y el clima, encima de todo el 3D y debajo del HUD */
+        clima_dibuja(h, sx, sy);
+    }
+    /* el 2D de la pantalla (front end, HUD) ya no es de ninguna vista */
+    s_ox2 = 0.0f;
+    s_oy2 = 0.0f;
+    s_rv.split = 0;
 
     /* con un coche del showroom, el 2D anterior a el va debajo (ver el showroom) */
     prueba = hay_coche;
@@ -1325,24 +1457,33 @@ void render_frame(GameHost *h)
         const OverlayQuad *q = &h->overlay.quad[i - 1u];
 
         if (q->kind == OVL_SR_CAR) {
-            /* el primer coche en orden de dibujo: el suelo justo antes, y desde aqui el 2D va
-             * encima de todo */
-            if (prueba) {
-                showroom_reflejos(h, 1);
-                showroom_suelo(h, &clip, sx, sy);
-                showroom_reflejos(h, 0);
-                prueba = 0;
+            /* el primer coche de cada vista en orden de dibujo: sus reflejos y su suelo justo
+             * antes, y desde aqui el 2D va encima de el (y debajo de los coches que quedan;
+             * despues del ultimo, encima de todo) */
+            uint32_t v = (uint16_t)q->pts[0][0] < SROOM_MAX ? s_sr_vista[(uint16_t)q->pts[0][0]] : 0u;
+
+            if (hay_coche && v == vista_sig) {
+                showroom_reflejos(h, 1, v);
+                showroom_suelos(h, sx, sy, v);
+                showroom_reflejos(h, 0, v);
+                vista_sig++;
+                prueba = vista_sig < s_sr_vistas;
+                z_prueba = Z_BANDA * (float)v + Z_FRANJA_2D;
             }
             continue;
         }
         if (q->kind == OVL_SR_FLOOR) {
-            /* sin coche, el suelo va en su sitio */
-            if (!hay_coche) {
-                uint32_t ini = (uint16_t)q->pts[0][0], n = (uint16_t)q->pts[0][1], k;
+            uint32_t ini = (uint16_t)q->pts[0][0], n = (uint16_t)q->pts[0][1], k;
 
-                for (k = n; k > 0u && ini + n <= SROOM_FLOOR_MAX; k--)
-                    dibuja_2d(h, &h->sroom_floor[ini + k - 1u], &clip, sx, sy, z, 0);
+            if (hay_coche && s_suelos < SR_SUELOS) {
+                /* espera a su coche */
+                s_suelo_i[s_suelos] = i - 1u;
+                s_suelo_r[s_suelos++] = clip;
+                continue;
             }
+            /* sin coche, en su sitio */
+            for (k = n; k > 0u && ini + n <= SROOM_FLOOR_MAX; k--)
+                dibuja_2d(h, &h->sroom_floor[ini + k - 1u], &clip, sx, sy, z, 0);
             continue;
         }
         if (q->kind == OVL_HUD_CMD)
@@ -1355,11 +1496,15 @@ void render_frame(GameHost *h)
             continue;
         }
 
-        dibuja_2d(h, q, &clip, sx, sy, prueba ? Z_FONDO : z, prueba);
+        dibuja_2d(h, q, &clip, sx, sy, prueba ? z_prueba : z, prueba);
         z += 0.001f;
         s_quads++;
         s_strips++;
     }
+
+    /* un suelo sin coche detras (no se ha visto): con el ultimo */
+    if (s_suelos > 0u)
+        showroom_suelos(h, sx, sy, vista_sig > 0u ? vista_sig - 1u : 0u);
 
     pvr_list_finish();
     pvr_scene_finish();

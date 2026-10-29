@@ -192,6 +192,29 @@ void view_init(View *vw, const struct RaceView *v, float sw, float sh)
         vw->ox = (float)v->centre[0] / 65536.0f * vw->kx;
         vw->oy = (float)v->centre[1] / 65536.0f * vw->ky;
     }
+    /* M5: a pantalla partida, la vista va en su sitio (rect, relativo a la vista 0) y se
+     * recorta a su franja */
+    vw->recorta_y = 0;
+    vw->y0 = 0.0f;
+    vw->y1 = sh;
+    if (v->split) {
+        vw->ox += (float)v->rect[0] * vw->kx;
+        vw->oy += (float)v->rect[1] * vw->ky;
+        vw->recorta_y = 1;
+        vw->y0 = (float)v->rect[1] * vw->ky;
+        vw->y1 = vw->y0 + sh;
+    }
+}
+
+void view_size(const struct RaceView *v, float dw, float dh, float W, float H,
+               float *sw, float *sh)
+{
+    *sw = W;
+    *sh = H;
+    if (v->split && dw > 0.0f && dh > 0.0f && v->rect[2] > 0 && v->rect[3] > 0) {
+        *sw = W * (float)v->rect[2] / dw;
+        *sh = H * (float)v->rect[3] / dh;
+    }
 }
 
 static void proyecta(const View *vw, const Cv *c, TrackVert *o)
@@ -229,13 +252,45 @@ static void mezcla(Cv *o, const Cv *a, const Cv *b, float s)
 /* Recorta un triangulo contra el plano cercano y lo emite. El PVR no recorta: un vertice
  * con z <= 0 se proyectaria detras de la camara y saldria un triangulo gigante al reves.
  * Cortar da 0, 3 o 4 vertices. */
+/* La distancia de un vertice a los bordes de la franja de la vista, en espacio de camara
+ * (>= 0 dentro). En pantalla y = oy - y * f * ky / z, asi que y >= y0 es
+ * (oy - y0) z - y f ky >= 0, y y <= y1 es (y1 - oy) z + y f ky >= 0: planos que pasan por la
+ * camara, y entre dos vertices se interpola como en el plano cercano. */
+static float borde_y(const View *vw, const Cv *c, int abajo)
+{
+    float fy = c->y * vw->focal * vw->ky;
+
+    return abajo ? (vw->y1 - vw->oy) * c->z + fy : (vw->oy - vw->y0) * c->z - fy;
+}
+
+/* Sutherland-Hodgman de `in` (n vertices) contra un borde de la franja. */
+static uint32_t recorta_borde(const View *vw, const Cv *in, uint32_t n, Cv *out, int abajo)
+{
+    uint32_t i, m = 0;
+
+    for (i = 0; i < n; i++) {
+        const Cv *a = &in[i], *b = &in[(i + 1u) % n];
+        float da = borde_y(vw, a, abajo), db = borde_y(vw, b, abajo);
+
+        if (da >= 0.0f)
+            out[m++] = *a;
+        if ((da >= 0.0f) != (db >= 0.0f))
+            mezcla(&out[m++], a, b, da / (da - db));
+    }
+    return m;
+}
+
+/* Recorta un triangulo contra el plano cercano y lo emite. El PVR no recorta: un vertice
+ * con z <= 0 se proyectaria detras de la camara y saldria un triangulo gigante al reves.
+ * Cortar da 0, 3 o 4 vertices; a pantalla partida, los bordes de la franja dan hasta 6. */
 void triangulo(const View *vw, const Cv *tri, const TrackMat *m,
                TrackEmit emit, void *user, TrackStats *st)
 {
-    Cv dentro[4];
-    TrackVert out[4];
+    Cv dentro[8], otro[8];
+    const Cv *pol = tri;
+    TrackVert out[8];
     uint32_t n = 0, i, k;
-    int cuantos = 0;
+    int cuantos = 0, cortado = 0;
 
     for (i = 0; i < 3u; i++)
         cuantos += tri[i].z >= NEAR;
@@ -245,36 +300,51 @@ void triangulo(const View *vw, const Cv *tri, const TrackMat *m,
         return;
     }
     if (cuantos == 3) {
-        for (i = 0; i < 3u; i++)
-            proyecta(vw, &tri[i], &out[i]);
-        emit(user, out, 3u, m);
-        if (st != NULL)
-            st->quads_out++;
-        return;
+        n = 3u;
+    } else {
+        /* Sutherland-Hodgman sobre el plano cercano. */
+        for (i = 0; i < 3u; i++) {
+            const Cv *a = &tri[i];
+            const Cv *b = &tri[(i + 1u) % 3u];
+            int ad = a->z >= NEAR, bd = b->z >= NEAR;
+
+            if (ad)
+                dentro[n++] = *a;
+            if (ad != bd && n < 4u) {
+                float d = b->z - a->z;
+
+                mezcla(&dentro[n++], a, b, d != 0.0f ? (NEAR - a->z) / d : 0.0f);
+            }
+        }
+        if (n < 3u)
+            return;
+        pol = dentro;
+        cortado = 1;
     }
+    if (vw->recorta_y) {
+        /* lo que esta del todo dentro, que es casi todo, no se toca */
+        int fuera = 0;
 
-    /* Sutherland-Hodgman sobre un solo plano. */
-    for (i = 0; i < 3u; i++) {
-        const Cv *a = &tri[i];
-        const Cv *b = &tri[(i + 1u) % 3u];
-        int ad = a->z >= NEAR, bd = b->z >= NEAR;
-
-        if (ad)
-            dentro[n++] = *a;
-        if (ad != bd && n < 4u) {
-            float d = b->z - a->z;
-
-            mezcla(&dentro[n++], a, b, d != 0.0f ? (NEAR - a->z) / d : 0.0f);
+        for (k = 0; k < n; k++)
+            fuera |= (borde_y(vw, &pol[k], 0) < 0.0f) | ((borde_y(vw, &pol[k], 1) < 0.0f) << 1);
+        if (fuera != 0) {
+            n = recorta_borde(vw, pol, n, otro, 0);
+            n = recorta_borde(vw, otro, n, dentro, 1);
+            if (n < 3u) {
+                if (st != NULL)
+                    st->clipped++;
+                return;
+            }
+            pol = dentro;
+            cortado = 1;
         }
     }
-    if (n < 3u)
-        return;
     for (k = 0; k < n; k++)
-        proyecta(vw, &dentro[k], &out[k]);
+        proyecta(vw, &pol[k], &out[k]);
     emit(user, out, n, m);
     if (st != NULL) {
         st->quads_out++;
-        st->clipped++;
+        st->clipped += (uint32_t)cortado;
     }
 }
 

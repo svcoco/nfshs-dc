@@ -269,12 +269,20 @@ void host_frame_top(GameHost *h, Cpu *c)
     hold_cameras(h, c);
     /* el flare del sol: en pausa, si el juego no lo pinta, el del ultimo frame (como la
      * referencia, que lo vuelca asi) */
-    if (h->paused && h->sky_quads_n == 0u) {
-        memcpy(h->sky_quad, h->sky_kept, h->sky_kept_n * sizeof h->sky_quad[0]);
-        h->sky_quads_n = h->sky_kept_n;
-    } else {
-        memcpy(h->sky_kept, h->sky_quad, h->sky_quads_n * sizeof h->sky_quad[0]);
-        h->sky_kept_n = h->sky_quads_n;
+    {
+        uint32_t k;
+
+        for (k = 0; k < VIEWS_MAX; k++) {
+            ViewCap *vc = &h->cap[k];
+
+            if (h->paused && vc->sky_quads_n == 0u) {
+                memcpy(vc->sky_quad, h->sky_kept[k], h->sky_kept_n[k] * sizeof vc->sky_quad[0]);
+                vc->sky_quads_n = h->sky_kept_n[k];
+            } else {
+                memcpy(h->sky_kept[k], vc->sky_quad, vc->sky_quads_n * sizeof vc->sky_quad[0]);
+                h->sky_kept_n[k] = vc->sky_quads_n;
+            }
+        }
     }
     /* en el mismo punto que la referencia (frame.rs, antes de su volcado): cargar una
      * partida vuelve a fijar las banderas, asi que se ponen en cada frame */

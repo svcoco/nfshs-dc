@@ -12,6 +12,11 @@ typedef struct {
     float focal;              /* projection, en pixeles de la pantalla de PS1 */
     float ox, oy;             /* centro de la pantalla de salida */
     float kx, ky;             /* de pixeles de PS1 a pixeles de salida */
+    /* M5: a pantalla partida, lo que caiga fuera de la franja y0..y1 de la vista se recorta
+     * aqui, en espacio de camara, igual que el plano cercano: el PVR solo recorta a tiles de
+     * 32 pixeles y la frontera entre las dos vistas cae en medio de una fila de tiles. */
+    int   recorta_y;
+    float y0, y1;
 } View;
 
 /* Un vertice en espacio de camara: x derecha, y arriba, z adelante (metros). */
@@ -23,7 +28,8 @@ typedef struct {
 
 void view_init(View *vw, const struct RaceView *v, float sw, float sh);
 
-/* Recorta un triangulo contra el plano cercano y lo emite. */
+/* Recorta un triangulo contra el plano cercano (y, a pantalla partida, contra los bordes
+ * de arriba y abajo de la vista) y lo emite: de 3 a 6 vertices, un poligono convexo. */
 void triangulo(const View *vw, const Cv *tri, const TrackMat *m,
                TrackEmit emit, void *user, TrackStats *st);
 

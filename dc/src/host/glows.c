@@ -91,31 +91,35 @@ static void graba_marcas(GameHost *h, Cpu *c, uint32_t fin, uint32_t car, int sm
 
         if (hasta <= desde)
             continue;
-        if (h->glows_n >= GLOWS_MAX) {
+        if (h->vc->glows_n >= GLOWS_MAX) {
             h->glows_lost++;
             continue;
         }
-        n = graba_en(h, c, desde, hasta, &h->glow_quad[h->glow_quads_n],
-                     GLOW_QUADS_MAX - h->glow_quads_n);
+        n = graba_en(h, c, desde, hasta, &h->vc->glow_quad[h->vc->glow_quads_n],
+                     GLOW_QUADS_MAX - h->vc->glow_quads_n);
         if (n == 0u)
             continue;
-        g = &h->glows[h->glows_n++];
+        g = &h->vc->glows[h->vc->glows_n++];
         memcpy(g->anchor, s_marks[k].anchor, sizeof g->anchor);
         g->car = car;
         g->smoke = (uint8_t)smoke;
         g->radius = 0.0f;
-        g->first = (uint16_t)h->glow_quads_n;
+        g->first = (uint16_t)h->vc->glow_quads_n;
         g->n = (uint16_t)n;
-        h->glow_quads_n += n;
+        h->vc->glow_quads_n += n;
     }
 }
 
 void host_glows_reset(GameHost *h)
 {
-    h->glows_n = 0;
-    h->glow_quads_n = 0;
-    h->sky_quads_n = 0;
-    h->weather_quads_n = 0;
+    uint32_t k;
+
+    for (k = 0; k < VIEWS_MAX; k++) {
+        h->cap[k].glows_n = 0;
+        h->cap[k].glow_quads_n = 0;
+        h->cap[k].sky_quads_n = 0;
+        h->cap[k].weather_quads_n = 0;
+    }
     h->halo_rng_n = 0;
 }
 
@@ -125,8 +129,8 @@ void host_record_glows(GameHost *h, Cpu *c, uint32_t chunks)
     uint32_t ini, fin, i;
 
     /* la referencia los vacia en cada vista */
-    h->glows_n = 0;
-    h->glow_quads_n = 0;
+    h->vc->glows_n = 0;
+    h->vc->glow_quads_n = 0;
 
     /* 1. las farolas de los trozos a la vista, como las llama BWorld_OnyxBuildFacets */
     ini = ps1_r32(c, PRIM_PTR);
@@ -176,7 +180,7 @@ void host_record_glows(GameHost *h, Cpu *c, uint32_t chunks)
     if (fin > ini && fin - ini < 0x40000u) {
         h->overlay.prim_offset[0] = 0;
         h->overlay.prim_offset[1] = 0;
-        h->weather_quads_n = graba_en(h, c, ini, fin, h->weather_quad, WEATHER_QUADS_MAX);
+        h->vc->weather_quads_n = graba_en(h, c, ini, fin, h->vc->weather_quad, WEATHER_QUADS_MAX);
     }
 
     /* 4. el flare del sol (Hrz_BuildSky llama a Flare_Sun si el cielo lo tiene): con la
@@ -200,12 +204,12 @@ void host_record_glows(GameHost *h, Cpu *c, uint32_t chunks)
         (void)host_capture_prims(h, c, ADDR_FLARE_SUN);
         n = h->overlay.n - n0;
         /* la referencia los acumula si hay varias vistas en el frame */
-        if (n > SKY_QUADS_MAX - h->sky_quads_n) {
-            h->glows_lost += n - (SKY_QUADS_MAX - h->sky_quads_n);
-            n = SKY_QUADS_MAX - h->sky_quads_n;
+        if (n > SKY_QUADS_MAX - h->vc->sky_quads_n) {
+            h->glows_lost += n - (SKY_QUADS_MAX - h->vc->sky_quads_n);
+            n = SKY_QUADS_MAX - h->vc->sky_quads_n;
         }
-        memcpy(&h->sky_quad[h->sky_quads_n], &h->overlay.quad[n0], n * sizeof(OverlayQuad));
-        h->sky_quads_n += n;
+        memcpy(&h->vc->sky_quad[h->vc->sky_quads_n], &h->overlay.quad[n0], n * sizeof(OverlayQuad));
+        h->vc->sky_quads_n += n;
         h->overlay.n = n0;
         for (k = 0; k < 8u; k++)
             ps1_gte_write(c, 32u + k, rot[k]);
@@ -224,14 +228,14 @@ void host_record_halos(GameHost *h, Cpu *c)
         uint32_t car = h->halo_rng[k][2], n;
         Glow *g;
 
-        if (h->glows_n >= GLOWS_MAX) {
+        if (h->vc->glows_n >= GLOWS_MAX) {
             h->glows_lost++;
             continue;
         }
         n = graba_en(h, c, h->halo_rng[k][0], h->halo_rng[k][1],
-                     &h->glow_quad[h->glow_quads_n], GLOW_QUADS_MAX - h->glow_quads_n);
+                     &h->vc->glow_quad[h->vc->glow_quads_n], GLOW_QUADS_MAX - h->vc->glow_quads_n);
         /* la referencia guarda el halo aunque no tenga cuadros */
-        g = &h->glows[h->glows_n++];
+        g = &h->vc->glows[h->vc->glows_n++];
         g->anchor[0] = (int32_t)ps1_r32(c, car + 0xA0u);
         g->anchor[1] = (int32_t)ps1_r32(c, car + 0xA4u);
         g->anchor[2] = (int32_t)ps1_r32(c, car + 0xA8u);
@@ -249,9 +253,9 @@ void host_record_halos(GameHost *h, Cpu *c)
             }
             g->radius = sqrtf(r2);
         }
-        g->first = (uint16_t)h->glow_quads_n;
+        g->first = (uint16_t)h->vc->glow_quads_n;
         g->n = (uint16_t)n;
-        h->glow_quads_n += n;
+        h->vc->glow_quads_n += n;
     }
     h->halo_rng_n = 0;
 }

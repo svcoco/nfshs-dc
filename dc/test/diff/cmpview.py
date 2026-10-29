@@ -7,7 +7,9 @@ no construye el mundo en su RAM: deja preparada la camara, dice que trozos de pi
 ven y **dibuja** los objetos. Si esta captura coincide, el port tiene los datos correctos
 aunque todavia no los dibuje.
 
-Formato en dc/src/host/game.c y src/dev/mod.rs (NFSHS_DIFF_VIEW), version 5.
+Formato en dc/src/host/game.c y src/dev/mod.rs (NFSHS_DIFF_VIEW), version 6: desde M5 los
+objetos, los destellos, el sol y el clima van en cada vista, para comparar tambien la
+segunda a pantalla partida.
 
     uso: python -I dc/test/diff/cmpview.py <c.view> <rust.view> [--max N]
 """
@@ -23,13 +25,13 @@ def cuadros(d, o, n):
 
 
 def leer(path):
-    """Devuelve {frame: (vistas, objetos)}."""
+    """Devuelve {frame: (vistas, coches, marcas)}; cada vista con lo suyo."""
     d = open(path, 'rb').read()
     if d[:4] != b'NFSV':
         raise SystemExit(f'{path}: no es un volcado de vista de carrera')
     version, = struct.unpack_from('<I', d, 4)
-    if version != 5:
-        raise SystemExit(f'{path}: version {version}, esperaba 5')
+    if version != 6:
+        raise SystemExit(f'{path}: version {version}, esperaba 6')
     o, frames = 8, {}
     while o + 8 <= len(d):
         frame, nv = struct.unpack_from('<II', d, o)
@@ -45,15 +47,29 @@ def leer(path):
             n, = struct.unpack_from('<H', d, o); o += 2
             pares = struct.unpack_from('<%dh' % (2 * n), d, o); o += 4 * n
             v['trozos'] = [(pares[2 * i], pares[2 * i + 1] & 0xFFFF) for i in range(n)]
+            n, = struct.unpack_from('<I', d, o); o += 4
+            objetos = []
+            for _ in range(n):
+                model, bb = struct.unpack_from('<HB', d, o)
+                mat = struct.unpack_from('<9i', d, o + 4)
+                pos = struct.unpack_from('<3i', d, o + 40)
+                o += 52
+                objetos.append((model, bb, mat, pos))
+            v['objetos'] = objetos
+            n, = struct.unpack_from('<I', d, o); o += 4
+            destellos = []
+            for _ in range(n):
+                ancla = struct.unpack_from('<3i', d, o)
+                coche, humo, nq = struct.unpack_from('<IBxH', d, o + 12)
+                o += 20
+                qs, o = cuadros(d, o, nq)
+                destellos.append((ancla, coche, humo, qs))
+            v['destellos'] = destellos
+            n, = struct.unpack_from('<I', d, o); o += 4
+            v['sol'], o = cuadros(d, o, n)
+            n, = struct.unpack_from('<I', d, o); o += 4
+            v['clima'], o = cuadros(d, o, n)
             vistas.append(v)
-        n, = struct.unpack_from('<I', d, o); o += 4
-        objetos = []
-        for _ in range(n):
-            model, bb = struct.unpack_from('<HB', d, o)
-            mat = struct.unpack_from('<9i', d, o + 4)
-            pos = struct.unpack_from('<3i', d, o + 40)
-            o += 52
-            objetos.append((model, bb, mat, pos))
         n, = struct.unpack_from('<I', d, o); o += 4
         coches = struct.unpack_from('<%dI' % n, d, o) if n else ()
         o += 4 * n
@@ -62,19 +78,7 @@ def leer(path):
         for _ in range(n):
             marcas.append(struct.unpack_from('<12i2IHh', d, o))
             o += 12 * 4 + 2 * 4 + 4
-        n, = struct.unpack_from('<I', d, o); o += 4
-        destellos = []
-        for _ in range(n):
-            ancla = struct.unpack_from('<3i', d, o)
-            coche, humo, nq = struct.unpack_from('<IBxH', d, o + 12)
-            o += 20
-            qs, o = cuadros(d, o, nq)
-            destellos.append((ancla, coche, humo, qs))
-        n, = struct.unpack_from('<I', d, o); o += 4
-        sol, o = cuadros(d, o, n)
-        n, = struct.unpack_from('<I', d, o); o += 4
-        clima, o = cuadros(d, o, n)
-        frames[frame] = (vistas, objetos, coches, marcas, destellos, sol, clima)
+        frames[frame] = (vistas, coches, marcas)
         if o > len(d):
             raise SystemExit(f'{path}: volcado truncado')
     return frames
@@ -94,21 +98,23 @@ def main(argv):
           % (len(a), len(b), len(comunes)))
 
     vistas = sum(len(a[f][0]) for f in comunes)
-    objetos = sum(len(a[f][1]) for f in comunes)
-    coches = sum(len(a[f][2]) // 99 for f in comunes)
-    marcas = sum(len(a[f][3]) for f in comunes)
-    destellos = sum(len(a[f][4]) for f in comunes)
-    humo = sum(sum(g[2] for g in a[f][4]) for f in comunes)
-    halos = sum(sum(g[1] != 0 for g in a[f][4]) for f in comunes)
-    sol = sum(len(a[f][5]) for f in comunes)
-    clima = sum(len(a[f][6]) for f in comunes)
-    if vistas == 0 and objetos == 0 and coches == 0 and marcas == 0:
+    partidas = sum(len(a[f][0]) > 1 for f in comunes)
+    por_vista = [v for f in comunes for v in a[f][0]]
+    objetos = sum(len(v['objetos']) for v in por_vista)
+    coches = sum(len(a[f][1]) // 99 for f in comunes)
+    marcas = sum(len(a[f][2]) for f in comunes)
+    destellos = sum(len(v['destellos']) for v in por_vista)
+    humo = sum(sum(g[2] for g in v['destellos']) for v in por_vista)
+    halos = sum(sum(g[1] != 0 for g in v['destellos']) for v in por_vista)
+    sol = sum(len(v['sol']) for v in por_vista)
+    clima = sum(len(v['clima']) for v in por_vista)
+    if vistas == 0 and coches == 0 and marcas == 0:
         print('  sin vistas de carrera en el guion: nada que comparar')
         return 0
 
     fallos = 0
     for f in comunes:
-        (va, oa, ca, ma, ga, sa, wa), (vb, ob, cb, mb, gb, sb, wb) = a[f], b[f]
+        (va, ca, ma), (vb, cb, mb) = a[f], b[f]
         if len(va) != len(vb):
             print(f'  frame {f}: {len(va)} vistas contra {len(vb)}')
             fallos += 1
@@ -120,15 +126,33 @@ def main(argv):
                     print(f'    ref {y[campo]}')
                     fallos += 1
                     break
-        if oa != ob:
-            if len(oa) != len(ob):
-                print(f'  frame {f}: {len(oa)} objetos contra {len(ob)}')
-            else:
-                k = next(i for i in range(len(oa)) if oa[i] != ob[i])
-                print(f'  frame {f} objeto {k} de {len(oa)}:')
-                print(f'    C   {oa[k]}')
-                print(f'    ref {ob[k]}')
-            fallos += 1
+            oa, ob = x['objetos'], y['objetos']
+            if oa != ob:
+                if len(oa) != len(ob):
+                    print(f'  frame {f} vista {i}: {len(oa)} objetos contra {len(ob)}')
+                else:
+                    k = next(j for j in range(len(oa)) if oa[j] != ob[j])
+                    print(f'  frame {f} vista {i} objeto {k} de {len(oa)}:')
+                    print(f'    C   {oa[k]}')
+                    print(f'    ref {ob[k]}')
+                fallos += 1
+            ga, gb = x['destellos'], y['destellos']
+            if ga != gb:
+                if len(ga) != len(gb):
+                    print(f'  frame {f} vista {i}: {len(ga)} destellos contra {len(gb)}')
+                else:
+                    k = next(j for j in range(len(ga)) if ga[j] != gb[j])
+                    p, q = ga[k], gb[k]
+                    print(f'  frame {f} vista {i} destello {k} de {len(ga)}: ancla {p[0]} / {q[0]}, '
+                          f'coche {p[1]:#x} / {q[1]:#x}, humo {p[2]} / {q[2]}, '
+                          f'{len(p[3])} / {len(q[3])} cuadros')
+                fallos += 1
+            for nombre in ('sol', 'clima'):
+                p, q = x[nombre], y[nombre]
+                if p != q:
+                    print(f'  frame {f} vista {i}: {nombre}, {len(p)} cuadros contra {len(q)}'
+                          + ('' if len(p) != len(q) else ' (distintos)'))
+                    fallos += 1
         if ca != cb:
             if len(ca) != len(cb):
                 print(f'  frame {f}: {len(ca) // 99} coches contra {len(cb) // 99}')
@@ -146,21 +170,6 @@ def main(argv):
                 print(f'    C   {ma[k]}')
                 print(f'    ref {mb[k]}')
             fallos += 1
-        if ga != gb:
-            if len(ga) != len(gb):
-                print(f'  frame {f}: {len(ga)} destellos contra {len(gb)}')
-            else:
-                k = next(i for i in range(len(ga)) if ga[i] != gb[i])
-                x, y = ga[k], gb[k]
-                print(f'  frame {f} destello {k} de {len(ga)}: ancla {x[0]} / {y[0]}, '
-                      f'coche {x[1]:#x} / {y[1]:#x}, humo {x[2]} / {y[2]}, '
-                      f'{len(x[3])} / {len(y[3])} cuadros')
-            fallos += 1
-        for nombre, x, y in (('flare del sol', sa, sb), ('clima', wa, wb)):
-            if x != y:
-                print(f'  frame {f}: {nombre}, {len(x)} cuadros contra {len(y)}'
-                      + ('' if len(x) != len(y) else ' (distintos)'))
-                fallos += 1
         if fallos >= tope:
             print(f'  ... (cortado en {tope} diferencias)')
             break
@@ -168,8 +177,8 @@ def main(argv):
     if fallos:
         print(f'\nFALLO: {fallos} diferencias en la vista, los objetos, los coches, las marcas o los destellos')
         return 1
-    print(f'\nOK: {vistas} vistas, {objetos} objetos, {coches} coches y {marcas} marcas identicos '
-          f'en {len(comunes)} frames')
+    print(f'\nOK: {vistas} vistas ({partidas} frames a pantalla partida), {objetos} objetos, '
+          f'{coches} coches y {marcas} marcas identicos en {len(comunes)} frames')
     print(f'OK: {destellos} destellos identicos ({halos} halos de coche, {humo} bocanadas de humo), '
           f'{sol} cuadros del flare del sol y {clima} de clima')
     return 0

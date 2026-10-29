@@ -75,6 +75,7 @@ int host_init(GameHost *h, const char *hle_funcs_path, const char *gamedata)
 {
     memset(h, 0, sizeof(*h));
     h->gamedata = gamedata;
+    h->vc = &h->cap[0];
     h->next_event = 0xF0000001u;   /* como en la referencia */
     files_init(&h->files);
 
@@ -356,6 +357,8 @@ void host_report(const GameHost *h, const Cpu *c)
     if (h->hud_kept_lost != 0u)
         printf("  AVISO cuadros de la pausa que no cupieron: %llu (sube HUD_KEPT_MAX)\n",
                (unsigned long long)h->hud_kept_lost);
+    printf("  paquetes de SetDrawEnv:    %u de %u%s\n", (unsigned)h->draw_envs_n,
+           (unsigned)DRAW_ENVS_MAX, h->draw_envs_lost != 0u ? " (LLENA: sube DRAW_ENVS_MAX)" : "");
     printf("  escrituras de mando:       %llu\n", (unsigned long long)h->pad_writes);
     printf("  MemCardSync entregados:    %llu (escrituras rechazadas: %llu)\n",
            (unsigned long long)h->mc_syncs, (unsigned long long)h->mc_writes_refused);

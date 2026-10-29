@@ -83,6 +83,9 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
     uint32_t args[2];
     uint32_t n;
 
+    /* Lo que se grabe de esta vista va a su hueco, el de la vista que va a ocupar. */
+    h->vc = &h->cap[h->views_n < VIEWS_MAX ? h->views_n : VIEWS_MAX - 1u];
+
     /* Donde el original espera encontrar la vista y el jugador. */
     ps1_w32(c, ADDR_RENDER_VIEW, view);
     ps1_w32(c, ADDR_RENDER_VIEW + 4u, player);
@@ -140,7 +143,8 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
         RaceView *v = &h->view[h->views_n++];
         uint32_t i;
 
-        v->beam = night_beam_read(h, c, player) ? &h->beam : NULL;
+        v->beam = night_beam_read(h, c, player) ? &h->vc->beam : NULL;
+        v->split = 0;
         v->player = player;
         for (i = 0; i < 3u; i++)
             v->camera_pos[i] = (int32_t)ps1_r32(c, ADDR_RENDER_VIEW + 8u + 4u * i);
@@ -180,7 +184,7 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
  * origen a ras de suelo, girado solo en horizontal). Devuelve si hay que aplicarlo. */
 static int night_beam_read(GameHost *h, Cpu *c, uint32_t player)
 {
-    NightBeam *b = &h->beam;
+    NightBeam *b = &h->vc->beam;
     uint32_t map = ps1_r32(c, 0x8013ED20u), table = ps1_r32(c, 0x8013ED28u), car, i;
     float row[3][3], pos[3], lift, n, fx, fz;
 
@@ -332,7 +336,7 @@ int view_dump_open(GameHost *h, const char *path)
     if (f == NULL)
         return 0;
     fwrite("NFSV", 1, 4, f);
-    putv32(f, 5u);   /* version 5: anade los destellos, el flare del sol y el clima */
+    putv32(f, 6u);   /* version 6: objetos, destellos, sol y clima van en cada vista (M5) */
     h->view_dump = f;
     return 1;
 }
@@ -340,7 +344,7 @@ int view_dump_open(GameHost *h, const char *path)
 void view_dump_frame(GameHost *h)
 {
     FILE *f = h->view_dump;
-    uint32_t i, k, no;
+    uint32_t i, k, j;
 
     if (f == NULL)
         return;
@@ -348,6 +352,7 @@ void view_dump_frame(GameHost *h)
     putv32(f, h->views_n);
     for (i = 0; i < h->views_n; i++) {
         const RaceView *v = &h->view[i];
+        const ViewCap *vc = &h->cap[i];
 
         putv32(f, v->player);
         for (k = 0; k < 4u; k++)
@@ -362,30 +367,49 @@ void view_dump_frame(GameHost *h)
             putv16(f, (uint16_t)v->chunk[k]);
             putv16(f, v->detail[k]);
         }
-    }
-    /* Los objetos del escenario van detras de las vistas: el port los graba una vez por
-     * frame, no por vista, que en un jugador es lo mismo. Sin vistas (en pausa) no hay:
-     * la referencia los toma de la primera vista. */
-    no = h->views_n > 0u ? h->objects_n : 0u;
-    putv32(f, no);
-    for (i = 0; i < no; i++) {
-        const ObjectDraw *o = &h->objects[i];
+        /* lo que el juego dibuja en esta vista: los objetos del escenario, ... */
+        putv32(f, vc->objects_n);
+        for (j = 0; j < vc->objects_n; j++) {
+            const ObjectDraw *o = &vc->objects[j];
 
-        putv16(f, o->model);
-        fputc(o->billboard, f);
-        fputc(0, f);
-        for (k = 0; k < 9u; k++)
-            putv32(f, (uint32_t)o->matrix[k]);
-        for (k = 0; k < 3u; k++)
-            putv32(f, (uint32_t)o->pos[k]);
+            putv16(f, o->model);
+            fputc(o->billboard, f);
+            fputc(0, f);
+            for (k = 0; k < 9u; k++)
+                putv32(f, (uint32_t)o->matrix[k]);
+            for (k = 0; k < 3u; k++)
+                putv32(f, (uint32_t)o->pos[k]);
+        }
+        /* ... los destellos (ancla, coche, si es humo y sus cuadros), y el flare del sol y
+         * el clima, cuadros sueltos */
+        putv32(f, vc->glows_n);
+        for (j = 0; j < vc->glows_n; j++) {
+            const Glow *g = &vc->glows[j];
+
+            for (k = 0; k < 3u; k++)
+                putv32(f, (uint32_t)g->anchor[k]);
+            putv32(f, g->car);
+            fputc(g->smoke, f);
+            fputc(0, f);
+            putv16(f, g->n);
+            for (k = 0; k < g->n; k++)
+                overlay_dump_quad(f, &vc->glow_quad[g->first + k]);
+        }
+        putv32(f, vc->sky_quads_n);
+        for (j = 0; j < vc->sky_quads_n; j++)
+            overlay_dump_quad(f, &vc->sky_quad[j]);
+        putv32(f, vc->weather_quads_n);
+        for (j = 0; j < vc->weather_quads_n; j++)
+            overlay_dump_quad(f, &vc->weather_quad[j]);
     }
-    /* La captura de los coches, en crudo: palabra a palabra como la graba la referencia
-     * (99 por coche). Comparar el crudo es mas estricto que comparar campos. */
+    /* La captura de los coches de la ultima vista, en crudo: palabra a palabra como la
+     * graba la referencia (99 por coche). Comparar el crudo es mas estricto que comparar
+     * campos. */
     putv32(f, h->cars_cap);
     for (i = 0; i < h->cars_cap; i++)
         putv32(f, h->cars_cap_buf[i]);
-    /* Las marcas de neumatico: por cuadro, 12 enteros de esquinas, 2 colores, la textura y
-     * la seccion. */
+    /* Las marcas de neumatico, del frame: por cuadro, 12 enteros de esquinas, 2 colores,
+     * la textura y la seccion. */
     putv32(f, h->skids_n);
     for (i = 0; i < h->skids_n; i++) {
         const SkidQuad *q = &h->skids[i];
@@ -397,27 +421,6 @@ void view_dump_frame(GameHost *h)
         putv16(f, q->tex);
         putv16(f, (uint16_t)q->slice);
     }
-    /* Los destellos: ancla, coche, si es humo y sus cuadros; despues el flare del sol y
-     * el clima, cuadros sueltos. */
-    putv32(f, h->glows_n);
-    for (i = 0; i < h->glows_n; i++) {
-        const Glow *g = &h->glows[i];
-
-        for (k = 0; k < 3u; k++)
-            putv32(f, (uint32_t)g->anchor[k]);
-        putv32(f, g->car);
-        fputc(g->smoke, f);
-        fputc(0, f);
-        putv16(f, g->n);
-        for (k = 0; k < g->n; k++)
-            overlay_dump_quad(f, &h->glow_quad[g->first + k]);
-    }
-    putv32(f, h->sky_quads_n);
-    for (i = 0; i < h->sky_quads_n; i++)
-        overlay_dump_quad(f, &h->sky_quad[i]);
-    putv32(f, h->weather_quads_n);
-    for (i = 0; i < h->weather_quads_n; i++)
-        overlay_dump_quad(f, &h->weather_quad[i]);
 }
 
 void view_dump_close(GameHost *h)

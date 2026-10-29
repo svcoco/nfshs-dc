@@ -129,8 +129,15 @@ typedef struct {
 int  track_load(Track *t, const char *path);
 void track_free(Track *t);
 
+/* M5: el tamano (`sw` x `sh`) que tiene en una pantalla de salida de W x H una vista que
+ * ocupa rect[2] x rect[3] de la pantalla de PS1 de dw x dh. Sin `split`, la pantalla entera.
+ * Es el `sw` y `sh` que se pasa a las funciones de dibujo. */
+void view_size(const struct RaceView *v, float dw, float dh, float W, float H,
+               float *sw, float *sh);
+
 /* Dibuja la vista. `light` son las 256 entradas de Chunk_lightTable (0xBBGGRR); si es
- * NULL, los vertices salen grises. `sw` y `sh` son el tamano de la pantalla de salida. */
+ * NULL, los vertices salen grises. `sw` y `sh` son el tamano de la vista en la pantalla de
+ * salida (ver view_size). */
 void track_draw(const Track *t, const struct RaceView *view, const uint32_t *light,
                 float sw, float sh, TrackEmit emit, void *user, TrackStats *st);
 

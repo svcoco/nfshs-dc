@@ -148,8 +148,8 @@ static int car_hook(Cpu *c, uint32_t addr)
 
     /* Y aparte, lo que hace falta para DIBUJARLO. Va separado de la captura porque esa
      * tiene que seguir siendo palabra a palabra la de la referencia. */
-    if (h->cars_n < CARS_MAX) {
-        CarDraw *d = &h->car_draw[h->cars_n];
+    if (h->vc->cars_n < CARS_MAX) {
+        CarDraw *d = &h->vc->car_draw[h->vc->cars_n];
 
         for (i = 0; i < 4u; i++)
             d->code[i] = (char)ps1_r8(c, car + 0x240u + i);
@@ -201,7 +201,7 @@ static int car_hook(Cpu *c, uint32_t addr)
         for (i = 0; i < 57u; i++)
             d->parts[i] = (uint8_t)ps1_r8(c, ADDR_R3DCAR_OBJECT_VISIBLE + i);
     }
-    h->cars_n++;
+    h->vc->cars_n++;
 
     /* y despues el original, que anade los halos de los faros y los frenos al buffer de
      * primitivas; todo lo demas se salta. El tramo se anota y se graba al terminar todos
@@ -268,7 +268,7 @@ void host_record_cars(GameHost *h, Cpu *c)
     uint32_t args[1];
 
     h->cars_cap = 0;
-    h->cars_n = 0;
+    h->vc->cars_n = 0;
     h->halo_rng_n = 0;
     s_host = h;
     s_halo_pass = 0;
@@ -278,7 +278,7 @@ void host_record_cars(GameHost *h, Cpu *c)
     (void)ps1_call_nested(c, ADDR_R3DCAR_INSERT_ALL_LIST, args, 1u);
     c->inner_hook = NULL;
     s_host = NULL;
-    h->cars_sum += h->cars_n;
-    if (h->cars_n > h->cars_max)
-        h->cars_max = h->cars_n;
+    h->cars_sum += h->vc->cars_n;
+    if (h->vc->cars_n > h->cars_max)
+        h->cars_max = h->vc->cars_n;
 }

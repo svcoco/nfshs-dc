@@ -102,7 +102,8 @@ static int parse_buttons(const char *s, uint16_t *out)
 }
 
 /* Formato del guion: lineas "<campo> <botones>", y "#end <campo>" para parar.
- * Los botones se mantienen hasta la linea siguiente. */
+ * Los botones se mantienen hasta la linea siguiente. M5: "<campo> <botones> | <botones>"
+ * da tambien los del mando 2 (sin '|', el mando 2 no pulsa nada). */
 int pad_load_script(GameHost *h, const char *path)
 {
     FILE *f = fopen(path, "r");
@@ -132,6 +133,18 @@ int pad_load_script(GameHost *h, const char *path)
             return 0;
         }
         h->pad_steps[h->pad_steps_n].frame = (uint64_t)frame;
+        h->pad_steps[h->pad_steps_n].buttons2 = 0;
+        {
+            char *barra = strchr(rest, '|');
+            if (barra != NULL) {
+                *barra = '\0';
+                if (!parse_buttons(barra + 1, &h->pad_steps[h->pad_steps_n].buttons2)) {
+                    fprintf(stderr, "guion del mando 2: no entiendo \"%s\"\n", barra + 1);
+                    fclose(f);
+                    return 0;
+                }
+            }
+        }
         if (!parse_buttons(rest, &h->pad_steps[h->pad_steps_n].buttons)) {
             fprintf(stderr, "guion del mando: no entiendo \"%s\"\n", rest);
             fclose(f);
@@ -370,6 +383,7 @@ void pad_write(GameHost *h, Cpu *c)
     /* avanza por el guion hasta el paso que corresponde a este frame */
     while (h->pad_at < h->pad_steps_n && h->pad_steps[h->pad_at].frame <= h->frames) {
         h->pad_buttons[0] = h->pad_steps[h->pad_at].buttons;
+        h->pad_buttons[1] = h->pad_steps[h->pad_at].buttons2;
         h->pad_at++;
     }
 

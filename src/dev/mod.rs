@@ -347,7 +347,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     f.write_all(&5u32.to_le_bytes()).expect("cabecera");
                     f
                 });
-            let mut diff_steps: Vec<(u32, u16)> = Vec::new();
+            let mut diff_steps: Vec<(u32, u16, u16)> = Vec::new();
             let mut diff_end = 0u32;
             if let Ok(path) = std::env::var("NFSHS_DIFF_SCRIPT") {
                 let text = std::fs::read_to_string(&path).expect("NFSHS_DIFF_SCRIPT");
@@ -360,10 +360,13 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     if l.is_empty() || l.starts_with('#') {
                         continue;
                     }
+                    // M5: "<frame> <botones> | <botones>" da tambien los del mando 2
+                    let (l, l2) = l.split_once('|').unwrap_or((l, "-"));
                     let mut it = l.split_whitespace();
                     let Some(at) = it.next().and_then(|t| t.parse::<u32>().ok()) else { continue };
+                    let parse = |field: &str| -> u16 {
                     let mut buttons = 0u16;
-                    for name in it.next().unwrap_or("-").split([',', '+']) {
+                    for name in field.split([',', '+']) {
                         use ps1::race::pad;
                         // "0x1234": the buttons in hexadecimal, as the C host also reads them
                         if let Some(h) = name.trim().strip_prefix("0x").or_else(|| name.trim().strip_prefix("0X")) {
@@ -381,7 +384,11 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                             _ => 0,
                         };
                     }
-                    diff_steps.push((at, buttons));
+                    buttons
+                    };
+                    let buttons = parse(it.next().unwrap_or("-"));
+                    let buttons2 = parse(l2.split_whitespace().next().unwrap_or("-"));
+                    diff_steps.push((at, buttons, buttons2));
                 }
             }
             // NFSHS_DIFF_AUTOPILOT=FILE: in races, the test autopilot (game/ai.rs) drives the
@@ -733,7 +740,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                     if diff_end != 0 && frame >= diff_end {
                         return None;
                     }
-                    let mut b = diff_steps.iter().rev().find(|(n, _)| *n <= frame).map_or(0, |(_, b)| *b);
+                    let (mut b, b2) = diff_steps.iter().rev().find(|(n, _, _)| *n <= frame).map_or((0, 0), |(_, b, b2)| (*b, *b2));
                     if let Some((log, driver, path, progress, track, last)) = pilot.as_mut() {
                         use ps1::race::{addr, pad};
                         let player = c.m.r32(addr::HUMAN_CARS);
@@ -785,7 +792,7 @@ pub fn run(cmd: &str, args: &[String], data: &assets::GameData, cfg: &game::Race
                             *last = b;
                         }
                     }
-                    return Some([b.into(), 0.into()]);
+                    return Some([b.into(), b2.into()]);
                 }
                 if Some(frame) == ram_at {
                     let _ = std::fs::create_dir_all("re/boot");

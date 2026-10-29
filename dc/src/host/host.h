@@ -318,7 +318,7 @@ typedef struct GameHost {
      * sola o no se pudo reproducir). NULL: no hay video (el arnes de PC y el test
      * diferencial, que se lo saltan en los dos lados). */
     uint16_t (*play_movie)(struct GameHost *h, const char *name);
-    struct { uint64_t frame; uint16_t buttons; } pad_steps[PAD_SCRIPT_MAX];
+    struct { uint64_t frame; uint16_t buttons, buttons2; } pad_steps[PAD_SCRIPT_MAX];
     uint32_t pad_steps_n, pad_at;
     uint64_t pad_end;         /* campo en el que termina el guion (0: sin fin) */
 

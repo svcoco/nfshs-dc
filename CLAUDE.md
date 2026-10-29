@@ -10,8 +10,8 @@ de forma nativa con el PowerVR**.
 Responsable: Jorge. Idioma de trabajo: **español**, tanto en la documentación como en los
 mensajes. Los identificadores de código van en inglés.
 
-Última actualización: 2026-10-28. Estado: **M0, M1a, M2, M3, M4 y M5 cerrados (M1b a M5, en
-emulador); el siguiente es M6 (guardado y VMU).** M1b cumple su criterio
+Última actualización: 2026-10-28. Estado: **M0, M1a, M2, M3, M4, M5 y M6 cerrados (M1b a M6,
+en emulador); el siguiente es M7 (consola real).** M1b cumple su criterio
 funcional: el juego **arranca con la BIOS real** desde un CDI (`mkdisc.sh`, formato por
 omisión), el front end corre a 69–78 fps y la **carrera simula a 98–113 fps**, `ps1rt`
 pasa **227/227** en SH-4 y el código generado ocupa **3,43 MB** con `-Os` (sin overlays).
@@ -45,7 +45,7 @@ todo el trabajo del port va en la rama **`dc`**. El C vive en el árbol **`dc/`*
 3. Corre `python -I dc/tools/recomp/m0_stats.py`. Si los números no coinciden con la
    sección 6, para y avisa antes de seguir. (`codegen_metrics.py` da las cifras del
    dimensionado del backend C.)
-4. El siguiente hito es **M6** (guardado y VMU). M5 está cerrado en emulador (`docs/hitos/M5.md`). Mantén la lista de tareas y deja
+4. El siguiente hito es **M7** (consola real). M6 está cerrado en emulador (`docs/hitos/M6.md`). Mantén la lista de tareas y deja
    las cifras nuevas en `docs/hitos/`; cada hito tiene su archivo.
 
 ## 2. Qué es la recompilación estática (resumen)
@@ -162,7 +162,7 @@ propio hilo, un paso de 60 Hz a la vez. El host graba lo que el juego decidió d
 | M3 | FMV: los vídeos del juego (STR/MDEC de PS1) | **Hecho en emulador (2026-10-26).** Las 5 películas se ven y suenan en Flycast a sus 15 fps (MDEC en SH-4, conversor YUV del PVR, audio XA por el AICA), leídas de los datos del juego; Start las salta. El video wall de los menús, idéntico a la referencia en 40 000 frames; menús a ~40 fps (`docs/hitos/M3.md`) |
 | M4 | Middleware de audio: SPU → AICA | **Hecho en emulador (2026-10-27).** Música, motor y efectos en el front end y en carrera por el AICA: cada voz de EA a un canal, la música en stream en anillos que sigue al driver (0 bloques pisados en front end y carrera), la reverb en el DSP del AICA (dentro de ~0,5 dB de la de PS1) y el reloj real. Audio ~1,4 % de CPU (`docs/hitos/M4.md`) |
 | M5 | Middleware de IO: controles (mando de Dreamcast, analógicos, gatillos, vibración) y 2 jugadores | **Hecho en emulador (2026-10-28).** El mando de Dreamcast como DualShock analógico (dirección proporcional, gatillos de acelerador y freno, vibración en el Jump Pack), botones según el contexto. Carrera y selección de coche a dos jugadores a pantalla partida, idénticas a la referencia en 2 500 frames; ~18 fps en Flycast. Falta la prueba a mano de Jorge (`docs/hitos/M5.md`) |
-| M6 | Middleware de IO: guardado y VMU (memory card de PS1 → VMU) | Guardar y cargar la partida en la VMU |
+| M6 | Middleware de IO: guardado y VMU (memory card de PS1 → VMU) | **Hecho en emulador (2026-10-28).** El modelo de tarjeta de la referencia en C; guardar y cargar idénticos a la referencia (también la imagen de la tarjeta). En Dreamcast, cada archivo de PS1 es un archivo VMS con el título y el icono del juego (18 bloques), ranuras en los puertos A y B, escritura en un hilo (~2 s en Flycast). Falta la prueba a mano de Jorge (`docs/hitos/M6.md`) |
 | M7 | Prueba en consola real (plan de Jorge, 2026-10-28): **contador de fps en la pantalla de la VMU** y **apagar los mensajes de depuración por el puerto serie** (pueden afectar al rendimiento); probarlo en una Dreamcast real en 480i (tele) y 480p (VGA); medir fps y coste del PVR; comprobar en consola el driver ARM del AICA y `PVR_YUV_STAT` | Arranca en una Dreamcast real; front end legible y carrera jugable en 480i y 480p; fps y costes del PVR medidos en consola |
 | M8 | Optimización (plan de Jorge, 2026-10-28): optimizar el código generado, SH-4 a mano en hooks, FTRV y LOD; **texturas escaladas horneadas en el PC, solo si mejoran el rendimiento** | **30 fps sostenidos** en carrera con un jugador como mínimo **en consola**, sin tope por arriba (60 es el objetivo ideal) |
 | M9 "Enhancements" | Mejoras (plan de Jorge, 2026-10-28): **widescreen**, **salida en 720p**, **resolución interna 3×**, **disco de arranque** (analizar antes si es posible, porque contradice puntos ya hechos y pendientes), **modelos de coche de mayor calidad** y **packs de texturas externos**. Los cuatro primeros son **objetivos descartables** (ver abajo) | Cada objetivo hecho o descartado por Jorge con cifras; un pack de texturas distribuido aparte se carga por nombre |

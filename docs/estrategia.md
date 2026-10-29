@@ -20,7 +20,7 @@ Por eso el plan las separa en el tiempo:
 - **M2** añade el renderer, que es trabajo nuevo y no una traducción.
 - **M3** pone los vídeos (FMV). **Cerrado en emulador (2026-10-26).**
 - **M4 a M6** completan el middleware que falta: audio, controles (con los dos jugadores) y
-  guardado con la VMU. **M4 y M5 cerrados en emulador (2026-10-27 y 2026-10-28).**
+  guardado con la VMU. **Cerrados en emulador (M4 el 2026-10-27, M5 y M6 el 2026-10-28).**
 - **M7** lleva el port a una **consola real** (480i y 480p): hasta ahí todo se ha validado en
   emulador, y es la primera vez que hay cifras del hardware de verdad. Antes de medir, un
   contador de fps en la pantalla de la VMU y sin mensajes por el puerto serie, que pueden
@@ -300,3 +300,14 @@ fps son de Flycast. Por eso la consola real (M7) va antes de optimizar (M8).
   la referencia, no mirar más capturas.
 - **Lo que el PVR no recorta, se recorta en geometría,** igual que el plano cercano y sin
   salirse de la arquitectura: solo los polígonos que cruzan la frontera de la vista.
+
+## Lo que se aprendió en M6 (cerrado en emulador, 2026-10-28)
+
+- **El oráculo tiene que ver también lo que se guarda.** Hasta M6 la referencia escribía su
+  tarjeta en un archivo que sobrevivía entre ejecuciones, fuera de lo comparado. Ahora cada
+  lado empieza con una tarjeta nueva y se comparan las dos al final.
+- **Respetar el tiempo que el juego espera.** Hacerlo «bien» (que `MemCardSync` esperase a la
+  VMU) rompía el guardado: el juego no aguanta dos segundos. La tarjeta de PS1 contesta
+  rápido, y el port tiene que contestar igual aunque el hardware de destino sea más lento.
+- **Medir antes de diseñar:** el tamaño del guardado (1 bloque, 18 de VMU) salió de guardar de
+  verdad en la referencia; en el binario estaba a cero.

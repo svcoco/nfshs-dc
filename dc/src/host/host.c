@@ -76,6 +76,12 @@ int host_init(GameHost *h, const char *hle_funcs_path, const char *gamedata)
     memset(h, 0, sizeof(*h));
     h->gamedata = gamedata;
     h->vc = &h->cap[0];
+    /* la ranura 1 con una tarjeta formateada, como la referencia; la plataforma la cambia */
+    memcard_format(h->mc_card[0]);
+    memcard_format(h->mc_card[1]);
+    h->mc_present[0] = 1;
+    h->mc_limit[0] = 15u;
+    h->mc_limit[1] = 15u;
     h->next_event = 0xF0000001u;   /* como en la referencia */
     files_init(&h->files);
 
@@ -360,8 +366,9 @@ void host_report(const GameHost *h, const Cpu *c)
     printf("  paquetes de SetDrawEnv:    %u de %u%s\n", (unsigned)h->draw_envs_n,
            (unsigned)DRAW_ENVS_MAX, h->draw_envs_lost != 0u ? " (LLENA: sube DRAW_ENVS_MAX)" : "");
     printf("  escrituras de mando:       %llu\n", (unsigned long long)h->pad_writes);
-    printf("  MemCardSync entregados:    %llu (escrituras rechazadas: %llu)\n",
-           (unsigned long long)h->mc_syncs, (unsigned long long)h->mc_writes_refused);
+    printf("  memory card:               %llu MemCardSync, %llu escrituras, %llu guardados%s\n",
+           (unsigned long long)h->mc_syncs, (unsigned long long)h->mc_writes,
+           (unsigned long long)h->mc_saves, h->mc_save_errors != 0u ? " (CON ERRORES)" : "");
     printf("\n=== capa de archivos ===\n");
     printf("  aperturas ok / fallidas:   %llu / %llu\n",
            (unsigned long long)h->files.opens, (unsigned long long)h->files.opens_failed);

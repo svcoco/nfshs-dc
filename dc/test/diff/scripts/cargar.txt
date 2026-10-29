@@ -1,0 +1,27 @@
+# M6: cargar la partida de la memory card desde los menus, en unidades de FRAME. Hace falta
+# una tarjeta con partida: la que deja guardar.txt (no se versiona: lleva datos del juego).
+#   make -C dc diff SCRIPT=<ruta>/guardar.txt
+#   cp dc/test/diff/out/rust.mcd dc/build/partida.mcd
+#   python -I dc/test/diff/run.py --script <ruta>/cargar.txt --tarjeta dc/build/partida.mcd
+#   [game setup]       "game options"                    -> aceptar
+#   [game options]     DOWN x3 "memory card"             -> aceptar
+#   [load]             (save / nfs: high stakes)         -> DOWN -> aceptar
+#   "are you sure you wish to load this file?"  yes      -> aceptar
+0   -
+60  CROSS
+66  -
+270 DOWN
+276 -
+290 DOWN
+296 -
+310 DOWN
+316 -
+340 CROSS
+346 -
+530 DOWN
+536 -
+560 CROSS
+566 -
+620 CROSS
+626 -
+#end 1100

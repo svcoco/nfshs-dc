@@ -7,7 +7,7 @@ descartaron no se guardan aquí.
 Se actualiza al cerrar cada paso. El detalle largo vive en `docs/hitos/`; esto es el
 resumen que permite retomar el proyecto sin releerlo todo.
 
-**Última entrada: 2026-10-28** (cierre de M5 en emulador).
+**Última entrada: 2026-10-28** (cierre de M6 en emulador).
 
 ---
 
@@ -25,10 +25,15 @@ resumen que permite retomar el proyecto sin releerlo todo.
 | **M3** FMV | **Cerrado en emulador (2026-10-26)**: películas con sonido a sus 15 fps y video wall idéntico a la referencia; menús a ~40 fps |
 | **M4** Audio | **Cerrado en emulador (2026-10-27)**: música, motor y efectos por el AICA; reverb en su DSP; reloj real en Dreamcast |
 | **M5** Controles y 2 jugadores | **Cerrado en emulador (2026-10-28)**: el mando de Dreamcast como DualShock analógico, con vibración; pantalla partida idéntica a la referencia. Falta que Jorge lo pruebe a mano con dos mandos |
-| M6 Guardado y VMU | Siguiente |
-| M7 Consola real · M8 Optimización · M9 Enhancements · M10 Polishing | Sin empezar (plan de Jorge del 2026-10-28 en CLAUDE.md §4) |
+| **M6** Guardado y VMU | **Cerrado en emulador (2026-10-28)**: guardar y cargar idénticos a la referencia; la partida en la VMU con su título e icono. Falta la prueba a mano de Jorge |
+| M7 Consola real | Siguiente |
+| M8 Optimización · M9 Enhancements · M10 Polishing | Sin empezar (plan de Jorge del 2026-10-28 en CLAUDE.md §4) |
 
-**Lo que hay hoy (M5 cerrado en emulador):** lo de M2 y M3, más el **audio** (M4: música,
+**Lo que hay hoy (M6 cerrado en emulador):** lo de M5, más el **guardado**: la memory card
+de PS1 va a la VMU de cada mando, archivo por archivo, y la partida se ve en ella con su
+título e icono.
+
+**Hasta M5:** lo de M2 y M3, más el **audio** (M4: música,
 motor y efectos por el AICA, con la reverb en su DSP, y el reloj del juego siguiendo al
 tiempo real) y los **controles** (M5: el mando de Dreamcast hace de DualShock analógico,
 con dirección proporcional, pedales en los gatillos y vibración en el Jump Pack), también
@@ -844,6 +849,21 @@ Detalle en `docs/hitos/M5.md`.
 - **Rendimiento (Flycast):** carrera a dos ~18 fps (56 ms, 24,7 de dibujo) frente a ~21 de un
   jugador con tráfico (47 ms, 14,1 de dibujo). Subirlos va al **M10** (decisión de Jorge).
 
+## M6 — Guardado y VMU (cerrado en emulador 2026-10-28)
+
+Detalle en `docs/hitos/M6.md`.
+
+- **Lo que guarda el juego** (medido en la referencia): un archivo, `BASLUS-00826NFS4`, de 1
+  bloque de PS1 (8 KB), con título «NFS: HIGH STAKES» e icono fijo.
+- **El modelo de tarjeta de la referencia, en C** (`dc/src/host/memcard.c`): imagen `.mcd` de
+  128 KB por ranura. El test diferencial da a cada lado una tarjeta nueva y compara las dos
+  al final: `guardar.txt` y `cargar.txt`, idénticos.
+- **Dreamcast** (`dc/src/platform/dc/vmu.c`, decisiones de Jorge): cada archivo de PS1 es un
+  archivo VMS `NFS4xxxxxxxx` de 18 bloques con el título y el icono del juego; ranura 1 en el
+  puerto A y 2 en el B; la tarjeta se monta de la VMU al arrancar y al ponerla.
+- **Escribir en la VMU tarda ~2 s** (Flycast) y el juego no espera tanto a `MemCardSync`: da
+  la escritura por fallida. El resultado se da enseguida y la VMU se escribe en un hilo.
+
 ---
 
 ## Decisiones vigentes
@@ -982,6 +1002,11 @@ incompleta— los encontró el oráculo, no la lectura del código.
   `rev()`). En ese orden el suelo del showroom va **antes** de su coche; leída en el otro
   sentido, parece al revés. Dos supuestos falsos sobre esto se resolvieron leyendo la
   referencia, no mirando capturas.
+- **El juego no espera dos segundos a la memory card.** Si `MemCardSync` contesta «todavía
+  no» mientras se escribe la VMU, da la escritura por fallida y no hace la segunda. Por eso la
+  VMU se escribe detrás.
+- **Las VMU de Flycast son las de Jorge** (`data/vmu_save_A1.bin`, con partidas de otros
+  juegos): copiar antes de probar y restaurar después.
 - **La consola serie de Flycast es una ventana propia** («Flycast Serial Output»), no la
   salida estándar: en Windows el proceso es de interfaz gráfica y `stdout` no va a
   ninguna parte.
@@ -990,6 +1015,8 @@ incompleta— los encontró el oráculo, no la lectura del código.
 
 ## Abierto
 
+- **Probar el guardado a mano (Jorge):** guardar, apagar y cargar; con una VMU llena; en el
+  puerto B; y ver el archivo en el gestor de memoria de la BIOS.
 - **Probar el mando a mano (Jorge):** menús, carrera, pausa, fin de carrera y vibración, y a
   dos jugadores con dos mandos (`dc/build/dc/disc/nfshs.cdi`, sin guion).
 - **M10:** la herramienta de espectrogramas, la **reverb en estéreo** (hoy entra mono al DSP)

@@ -199,6 +199,7 @@ typedef struct ShowroomCar {
 #define HUD_KEPT_MAX   768u   /* el HUD que se conserva en pausa (~176 cuadros por frame) */
 #define MENU_KEPT_MAX  512u   /* el menu de pausa que se conserva */
 #define DRAW_ENVS_MAX  2048u   /* potencia de 2: es una tabla hash (ver draw_envs) */
+#define MC_CARD (16u * 8192u)  /* una memory card de PS1: 16 bloques de 8 KB */
 
 /* Lo que SetDrawEnv dejo en un paquete de entorno: su recorte y su desplazamiento. */
 typedef struct DrawEnvRec {
@@ -364,10 +365,25 @@ typedef struct GameHost {
     uint64_t dump_frames;
     uint64_t pad_writes;
 
-    /* ---- memory card: comando pendiente ---- */
-    int      mc_pending;
+    /* ---- memory card (M6, memcard.c) ----
+     * La imagen de 128 KB de cada ranura, como la de la referencia, y quien guarda los cambios
+     * (la plataforma: el .mcd en PC, la VMU en Dreamcast; NULL: solo en memoria). `name` es el
+     * archivo que cambio, o NULL si cambio la tarjeta entera (formatear). */
+    uint8_t  mc_card[2][MC_CARD];
+    uint8_t  mc_present[2];
+    int      mc_two_slots;   /* 0: cualquier canal es la ranura 1, como la referencia */
+    int    (*mc_save)(struct GameHost *h, uint32_t slot, const char *name);
+    /* Opcionales (Dreamcast): mirar si la tarjeta de la ranura se puso o se quito, y si
+     * todavia hay escrituras en curso (MemCardSync espera); `mc_async_error` lo pone una que
+     * fallo. */
+    void   (*mc_probe)(struct GameHost *h, uint32_t slot);
+    int    (*mc_busy)(struct GameHost *h);
+    volatile int mc_async_error;
+    uint32_t mc_limit[2];    /* bloques de PS1 que caben (15; en Dreamcast, segun la VMU) */
+    void    *mc_user;
+    int      mc_pending;     /* el comando que espera a MemCardSync */
     uint32_t mc_cmd, mc_result;
-    uint64_t mc_syncs, mc_writes_refused;
+    uint64_t mc_syncs, mc_writes, mc_saves, mc_save_errors;
 
     /* ---- videos del front end ---- */
     uint64_t video_calls;
@@ -540,6 +556,15 @@ int  host_gpu_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 int  host_file_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 int  host_game_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 int  host_memcard_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
+/* Una tarjeta de 128 KB vacia y formateada, y el primer bloque del archivo `name` (-1 si no
+ * esta). */
+void memcard_format(uint8_t *card);
+int  memcard_find(uint8_t *card, const char *name);
+/* Da de alta el archivo `name` de `bloques` bloques con `datos` (bloques * 8 KB; NULL: a
+ * cero), como MemCardCreateFile; 0 si no cabe. Y copia sus bloques a `out`; devuelve
+ * cuantos (0 si no esta o no caben en max_bloques). */
+int  memcard_put(uint8_t *card, const char *name, uint32_t bloques, const uint8_t *datos);
+uint32_t memcard_get(uint8_t *card, const char *name, uint8_t *out, uint32_t max_bloques);
 int  host_video_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret);
 /* Abre un archivo del disco extraido (sin leerlo) y da su tamano; 0 si no esta. */
 int  host_disk_open(GameHost *h, const char *name, FILE **out, uint32_t *size);

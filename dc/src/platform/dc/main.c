@@ -19,6 +19,7 @@
 #include "spu.h"
 #include "aica_spu.h"
 #include "mando.h"
+#include "vmu.h"
 #include "render.h"
 #include "video.h"
 #include "movie.h"
@@ -162,6 +163,14 @@ static void *diag_thread(void *arg)
                    (unsigned long)((host.clock - host.real_clock0) * 1000u / 1920u),
                    (unsigned long)((timer_us_gettime64() - host.real_us0) / 1000u),
                    (unsigned long)(host.real_dropped * 1000u / 1920u));
+        {
+            uint32_t ve, vf, vms;
+
+            tarjeta_vmu_cifras(&ve, &vf, &vms);
+            if (ve != 0u || vf != 0u)
+                printf("        VMU: %lu escrituras (%lu fallidas), la ultima en %lu ms\n",
+                       (unsigned long)ve, (unsigned long)vf, (unsigned long)vms);
+        }
         printf("        archivos %lu ok / %lu fallidos  BIGF %lu ok / %lu fallidos\n",
                (unsigned long)host.files.opens, (unsigned long)host.files.opens_failed,
                (unsigned long)host.files.mounts_ok,
@@ -341,6 +350,8 @@ int main(int argc, char **argv)
     /* Como la referencia por omision: marca pistas y coches como disponibles. Sin esto
      * no hay acceso a carreras (ver docs/hitos/M1a.md). */
     host.unlock = 1;
+    /* M6: las ranuras de la memory card sobre las VMU de los puertos A y B */
+    tarjeta_vmu_init(&host);
     /* El cono de visibilidad de los coches: 1 es el del original (4:3 de PS1). La
      * referencia usa 2, pero eso es una mejora suya y en el port va apagada
      * (docs/hitos/M1a.md). */

@@ -10,6 +10,7 @@ de escribir** antes de comparar nada.
                                        [--keep]
 """
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -72,6 +73,8 @@ def main(argv):
         ticks = argv[argv.index('--ticks') + 1]
     if '--solo' in argv:
         solo = argv[argv.index('--solo') + 1]
+    # --tarjeta FILE: los dos lados empiezan con esa memory card (una copia cada uno)
+    tarjeta = argv[argv.index('--tarjeta') + 1] if '--tarjeta' in argv else None
 
     os.makedirs(OUT, exist_ok=True)
     c_dump = os.path.join(OUT, 'c.d1')
@@ -84,6 +87,16 @@ def main(argv):
     # ninguna, asi que con un guion de menus los dos lados salen vacios y coinciden.
     c_view = os.path.join(OUT, 'c.view')
     rust_view = os.path.join(OUT, 'rust.view')
+    # La memory card (M6): los dos lados empiezan con una tarjeta nueva y al final se comparan
+    # las dos imagenes. Sin esto la referencia usaria memcard.mcd junto a gamedata/, que
+    # sobrevive de una ejecucion a otra.
+    c_mcd = os.path.join(OUT, 'c.mcd')
+    rust_mcd = os.path.join(OUT, 'rust.mcd')
+    for f in (c_mcd, rust_mcd):
+        if os.path.exists(f) and solo is None:
+            os.remove(f)
+        if tarjeta is not None:
+            shutil.copyfile(tarjeta, f)
     t0 = time.time() - 1          # margen por la resolucion del mtime
 
     if solo != 'rust':
@@ -94,7 +107,7 @@ def main(argv):
         # sin esto no existe el escenario de carrera que pide el criterio de M1a. En el
         # port la bandera esta apagada por defecto (ver dc/src/host/unlock.c).
         run([C_EXE, '--script', script, '--ticks', ticks, '--unlock', '--dump', c_dump,
-             '--overlaydump', c_ovl, '--viewdump', c_view,
+             '--overlaydump', c_ovl, '--viewdump', c_view, '--memcard', c_mcd,
              '--carcone', '2'],
             {}, os.path.join(OUT, 'c.log'), 'C')
         n = fresh(c_dump, t0, 'C')
@@ -107,6 +120,7 @@ def main(argv):
              'NFSHS_DIFF_OUT': rust_dump,
              'NFSHS_DIFF_OVERLAY': rust_ovl,
              'NFSHS_DIFF_VIEW': rust_view,
+             'NFSHS_MEMCARD': rust_mcd,
              'NFSHS_FRAMESRC': '1',
              'TICKS': ticks},
             os.path.join(OUT, 'rust.log'), 'Rust')
@@ -127,7 +141,29 @@ def main(argv):
     cmpview = os.path.join(ROOT, 'dc', 'test', 'diff', 'cmpview.py')
     rc3 = subprocess.run([sys.executable, '-I', cmpview, c_view, rust_view],
                          cwd=ROOT).returncode
-    return rc or rc2 or rc3
+    print('\nmemory card:')
+    rc4 = cmp_tarjetas(c_mcd, rust_mcd)
+    return rc or rc2 or rc3 or rc4
+
+
+def cmp_tarjetas(c_mcd, rust_mcd):
+    """Las dos imagenes de la tarjeta al terminar: iguales byte a byte, o ninguna escrita."""
+    hay = [os.path.exists(f) for f in (c_mcd, rust_mcd)]
+    if not any(hay):
+        print('  ningun lado escribio en la tarjeta')
+        return 0
+    if not all(hay):
+        print(f'FALLO: solo escribio en la tarjeta {"el lado C" if hay[0] else "la referencia"}')
+        return 1
+    a, b = open(c_mcd, 'rb').read(), open(rust_mcd, 'rb').read()
+    if a != b:
+        k = next((i for i in range(min(len(a), len(b))) if a[i] != b[i]), min(len(a), len(b)))
+        print(f'FALLO: las tarjetas difieren desde el byte {k:#x} (bloque {k // 8192}, '
+              f'marco {k // 128})')
+        return 1
+    usados = sum(1 for i in range(1, 16) if a[128 * i] in (0x51, 0x52, 0x53))
+    print(f'OK: tarjetas identicas ({usados} bloques usados)')
+    return 0
 
 
 sys.exit(main(sys.argv[1:]))

@@ -48,6 +48,37 @@ static void sndapi_enter(Cpu *c, uint32_t f)
             (unsigned)c->r[4], (unsigned)c->r[5], (unsigned)c->r[6], (unsigned)c->r[7]);
 }
 
+/* --memcard FILE (M6): la ranura 1 es esa imagen .mcd, como NFSHS_MEMCARD de la referencia:
+ * se carga si es una tarjeta de 128 KB (si no, una vacia) y cada cambio la reescribe entera. */
+static int pc_memcard_save(GameHost *h, uint32_t slot, const char *name)
+{
+    FILE *f = fopen((const char *)h->mc_user, "wb");
+    int ok;
+
+    (void)name;
+    if (f == NULL || slot != 0u)
+        return f != NULL ? (fclose(f), 0) : 0;
+    ok = fwrite(h->mc_card[0], 1, MC_CARD, f) == MC_CARD;
+    return (fclose(f) == 0) && ok;
+}
+
+static void pc_memcard(GameHost *h, const char *path)
+{
+    FILE *f = fopen(path, "rb");
+
+    if (f != NULL) {
+        size_t n = fread(h->mc_card[0], 1, MC_CARD, f);
+
+        fclose(f);
+        if (n != MC_CARD || h->mc_card[0][0] != 'M' || h->mc_card[0][1] != 'C') {
+            fprintf(stderr, "%s: no es una memory card de 128 KB; uso una vacia\n", path);
+            memcard_format(h->mc_card[0]);
+        }
+    }
+    h->mc_user = (void *)path;
+    h->mc_save = pc_memcard_save;
+}
+
 static uint64_t shot_frame;
 static const char *shot_file;
 static uint64_t track_frame;
@@ -159,6 +190,8 @@ static void usage(const char *argv0)
             "  --textlog        el texto en pantalla por frame (que pantalla es)\n"
             "  --unlock         pistas y coches disponibles, como la referencia\n"
             "  --script FILE    entrada guionizada (ver dc/test/diff/scripts/)\n"
+            "  --memcard FILE   la memory card de la ranura 1, imagen .mcd de 128 KB (como\n"
+            "                   NFSHS_MEMCARD de la referencia); sin ella, solo en memoria\n"
             "  --dump FILE      volcado del estado por frame (test diferencial)\n",
             argv0, (unsigned)ADDR_MAIN);
 }
@@ -174,6 +207,7 @@ int main(int argc, char **argv)
     uint32_t cone = 1u;   /* el cono de visibilidad del original */
     const char *tex_path = NULL;
     const char *counts_path = NULL;
+    const char *mc_path = NULL;
     uint64_t win_lo = 0, win_hi = 0, ram_at_call = 0, frame_dump_at = 0;
     const char *frame_dump_path = NULL;
     const char *ram_at_path = NULL;
@@ -207,6 +241,8 @@ int main(int argc, char **argv)
             cone = (uint32_t)strtoul(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "--unlock"))
             unlock = 1;
+        else if (!strcmp(argv[i], "--memcard") && i + 1 < argc)
+            mc_path = argv[++i];
         else if (!strcmp(argv[i], "--filelog"))
             filelog = 1;
         else if (!strcmp(argv[i], "--spulog"))
@@ -287,6 +323,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "no pude leer la lista HLE %s\n", hle_path);
         return 1;
     }
+    if (mc_path != NULL)
+        pc_memcard(&host, mc_path);
     host.survey = survey;
     host.idlelog = idlelog;
     host.textlog = textlog;

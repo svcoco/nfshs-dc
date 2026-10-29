@@ -1,0 +1,22 @@
+# M6: guardar la partida en la memory card desde los menus, en unidades de FRAME.
+# Navegacion (derivada con --textlog y screens.py):
+#   [game setup]       arranca en "game options"      -> aceptar
+#   [game options]     audio, display, controllers, memory card, ... -> DOWN x3 -> aceptar
+#   [memory card slot 1] save / (cargar)              -> UP -> aceptar: guarda
+# Con la tarjeta vacia de la referencia crea BASLUS-00826NFS4, 1 bloque (docs/hitos/M6.md).
+0 -
+60 CROSS
+66 -
+270 DOWN
+276 -
+290 DOWN
+296 -
+310 DOWN
+316 -
+340 CROSS
+346 -
+530 UP
+536 -
+560 CROSS
+566 -
+#end 1200

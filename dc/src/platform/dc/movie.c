@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "vmu_fps.h"
 #include "host.h"
 #include "mdec.h"
 #include "movie.h"
@@ -257,6 +258,7 @@ uint16_t movie_play(GameHost *h, const char *name)
     /* con un guion de entrada manda el guion, y los guiones cuentan con que no hay video */
     if (h->pad_steps_n != 0u)
         return 0;
+    vmu_fps_punto(PUNTO_PELICULA);
     snprintf(ruta, sizeof ruta, "%s/MOVIES/%s", h->gamedata, name);
     p = calloc(1, sizeof *p);
     if (p == NULL)

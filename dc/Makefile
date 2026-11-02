@@ -14,6 +14,9 @@ BUILD  := build
 CC       := gcc
 CFLAGS   ?= -std=c11 -O2 -fwrapv -fno-strict-aliasing -Wall -Wextra
 CPPFLAGS += -Isrc/ps1rt -Isrc/render -I$(GEN)
+ifdef SERIE
+CPPFLAGS += -DNFSHS_SERIE
+endif
 # el codigo generado dispara estos avisos por construccion, no son problemas reales
 GENFLAGS := -Wno-unused-label -Wno-unused-variable -Wno-unused-but-set-variable             -Wno-unused-value -Wno-unused-parameter
 

@@ -20,6 +20,7 @@
 #include "aica_spu.h"
 #include "mando.h"
 #include "vmu.h"
+#include "vmu_fps.h"
 #include "render.h"
 #include "video.h"
 #include "movie.h"
@@ -56,6 +57,7 @@ static void on_frame(GameHost *h)
     /* Con un guion cargado manda el guion: si el mando se leyera aqui, entre paso y
      * paso del guion dejaria los botones a 0 y se perderia el "mantener hasta la
      * linea siguiente" (pad_write solo escribe en los frames que tienen paso). */
+    vmu_fps_punto(h->mode == HOST_RACE ? PUNTO_CARRERA : PUNTO_MENUS);
     if (h->mode == HOST_RACE && race_frame0 == 0u) {
         race_frame0 = h->frames;
         race_ms0 = timer_ms_gettime64() - t_start;
@@ -402,6 +404,11 @@ int main(int argc, char **argv)
 
     t_start = timer_ms_gettime64();
     thd_create(1, diag_thread, NULL);
+    vmu_fps_init(&host);
+#ifndef NFSHS_SERIE
+    /* M7: sin mensajes por el serie (cuestan rendimiento). make dc SERIE=1 los deja. */
+    dbgio_disable();
+#endif
     if (setjmp(cpu.stop_jmp) == 0) {
         cpu.stop_armed = 1;
         ps1_call(&cpu, ADDR_MAIN);

@@ -694,7 +694,13 @@ int render_init(void)
         .dma_enabled = 0,
         .fsaa_enabled = 0,
         .autosort_disabled = 1,   /* manda el orden de envio: es un overlay 2D */
-        .opb_overflow_count = 0
+        /* Cada tile de 32x32 guarda sus poligonos en un bloque de 16 palabras (opb_sizes). Si
+         * en un tile caen mas (un coche son ~1 200 triangulos, con el interior y la
+         * carroceria superpuestos, en muy pocos tiles), el TA los DESCARTA salvo que haya una
+         * zona de desbordamiento: en consola real faltaban bloques de 1-2 tiles en los
+         * coches, con el interior a la vista. Flycast no modela ese limite y lo dibuja todo,
+         * por eso no se vio antes. 3 es el valor por omision de KOS (unos 115 KB de VRAM). */
+        .opb_overflow_count = 3
     };
 
     if (pvr_init(&p) < 0)
@@ -703,6 +709,10 @@ int render_init(void)
     if (tex_vram == NULL)
         return 0;
     pvr_set_bg_color(0.0f, 0.0f, 0.0f);
+    /* VRAM del PVR libre tras el buffer de vertices, los bins y la cache de texturas: lo que
+     * queda para las texturas de los coches y la pista */
+    printf("PVR: %lu KB de VRAM libres para texturas\n",
+           (unsigned long)(pvr_mem_available() / 1024u));
     return 1;
 }
 

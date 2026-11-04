@@ -1416,6 +1416,10 @@ void render_frame(GameHost *h)
      * convertido. Subirlo todo (hasta 1 MB) valia mientras convertir era raro (63 veces en
      * el front end); con el video wall de M3 la VRAM cambia 15 veces por segundo. Los
      * extremos se alinean a 32 bytes para el store queue. */
+    /* El PVR renderiza el frame anterior mientras la CPU sigue: hay que esperar a que acabe
+     * ANTES de escribir en su VRAM, o las texturas que se estan leyendo salen corruptas
+     * (en hardware real; Flycast renderiza de golpe y no lo muestra). */
+    pvr_wait_ready();
     if (h->texcache.conversiones != subidas_vistas) {
         uint32_t ini = h->texcache.sube_ini & ~15u, fin = (h->texcache.sube_fin + 15u) & ~15u;
 

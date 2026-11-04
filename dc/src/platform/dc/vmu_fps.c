@@ -104,20 +104,30 @@ static void *hilo(void *arg)
     uint8_t bm[ANCHO_B * ALTO];
     uint64_t t0 = timer_ms_gettime64();
     uint64_t f0 = s_host->frames;
+    int v0 = pvr_get_vbl_count();
 
     (void)arg;
     while (s_corriendo) {
         uint64_t t1, f1;
+        int v1;
 
         thd_sleep(500);
         t1 = timer_ms_gettime64();
         f1 = s_host->frames;
-        if (t1 > t0) {
+        v1 = pvr_get_vbl_count();
+        /* Los fps se miden contra los vblank del PVR (60 Hz en 480p y 480i), que no dependen
+         * del reloj del hilo; sin PVR, contra el reloj. */
+        if (v1 > v0)
+            dibuja(bm, (unsigned)((f1 - f0) * 600u / (unsigned)(v1 - v0)));
+        else if (t1 > t0)
             dibuja(bm, (unsigned)((f1 - f0) * 10000u / (t1 - t0)));
-            pinta(bm);
-        }
+        else
+            goto sigue;
+        pinta(bm);
+sigue:
         t0 = t1;
         f0 = f1;
+        v0 = v1;
     }
     return NULL;
 }

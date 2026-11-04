@@ -14,6 +14,8 @@ uint32_t  render_texcap(void);
 void render_frame(struct GameHost *h);
 /* Para el informe. */
 uint64_t render_frames(void);
+/* Microsegundos acumulados esperando a que el PVR acabe el frame anterior. */
+uint64_t render_espera_us(void);
 uint64_t render_quads(void);
 uint64_t render_glow_quads(void);
 uint64_t render_refl_tris(void);

@@ -17,6 +17,7 @@
 #include <dc/maple.h>
 #include <dc/maple/vmu.h>
 
+#include "render.h"
 #include "vmu_fps.h"
 
 #define ANCHO_B 6u            /* bytes por fila (48 px) */
@@ -31,6 +32,10 @@ static const uint8_t cifra[10][5] = {
 static const uint8_t letra_f[5] = {7, 4, 6, 4, 4};
 static const uint8_t letra_p[5] = {7, 5, 7, 4, 4};
 static const uint8_t letra_s[5] = {7, 4, 7, 1, 7};
+
+static const uint8_t letra_l[5] = {4, 4, 4, 4, 7};
+static const uint8_t letra_d[5] = {6, 5, 5, 5, 6};
+static const uint8_t letra_e[5] = {7, 4, 6, 4, 7};
 
 static const GameHost *s_host;
 static volatile int s_corriendo = 1;
@@ -90,6 +95,33 @@ static void dibuja(uint8_t *bm, unsigned deci)
     glifo(bm, cifra[d[2]], x, 12u, 3u);
 }
 
+/* Pagina de medicion: ms por frame de L = logica del juego, D = dibujo (CPU: transformacion,
+ * texturas y envio al PVR) y E = espera al PVR. Si E domina, manda la GPU; si no, la CPU.
+ * Las tres se dan en decimas de ms (cada una con tres cifras, 99.9 de tope). */
+static void dibuja_ms(uint8_t *bm, unsigned l, unsigned d, unsigned e)
+{
+    const uint8_t *letra[3] = { letra_l, letra_d, letra_e };
+    unsigned v[3] = { l, d, e };
+    unsigned f, y, x, n;
+
+    memset(bm, 0, ANCHO_B * ALTO);
+    for (f = 0; f < 3u; f++) {
+        y = f * 11u;
+        n = v[f] > 999u ? 999u : v[f];
+        glifo(bm, letra[f], 2u, y, 2u);
+        x = 14u;
+        if (n >= 100u)
+            glifo(bm, cifra[n / 100u], x, y, 2u);
+        x += 8u;
+        glifo(bm, cifra[(n / 10u) % 10u], x, y, 2u);
+        x += 8u;
+        punto(bm, x, y + 8u); punto(bm, x + 1u, y + 8u);
+        punto(bm, x, y + 9u); punto(bm, x + 1u, y + 9u);
+        x += 4u;
+        glifo(bm, cifra[n % 10u], x, y, 2u);
+    }
+}
+
 static void pinta(const uint8_t *bm)
 {
     maple_device_t *dev;
@@ -105,6 +137,8 @@ static void *hilo(void *arg)
     uint64_t t0 = timer_ms_gettime64();
     uint64_t f0 = s_host->frames;
     int v0 = pvr_get_vbl_count();
+    uint64_t dib0 = s_host->tex_us + s_host->draw_us, esp0 = render_espera_us();
+    unsigned ciclo = 0;
 
     (void)arg;
     while (s_corriendo) {
@@ -115,9 +149,21 @@ static void *hilo(void *arg)
         t1 = timer_ms_gettime64();
         f1 = s_host->frames;
         v1 = pvr_get_vbl_count();
+        ciclo++;
         /* Los fps se miden contra los vblank del PVR (60 Hz en 480p y 480i), que no dependen
          * del reloj del hilo; sin PVR, contra el reloj. */
-        if (v1 > v0)
+        if (f1 > f0 && ((ciclo / 4u) & 1u) != 0u && t1 > t0) {
+            /* pagina B (2 s de cada 4): costes por frame en decimas de ms */
+            uint64_t df = f1 - f0, dib1 = s_host->tex_us + s_host->draw_us, esp1 = render_espera_us();
+            uint64_t per = (t1 - t0) * 10u / df;            /* periodo, decimas de ms */
+            uint64_t d = (dib1 - dib0) / (df * 100u);       /* dibujo + texturas + espera */
+            uint64_t e = (esp1 - esp0) / (df * 100u);
+
+            dib0 = dib1;
+            esp0 = esp1;
+            dibuja_ms(bm, (unsigned)(per > d ? per - d : 0u), (unsigned)(d > e ? d - e : 0u),
+                      (unsigned)e);
+        } else if (v1 > v0)
             dibuja(bm, (unsigned)((f1 - f0) * 600u / (unsigned)(v1 - v0)));
         else if (t1 > t0)
             dibuja(bm, (unsigned)((f1 - f0) * 10000u / (t1 - t0)));
@@ -125,6 +171,10 @@ static void *hilo(void *arg)
             goto sigue;
         pinta(bm);
 sigue:
+        if (((ciclo / 4u) & 1u) == 0u) {     /* en la pagina A los acumulados siguen el paso */
+            dib0 = s_host->tex_us + s_host->draw_us;
+            esp0 = render_espera_us();
+        }
         t0 = t1;
         f0 = f1;
         v0 = v1;

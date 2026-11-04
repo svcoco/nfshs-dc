@@ -40,6 +40,7 @@ static uint16_t  tex_staging[TEX_TEXELS];
 static pvr_ptr_t tex_vram;
 static uint64_t  subidas_vistas = (uint64_t)-1;   /* para saber cuando resubir */
 
+static uint64_t s_espera_us;           /* tiempo esperando al PVR (pvr_wait_ready) */
 static uint64_t s_frames, s_quads, s_strips, s_quads_destellos;
 
 /* ---- la pista (M2b paso 3) ----
@@ -674,6 +675,7 @@ static void pista_dibuja(GameHost *h)
 uint16_t *render_texbuf(void)   { return tex_staging; }
 uint32_t  render_texcap(void)   { return TEX_TEXELS; }
 uint64_t  render_frames(void)   { return s_frames; }
+uint64_t  render_espera_us(void) { return s_espera_us; }
 uint64_t  render_quads(void)    { return s_quads; }
 uint64_t  render_glow_quads(void) { return s_quads_destellos; }
 
@@ -1419,7 +1421,12 @@ void render_frame(GameHost *h)
     /* El PVR renderiza el frame anterior mientras la CPU sigue: hay que esperar a que acabe
      * ANTES de escribir en su VRAM, o las texturas que se estan leyendo salen corruptas
      * (en hardware real; Flycast renderiza de golpe y no lo muestra). */
-    pvr_wait_ready();
+    {
+        uint64_t e0 = timer_us_gettime64();
+
+        pvr_wait_ready();
+        s_espera_us += timer_us_gettime64() - e0;
+    }
     if (h->texcache.conversiones != subidas_vistas) {
         uint32_t ini = h->texcache.sube_ini & ~15u, fin = (h->texcache.sube_fin + 15u) & ~15u;
 

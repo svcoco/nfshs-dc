@@ -691,7 +691,7 @@ int render_init(void)
          * (los huecos entre las copas de los arboles) y la lista opaca no hace prueba de
          * alfa, asi que esos texeles salian NEGROS y dejaban un fleco en cada silueta. */
         .opb_sizes = { PVR_BINSIZE_0, PVR_BINSIZE_0, PVR_BINSIZE_16,
-                       PVR_BINSIZE_0, PVR_BINSIZE_16 },
+                       PVR_BINSIZE_0, PVR_BINSIZE_32 },
         .vertex_buf_size = 512 * 1024,
         .dma_enabled = 0,
         .fsaa_enabled = 0,
@@ -701,7 +701,11 @@ int render_init(void)
          * carroceria superpuestos, en muy pocos tiles), el TA los DESCARTA salvo que haya una
          * zona de desbordamiento: en consola real faltaban bloques de 1-2 tiles en los
          * coches, con el interior a la vista. Flycast no modela ese limite y lo dibuja todo,
-         * por eso no se vio antes. 3 es el valor por omision de KOS (unos 115 KB de VRAM). */
+         * por eso no se vio antes. 3 es el valor por omision de KOS (unos 115 KB de VRAM).
+         * La lista PT lleva TODO el mundo (pista, objetos y cielo), y en los tiles del horizonte
+         * caen muchos mas poligonos que en los demas: su bloque es de 32 palabras (con el
+         * desbordamiento, 128 poligonos por tile). Hipotesis: lo que faltaba al fondo (montanas
+         * y el edificio lejano) eran poligonos descartados por llenarse esos tiles. */
         .opb_overflow_count = 3
     };
 

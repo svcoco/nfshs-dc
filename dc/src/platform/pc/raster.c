@@ -523,6 +523,8 @@ static void raster_vista(const GameHost *h, uint32_t vi, const Track *track,
     objects_draw(track, vc->objects, vc->objects_n, &vista,
                  h->light_ok ? h->light_table : NULL,
                  sw, sh, emite, P, &ost);
+    printf("  pista: %u triangulos, %u de espaldas; objetos: %u, %u de espaldas\n", (unsigned)st.quads_out,
+           (unsigned)st.espalda, (unsigned)ost.quads_out, (unsigned)ost.espalda);
     /* Los coches: cada uno con su modelo horneado, que se carga la primera vez que
      * aparece su codigo. Su atlas es otro, asi que se cambia de textura. */
     {

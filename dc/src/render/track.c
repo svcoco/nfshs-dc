@@ -280,15 +280,53 @@ static uint32_t recorta_borde(const View *vw, const Cv *in, uint32_t n, Cv *out,
     return m;
 }
 
+/* La banda de guarda: el PVR no recorta y sus coordenadas de pantalla tienen un alcance
+ * finito. Sin este recorte, un vertice recien cortado por el plano cercano sale a decenas de
+ * miles de pixeles (la banda del horizonte tiene radio 32000: 32000 * 190 / 0,25 = 2,4e7).
+ * Una pantalla de margen a cada lado es de sobra: lo que cae fuera de la pantalla no se pinta. */
+#define GUARD_X0 (-640.0f)
+#define GUARD_X1 1280.0f
+#define GUARD_Y0 (-480.0f)
+#define GUARD_Y1 960.0f
+
+/* Distancia a un borde de la banda de guarda en espacio de camara (>= 0 dentro). Como en
+ * borde_y: son planos que pasan por la camara. */
+static float borde_guarda(const View *vw, const Cv *c, uint32_t b)
+{
+    switch (b) {
+    case 0:  return c->x * vw->focal * vw->kx + (vw->ox - GUARD_X0) * c->z;
+    case 1:  return (GUARD_X1 - vw->ox) * c->z - c->x * vw->focal * vw->kx;
+    case 2:  return (vw->oy - GUARD_Y0) * c->z - c->y * vw->focal * vw->ky;
+    default: return (GUARD_Y1 - vw->oy) * c->z + c->y * vw->focal * vw->ky;
+    }
+}
+
+static uint32_t recorta_guarda(const View *vw, const Cv *in, uint32_t n, Cv *out, uint32_t b)
+{
+    uint32_t i, m = 0;
+
+    for (i = 0; i < n; i++) {
+        const Cv *p = &in[i], *q = &in[(i + 1u) % n];
+        float dp = borde_guarda(vw, p, b), dq = borde_guarda(vw, q, b);
+
+        if (dp >= 0.0f)
+            out[m++] = *p;
+        if ((dp >= 0.0f) != (dq >= 0.0f))
+            mezcla(&out[m++], p, q, dp / (dp - dq));
+    }
+    return m;
+}
+
 /* Recorta un triangulo contra el plano cercano y lo emite. El PVR no recorta: un vertice
  * con z <= 0 se proyectaria detras de la camara y saldria un triangulo gigante al reves.
- * Cortar da 0, 3 o 4 vertices; a pantalla partida, los bordes de la franja dan hasta 6. */
+ * Cortar da 0, 3 o 4 vertices; a pantalla partida, los bordes de la franja dan hasta 6, y
+ * cada borde de la banda de guarda anade como mucho uno mas. */
 void triangulo(const View *vw, const Cv *tri, const TrackMat *m,
                TrackEmit emit, void *user, TrackStats *st)
 {
-    Cv dentro[8], otro[8];
+    Cv dentro[12], otro[12];
     const Cv *pol = tri;
-    TrackVert out[8];
+    TrackVert out[12];
     uint32_t n = 0, i, k;
     int cuantos = 0, cortado = 0;
 
@@ -335,6 +373,26 @@ void triangulo(const View *vw, const Cv *tri, const TrackMat *m,
                     st->clipped++;
                 return;
             }
+            pol = dentro;
+            cortado = 1;
+        }
+    }
+    {
+        /* lo normal es que todo caiga dentro: entonces solo cuesta estas comparaciones */
+        uint32_t b, fuera = 0;
+
+        for (k = 0; k < n; k++)
+            for (b = 0; b < 4u; b++)
+                if (borde_guarda(vw, &pol[k], b) < 0.0f)
+                    fuera |= 1u << b;
+        for (b = 0; b < 4u && fuera != 0u; b++) {
+            if ((fuera & (1u << b)) == 0u)
+                continue;
+            n = recorta_guarda(vw, pol, n, otro, b);
+            if (n < 3u)
+                return;
+            for (k = 0; k < n; k++)
+                dentro[k] = otro[k];
             pol = dentro;
             cortado = 1;
         }
@@ -403,12 +461,29 @@ static uint32_t sombra_haz(const NightBeam *b, const float w[3], uint32_t s)
     return b->table[(s & 0xFFu) * 16u + (k & 15u)];
 }
 
+/* Si el triangulo mira a la camara. La pista y los objetos fijos son de UNA cara, como en
+ * PS1 (el NCLIP de DrawW_DrawQuad) y como en la referencia (FrontFace::Ccw con Face::Back):
+ * sin esto se ven las espaldas de muros y laderas, que tapan lo que hay detras, y los rotulos
+ * (un cuadro delante y otro detras, coplanares) pelean en el Z. En espacio de camara, con la
+ * X a la derecha, la Y arriba y la Z adelante, el triangulo gira a izquierdas en pantalla si
+ * p0 . (p1 x p2) > 0; es la cara del plano en que esta la camara, asi que vale tambien para
+ * los que cruzan el plano cercano. */
+static int de_frente(const Cv *a, const Cv *b, const Cv *c)
+{
+    float nx = b->y * c->z - b->z * c->y;
+    float ny = b->z * c->x - b->x * c->z;
+    float nz = b->x * c->y - b->y * c->x;
+
+    return a->x * nx + a->y * ny + a->z * nz > 0.0f;
+}
+
 /* Dibuja una malla: `verts` es su charco y `quads` sus caras. */
 /* Dibuja una malla colocada en `o` (metros, espacio de PS1) y, si `mat` no es NULL,
  * girada y escalada por el (3x3 por filas, ya transpuesta por quien llama). La pista usa
- * `mat` NULL; los objetos del escenario lo usan siempre. */
+ * `mat` NULL; los objetos del escenario lo usan siempre. `dos_caras`: sin la prueba de cara
+ * (los billboard; los materiales con el indicador 1 tampoco la pasan). */
 static void malla(const Track *t, const View *vw, const uint32_t *light,
-                  const float o[3], const float *mat,
+                  const float o[3], const float *mat, int dos_caras,
                   const int16_t *verts, uint32_t nv,
                   const uint16_t *quads, uint32_t nq,
                   TrackEmit emit, void *user, TrackStats *st)
@@ -439,6 +514,7 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
         Cv cv[4];
         Cv tri[3];
         uint32_t k;
+        int dos;
         float au = (float)t->atlas_w, av = (float)t->atlas_h;
         /* las cuatro esquinas del rectangulo del material, en el atlas */
         float cu[4], cvv[4];
@@ -499,10 +575,17 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
         /* Los vertices del cuadro van en orden CICLICO alrededor de el, no en zigzag,
          * asi que se parte en (0,1,2) y (0,2,3). Partirlo como una tira deja huecos
          * triangulares por toda la pista. */
+        dos = dos_caras || (m->flags & 1u) != 0u;
         tri[0] = cv[0]; tri[1] = cv[1]; tri[2] = cv[2];
-        triangulo(vw, tri, m, emit, user, st);
+        if (dos || de_frente(&tri[0], &tri[1], &tri[2]))
+            triangulo(vw, tri, m, emit, user, st);
+        else if (st != NULL)
+            st->espalda++;
         tri[0] = cv[0]; tri[1] = cv[2]; tri[2] = cv[3];
-        triangulo(vw, tri, m, emit, user, st);
+        if (dos || de_frente(&tri[0], &tri[1], &tri[2]))
+            triangulo(vw, tri, m, emit, user, st);
+        else if (st != NULL)
+            st->espalda++;
     }
 }
 
@@ -542,13 +625,13 @@ void track_draw(const Track *t, const struct RaceView *view, const uint32_t *lig
         og[1] = (float)b->origin[1] / 64.0f;
         og[2] = (float)b->origin[2] / 64.0f;
         if ((flags & CHUNK_GROUND) != 0u) {
-            malla(t, &vw, light, og, NULL,
+            malla(t, &vw, light, og, NULL, 0,
                   t->vert + (size_t)b->off[TB_GROUND_VERTS] * 4u,
                   b->n[TB_GROUND_VERTS],
                   t->quad + (size_t)b->off[suelo] * 5u, b->n[suelo],
                   emit, user, st);
             /* las superficies de detalle van siempre con el suelo */
-            malla(t, &vw, light, og, NULL,
+            malla(t, &vw, light, og, NULL, 0,
                   t->vert + (size_t)b->off[TB_DETAIL_VERTS] * 4u,
                   b->n[TB_DETAIL_VERTS],
                   t->quad + (size_t)b->off[TB_DETAIL_QUADS] * 5u,
@@ -557,7 +640,7 @@ void track_draw(const Track *t, const struct RaceView *view, const uint32_t *lig
         }
         /* las lineas pintadas, solo si el juego las pide para este trozo (indicador 4) */
         if ((flags & CHUNK_LINES) != 0u)
-            malla(t, &vw, light, og, NULL,
+            malla(t, &vw, light, og, NULL, 0,
                   t->vert + (size_t)b->off[TB_LINE_VERTS] * 4u,
                   b->n[TB_LINE_VERTS],
                   t->quad + (size_t)b->off[TB_LINE_QUADS] * 5u,
@@ -641,7 +724,7 @@ void objects_draw(const Track *t, const struct ObjectDraw *obj, uint32_t n,
                 mat[k * 3u + 2u] = (float)o->matrix[k + 6u] / 65536.0f;
             }
         }
-        malla(t, &vw, light, pos, mat,
+        malla(t, &vw, light, pos, mat, o->billboard != 0,
               t->mvert + (size_t)m->vert_off * 4u, m->vert_n,
               t->mquad + (size_t)m->quad_off * 5u, m->quad_n,
               emit, user, st);

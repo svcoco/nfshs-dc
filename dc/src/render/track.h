@@ -123,6 +123,7 @@ typedef struct {
     uint32_t quads_out;       /* triangulos emitidos */
     uint32_t clipped;         /* triangulos que cruzaban el plano cercano */
     uint32_t behind;          /* triangulos enteros detras de la camara */
+    uint32_t espalda;         /* triangulos descartados por mirar al otro lado */
 } TrackStats;
 
 /* Carga un .TRK. Devuelve 0 si no pudo (y deja `t` a cero). */

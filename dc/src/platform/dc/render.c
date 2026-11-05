@@ -239,7 +239,11 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
             pv.flags = PVR_CMD_VERTEX_EOL;
         pv.x = v[i].x;
         pv.y = v[i].y;
-        pv.z = v[i].z * s_zmul + s_zadd;
+        /* El cielo va al fondo: en la lista punch-through el PVR IGNORA "no escribir Z", asi que
+         * la cupula (radio 100) escribia su 1/w y tapaba todo lo que hubiera mas alla de 100 m:
+         * las colinas, los arboles lejanos y los edificios, que aparecian de golpe al acercarse.
+         * Flycast hace lo mismo; el raster de PC, no. */
+        pv.z = s_fase == FASE_CIELO ? 0.0001f : v[i].z * s_zmul + s_zadd;
         pv.u = v[i].u * s_umul + s_uadd;
         pv.v = v[i].v * s_vmul + s_vadd;
         pv.argb = v[i].argb;

@@ -150,6 +150,24 @@ void track_free(Track *t)
     memset(t, 0, sizeof(*t));
 }
 
+/* El atlas es el ultimo tramo del archivo, asi que basta con encoger el bloque: realloc no
+ * mueve al encoger, y los punteros a las mallas, que van delante, siguen valiendo. */
+void track_suelta_atlas(Track *t)
+{
+    size_t queda;
+
+    if (t->raw == NULL || t->atlas == NULL)
+        return;
+    queda = (size_t)((const uint8_t *)t->atlas - t->raw);
+    t->atlas = NULL;
+    t->size = (uint32_t)queda;
+    {
+        void *mismo = realloc(t->raw, queda);
+
+        (void)mismo;
+    }
+}
+
 /* ---- la camara ---- */
 
 static float len3(const float v[3])
@@ -522,10 +540,15 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
         if (st != NULL)
             st->quads_in++;
 
-        cu[0] = (float)m->x;            cvv[0] = (float)m->y;
-        cu[1] = (float)(m->x + m->w);   cvv[1] = (float)m->y;
-        cu[2] = (float)m->x;            cvv[2] = (float)(m->y + m->h);
-        cu[3] = (float)(m->x + m->w);   cvv[3] = (float)(m->y + m->h);
+        /* Medio texel hacia dentro: el texel de al lado es la separacion del atlas, que vale 0
+         * (transparente). Muestreando sin filtro justo en el borde, el PVR toma a veces ese
+         * texel y la lista punch-through descarta el pixel: salen puntos y rayas de lo que hay
+         * detras (el cielo sobre las laderas, el fondo sobre el asfalto). PS1 tampoco llega
+         * al borde: sus UV van de x a x + w - 1. */
+        cu[0] = (float)m->x + 0.5f;           cvv[0] = (float)m->y + 0.5f;
+        cu[1] = (float)(m->x + m->w) - 0.5f;  cvv[1] = (float)m->y + 0.5f;
+        cu[2] = (float)m->x + 0.5f;           cvv[2] = (float)(m->y + m->h) - 0.5f;
+        cu[3] = (float)(m->x + m->w) - 0.5f;  cvv[3] = (float)(m->y + m->h) - 0.5f;
 
         for (k = 0; k < 4u; k++) {
             uint32_t vi = f[k];
@@ -813,11 +836,12 @@ void sky_draw(const Track *t, const struct SkyData *s, const struct RaceView *vi
                     /* el borde alto de la textura va en el anillo de arriba */
                     static const uint8_t esq[4] = { 0, 1, 1, 0 };  /* izquierda/derecha */
                     static const uint8_t alto[4] = { 1, 1, 0, 0 }; /* abajo/arriba */
-                    float iz = espejada ? (float)r->w : 0.0f;
-                    float de = espejada ? 0.0f : (float)r->w;
+                    /* medio texel hacia dentro, como en malla() */
+                    float iz = espejada ? (float)r->w - 0.5f : 0.5f;
+                    float de = espejada ? 0.5f : (float)r->w - 0.5f;
 
                     q[k].u = ((float)r->x + (esq[k] != 0u ? de : iz)) / (float)t->atlas_w;
-                    q[k].v = ((float)r->y + (alto[k] != 0u ? (float)r->h : 0.0f)) /
+                    q[k].v = ((float)r->y + (alto[k] != 0u ? (float)r->h - 0.5f : 0.5f)) /
                              (float)t->atlas_h;
                     q[k].argb = dobla(c);
                 } else {
@@ -862,8 +886,8 @@ void sky_draw(const Track *t, const struct SkyData *s, const struct RaceView *vi
 
             sky_punto(&vw, &q[k], -(float)s->ring[i][0] * ky,
                       arr[k] != 0u ? y1 : y0, (float)s->ring[i][1] * ky);
-            q[k].u = ((float)r->x + (pi[k] != 0u ? (float)r->w : 0.0f)) / (float)t->atlas_w;
-            q[k].v = ((float)r->y + (arr[k] != 0u ? 0.0f : (float)r->h)) / (float)t->atlas_h;
+            q[k].u = ((float)r->x + (pi[k] != 0u ? (float)r->w - 0.5f : 0.5f)) / (float)t->atlas_w;
+            q[k].v = ((float)r->y + (arr[k] != 0u ? 0.5f : (float)r->h - 0.5f)) / (float)t->atlas_h;
             q[k].argb = dobla(c);
         }
         sky_quad(&vw, q, &m, emit, user, st);

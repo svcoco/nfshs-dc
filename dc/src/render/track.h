@@ -129,6 +129,8 @@ typedef struct {
 /* Carga un .TRK. Devuelve 0 si no pudo (y deja `t` a cero). */
 int  track_load(Track *t, const char *path);
 void track_free(Track *t);
+/* Devuelve a la RAM el atlas de una pista ya subida al PVR (va al final del archivo). */
+void track_suelta_atlas(Track *t);
 
 /* M5: el tamano (`sw` x `sh`) que tiene en una pantalla de salida de W x H una vista que
  * ocupa rect[2] x rect[3] de la pantalla de PS1 de dw x dh. Sin `split`, la pantalla entera.

@@ -21,6 +21,7 @@
 #include "mando.h"
 #include "vmu.h"
 #include "vmu_fps.h"
+#include <malloc.h>
 #include "render.h"
 #include "video.h"
 #include "movie.h"
@@ -173,6 +174,9 @@ static void *diag_thread(void *arg)
                 printf("        VMU: %lu escrituras (%lu fallidas), la ultima en %lu ms\n",
                        (unsigned long)ve, (unsigned long)vf, (unsigned long)vms);
         }
+        printf("        memoria: RAM libre %lu KB, VRAM libre %lu KB\n",
+               (unsigned long)(mallinfo().fordblks / 1024u),
+               (unsigned long)(pvr_mem_available() / 1024u));
         printf("        archivos %lu ok / %lu fallidos  BIGF %lu ok / %lu fallidos\n",
                (unsigned long)host.files.opens, (unsigned long)host.files.opens_failed,
                (unsigned long)host.files.mounts_ok,

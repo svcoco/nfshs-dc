@@ -104,6 +104,9 @@ static void pista_carga(const char *nombre)
     }
     pvr_txr_load((void *)s_track.atlas, s_atlas,
                  (uint32_t)s_track.atlas_w * s_track.atlas_h * 2u);
+    /* Ya esta en la VRAM y nadie mas lo lee: son 2 MB de RAM que hacen falta para los coches.
+     * Sin soltarlos, el sexto modelo no cabia y ese coche no se dibujaba en toda la carrera. */
+    track_suelta_atlas(&s_track);
     printf("pista %s: %u bloques, %u cuadros, atlas %ux%u\n", nombre,
            (unsigned)s_track.blocks, (unsigned)s_track.quads,
            (unsigned)s_track.atlas_w, (unsigned)s_track.atlas_h);
@@ -274,6 +277,7 @@ static struct {
 } s_coches[CARS_CACHE];
 static uint16_t s_pintado[512u * 256u] __attribute__((aligned(32)));
 static uint32_t s_uso;
+static uint32_t s_uso_frame;   /* s_uso al empezar el frame: lo que pase de ahi se esta usando */
 static uint64_t s_expansiones;
 static uint32_t s_coches_n;
 static uint64_t s_tri_coches;
@@ -282,6 +286,31 @@ uint64_t render_car_tris(void) { return s_tri_coches; }
 uint64_t render_car_paints(void) { return s_expansiones; }
 static uint64_t s_tri_efectos;
 uint64_t render_fx_tris(void)  { return s_tri_efectos; }
+
+/* Saca de la cache el modelo menos usado, con sus texturas. Nunca uno que ya se haya dibujado
+ * en este frame: el PVR todavia no ha leido su textura. 0 si no hay ninguno que sacar. */
+static int coche_expulsa(void)
+{
+    uint32_t j, k = 0;
+
+    if (s_coches_n == 0u)
+        return 0;
+    for (j = 1; j < s_coches_n; j++)
+        if (s_coches[j].uso < s_coches[k].uso)
+            k = j;
+    if (s_coches[k].uso > s_uso_frame)
+        return 0;
+    for (j = 0; j < s_coches[k].ntex; j++)
+        pvr_mem_free(s_coches[k].tex[j].vram);
+    s_coches[k].ntex = 0;
+    car_free(&s_coches[k].modelo);
+    /* se carga en ese hueco: se intercambia con el ultimo para reutilizar el codigo */
+    s_coches_n--;
+    if (k != s_coches_n)
+        s_coches[k] = s_coches[s_coches_n];
+    memset(&s_coches[s_coches_n], 0, sizeof s_coches[s_coches_n]);
+    return 1;
+}
 
 /* Devuelve el indice en la cache, o 0xFFFFFFFF si no se pudo. */
 static uint32_t coche_modelo(const char *code)
@@ -295,28 +324,30 @@ static uint32_t coche_modelo(const char *code)
             s_coches[i].uso = ++s_uso;
             return i;
         }
-    if (s_coches_n >= CARS_CACHE) {
-        /* llena: fuera el menos usado, con sus texturas (el showroom recorre coches) */
-        uint32_t j, k = 0;
+    /* llena: fuera el menos usado (el showroom recorre coches) */
+    if (s_coches_n >= CARS_CACHE && !coche_expulsa())
+        return 0xFFFFFFFFu;
 
-        for (j = 1; j < CARS_CACHE; j++)
-            if (s_coches[j].uso < s_coches[k].uso)
-                k = j;
-        for (j = 0; j < s_coches[k].ntex; j++)
-            pvr_mem_free(s_coches[k].tex[j].vram);
-        s_coches[k].ntex = 0;
-        car_free(&s_coches[k].modelo);
-        /* se carga en ese hueco: se intercambia con el ultimo para reutilizar el codigo */
-        s_coches_n--;
-        if (k != s_coches_n)
-            s_coches[k] = s_coches[s_coches_n];
-        memset(&s_coches[s_coches_n], 0, sizeof s_coches[s_coches_n]);
-    }
-    s_coches[s_coches_n].uso = ++s_uso;
-
-    m = &s_coches[s_coches_n].modelo;
     snprintf(ruta, sizeof ruta, "/cd/BAKED/%s.CAR", code);
-    if (!car_load(m, ruta)) {
+    /* Un fallo de memoria no es definitivo: se hace sitio y se reintenta. */
+    for (;;) {
+        s_coches[s_coches_n].uso = ++s_uso;
+        m = &s_coches[s_coches_n].modelo;
+        if (car_load(m, ruta))
+            break;
+        /* si el archivo no esta, sacar modelos no arregla nada */
+        {
+            FILE *f = fopen(ruta, "rb");
+
+            if (f == NULL)
+                break;
+            fclose(f);
+        }
+        if (!coche_expulsa())
+            break;
+    }
+    m = &s_coches[s_coches_n].modelo;
+    if (m->raw == NULL) {
         printf("coche: no pude cargar %s\n", ruta);
         /* se anota igualmente, con el codigo puesto, para no reintentarlo cada frame */
         memset(m, 0, sizeof(*m));
@@ -340,6 +371,27 @@ static uint32_t coche_de(const GameHost *h, const char *code)
     return coche_modelo(host_car_file(h, code, archivo));
 }
 
+/* Libera la textura de coche menos usada, de cualquier modelo. Nunca una ya dibujada en este
+ * frame, porque el PVR todavia no la ha leido. 0 si no hay ninguna. */
+static int coche_suelta_textura(void)
+{
+    uint32_t m, i, km = 0, ki = 0, mejor = 0xFFFFFFFFu;
+
+    for (m = 0; m < s_coches_n; m++)
+        for (i = 0; i < s_coches[m].ntex; i++)
+            if (s_coches[m].tex[i].uso <= s_uso_frame && s_coches[m].tex[i].uso < mejor) {
+                mejor = s_coches[m].tex[i].uso;
+                km = m;
+                ki = i;
+            }
+    if (mejor == 0xFFFFFFFFu)
+        return 0;
+    pvr_mem_free(s_coches[km].tex[ki].vram);
+    s_coches[km].ntex--;
+    s_coches[km].tex[ki] = s_coches[km].tex[s_coches[km].ntex];
+    return 1;
+}
+
 /* La textura del modelo `k` con la pintura `paint`, subida al PVR; NULL si no se pudo. */
 static pvr_ptr_t coche_textura(uint32_t k, uint8_t paint)
 {
@@ -357,10 +409,14 @@ static pvr_ptr_t coche_textura(uint32_t k, uint8_t paint)
     bytes = (uint32_t)m->atlas_w * m->atlas_h * 2u;
     if (s_coches[k].ntex < PINTURAS) {
         i = s_coches[k].ntex;
-        s_coches[k].tex[i].vram = pvr_mem_malloc(bytes);
-        if (s_coches[k].tex[i].vram == NULL) {
-            printf("coche %s: no cabe otra textura en la VRAM del PVR\n", m->code);
-            return NULL;
+        /* Una pintura son 256 KB y solo caben unas cuantas, asi que con trafico de varios modelos
+         * hay que turnarlas. Sin esto, el coche que no cabia no se dibujaba. */
+        while ((s_coches[k].tex[i].vram = pvr_mem_malloc(bytes)) == NULL) {
+            if (!coche_suelta_textura()) {
+                /* todas en uso en este frame: mejor con otra pintura que sin coche */
+                return s_coches[k].ntex != 0u ? s_coches[k].tex[0].vram : NULL;
+            }
+            i = s_coches[k].ntex;   /* soltar una de este modelo mueve el hueco */
         }
         s_coches[k].ntex++;
     } else {
@@ -1426,6 +1482,7 @@ void render_frame(GameHost *h)
      * convertido. Subirlo todo (hasta 1 MB) valia mientras convertir era raro (63 veces en
      * el front end); con el video wall de M3 la VRAM cambia 15 veces por segundo. Los
      * extremos se alinean a 32 bytes para el store queue. */
+    s_uso_frame = s_uso;
     /* El PVR renderiza el frame anterior mientras la CPU sigue: hay que esperar a que acabe
      * ANTES de escribir en su VRAM, o las texturas que se estan leyendo salen corruptas
      * (en hardware real; Flycast renderiza de golpe y no lo muestra). */

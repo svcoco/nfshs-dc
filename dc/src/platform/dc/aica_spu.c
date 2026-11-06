@@ -622,6 +622,7 @@ static void *hilo_largas(void *arg)
                 rellena(&s_v[n], t0);
         if (s_rev_sucia)
             rev_aplica(s_spu->reg);
+#ifdef NFSHS_SERIE
         if (s_rev_anillo != 0u)                    /* DIAG: la salida del DSP */
             for (unsigned k = 0; k < 2u; k++) {
                 int32_t e = (int16_t)g2_read_32(AICA_REG(0x4580u + 4u * k));
@@ -629,6 +630,7 @@ static void *hilo_largas(void *arg)
                 if (e > s_rev_pico)
                     s_rev_pico = e;
             }
+#endif
         s_hilo_us += timer_us_gettime64() - t0;
         mutex_unlock(&s_mtx);
     }
@@ -998,6 +1000,11 @@ int aica_spu_init(SpuStub *spu)
     s_sink.irq = irq_voz;
     spu->sink = &s_sink;
     return 1;
+}
+
+uint64_t aica_spu_us(void)
+{
+    return s_hilo_us + s_subida_us;
 }
 
 void aica_spu_report(void)

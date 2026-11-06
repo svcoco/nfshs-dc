@@ -393,6 +393,8 @@ typedef struct GameHost {
      * acumulado del video wall, de la conversion de texturas y del dibujo. */
     uint64_t (*now_us)(void);
     uint64_t video_us, tex_us, draw_us;
+    uint64_t file_us;             /* M8: en la capa de archivos (incluye esperar al CD) */
+    uint64_t wait_us;             /* M8: esperando a que el reloj real alcance al del juego */
 
     /* ---- dibujo que se cuenta pero no se pinta (M2a) ---- */
     uint64_t fe_shapes, fe_squares, player_views;

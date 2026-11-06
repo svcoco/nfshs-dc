@@ -16,6 +16,9 @@ CFLAGS   ?= -std=c11 -O2 -fwrapv -fno-strict-aliasing -Wall -Wextra
 CPPFLAGS += -Isrc/ps1rt -Isrc/render -I$(GEN)
 ifdef SERIE
 CPPFLAGS += -DNFSHS_SERIE
+else
+# los CDI, sin mensajes (src/platform/dc/silencio.c)
+DCSILENCIO := -Wl,--wrap=printf -Wl,--wrap=puts -Wl,--wrap=putchar
 endif
 # el codigo generado dispara estos avisos por construccion, no son problemas reales
 GENFLAGS := -Wno-unused-label -Wno-unused-variable -Wno-unused-but-set-variable             -Wno-unused-value -Wno-unused-parameter
@@ -122,6 +125,8 @@ DCBUILD   := $(BUILD)/dc
 # frente a 7,85 MB, y con 8 KB de I-cache eso puede ser ademas mas rapido. La
 # eleccion definitiva se decide midiendo ms/frame (docs/hitos/M1b.md, seccion 1).
 DCFLAGS   := -std=c11 -Os -fwrapv -fno-strict-aliasing -Wall -Wextra
+# Solo el juego, no las pruebas unitarias (que comprueban los contadores): M8.
+DCFAST    := -DPS1_COUNT_ACCESS=0 -DPS1_STACK=0 -DPS1_FAST_TICK=1
 DCTEST_OBJS := $(DCBUILD)/run_tests.o $(DCBUILD)/test_main.o                $(patsubst src/ps1rt/%.c,$(DCBUILD)/%.o,$(PS1RT_SRCS))
 
 dc-check:
@@ -179,7 +184,7 @@ dc: $(DCBUILD)/nfshs.elf
 # de forma incoherente sin dar ningun error. Costo una tarde de diagnostico.
 $(DCBUILD)/o/%.o: %.c
 	@mkdir -p $(dir $@) $(TMPDIR)
-	$(KOS_CC_W) $(DCFLAGS) $(CPPFLAGS) -DPS1_DIAG=0 -MMD -MP -c $< -o $@
+	$(KOS_CC_W) $(DCFLAGS) $(DCFAST) $(CPPFLAGS) -DPS1_DIAG=0 -MMD -MP -c $< -o $@
 
 -include $(DC_OBJS:.o=.d)
 
@@ -195,10 +200,10 @@ $(AICA_DRV_C):
 # El C generado no se recompila aqui: lo hace dc-gen, que son 71 unidades y tarda.
 dc-gen: dc-check $(GEN)/parts.mk
 	@mkdir -p $(DCBUILD)/gen $(TMPDIR)
-	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(GENFLAGS)" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
+	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(DCFAST) $(GENFLAGS)" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
 
 $(DCBUILD)/nfshs.elf: dc-check dc-gen $(DC_OBJS)
-	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o -o $@
+	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o $(DCSILENCIO) -o $@
 	@sh-elf-size $@
 
 # Horneado de pistas (M2b paso 2): GRP + PSH -> un .TRK que el SH-4 dibuja sin parsear

@@ -2,7 +2,8 @@
  *
  * En una Dreamcast real no hay ventana de Flycast con los contadores, y los mensajes por el
  * puerto serie se apagan (cuestan rendimiento), asi que los fps se leen en la VMU: un hilo
- * propio mira host.frames cada 500 ms y dibuja "FPS" y la cifra con una decimal.
+ * propio mira host.frames cada 500 ms y dibuja "FPS" y la cifra con una decimal. Cambia de
+ * pagina cada 2 s: fps; L, D y E; J, C y A; I, O y F (ver hilo()).
  *
  * La pantalla es de 48x32 a 1 bit. Se dibuja en un bitmap natural (fila a fila, bit 7 =
  * pixel de la izquierda) y vmu_draw_lcd_rotated() lo gira 180 grados, que es como KOS
@@ -17,6 +18,9 @@
 #include <dc/maple.h>
 #include <dc/maple/vmu.h>
 
+#include <dc/perfctr.h>
+
+#include "aica_spu.h"
 #include "render.h"
 #include "vmu_fps.h"
 
@@ -36,6 +40,11 @@ static const uint8_t letra_s[5] = {7, 4, 7, 1, 7};
 static const uint8_t letra_l[5] = {4, 4, 4, 4, 7};
 static const uint8_t letra_d[5] = {6, 5, 5, 5, 6};
 static const uint8_t letra_e[5] = {7, 4, 6, 4, 7};
+static const uint8_t letra_j[5] = {1, 1, 1, 5, 7};
+static const uint8_t letra_c[5] = {7, 4, 4, 4, 7};
+static const uint8_t letra_a[5] = {7, 5, 7, 5, 5};
+static const uint8_t letra_i[5] = {7, 2, 2, 2, 7};
+static const uint8_t letra_o[5] = {7, 5, 5, 5, 7};
 
 static const GameHost *s_host;
 static volatile int s_corriendo = 1;
@@ -95,30 +104,21 @@ static void dibuja(uint8_t *bm, unsigned deci)
     glifo(bm, cifra[d[2]], x, 12u, 3u);
 }
 
-/* Pagina de medicion: ms por frame de L = logica del juego, D = dibujo (CPU: transformacion,
- * texturas y envio al PVR) y E = espera al PVR. Si E domina, manda la GPU; si no, la CPU.
- * Las tres se dan en decimas de ms (cada una con tres cifras, 99.9 de tope). */
-static void dibuja_ms(uint8_t *bm, unsigned l, unsigned d, unsigned e)
+/* Una pagina de medicion: tres filas con una letra y un entero de hasta tres cifras (M8). */
+static void dibuja_filas(uint8_t *bm, const uint8_t *const letra[3], const unsigned v[3])
 {
-    const uint8_t *letra[3] = { letra_l, letra_d, letra_e };
-    unsigned v[3] = { l, d, e };
-    unsigned f, y, x, n;
+    unsigned f;
 
     memset(bm, 0, ANCHO_B * ALTO);
     for (f = 0; f < 3u; f++) {
-        y = f * 11u;
-        n = v[f] > 999u ? 999u : v[f];
+        unsigned y = f * 11u, n = v[f] > 999u ? 999u : v[f];
+
         glifo(bm, letra[f], 2u, y, 2u);
-        x = 14u;
         if (n >= 100u)
-            glifo(bm, cifra[n / 100u], x, y, 2u);
-        x += 8u;
-        glifo(bm, cifra[(n / 10u) % 10u], x, y, 2u);
-        x += 8u;
-        punto(bm, x, y + 8u); punto(bm, x + 1u, y + 8u);
-        punto(bm, x, y + 9u); punto(bm, x + 1u, y + 9u);
-        x += 4u;
-        glifo(bm, cifra[n % 10u], x, y, 2u);
+            glifo(bm, cifra[n / 100u], 14u, y, 2u);
+        if (n >= 10u)
+            glifo(bm, cifra[(n / 10u) % 10u], 22u, y, 2u);
+        glifo(bm, cifra[n % 10u], 30u, y, 2u);
     }
 }
 
@@ -131,52 +131,114 @@ static void pinta(const uint8_t *bm)
         vmu_draw_lcd_rotated(dev, bm);   /* un fallo (bus ocupado) se reintenta en 500 ms */
 }
 
+/* Lo que se acumula y se reparte por frame. */
+typedef struct Foto {
+    uint64_t t_ms, frames, fields, dibujo, espera, archivos, audio, reloj;
+} Foto;
+
+static void foto(Foto *o)
+{
+    o->t_ms = timer_ms_gettime64();
+    o->frames = s_host->frames;
+    o->fields = s_host->fields;
+    o->dibujo = s_host->tex_us + s_host->draw_us;
+    o->espera = render_espera_us();
+    o->archivos = s_host->file_us;
+    o->audio = aica_spu_us();
+    o->reloj = s_host->wait_us;
+}
+
+/* Los contadores del SH-4: PRFC0 es del reloj de KOS, asi que solo se usa PRFC1 y mide por
+ * turnos, 4 s cada cosa: ciclos parados por fallos de la cache de instrucciones y por fallos
+ * de la de datos. */
+static void mide(perf_cntr_event_t ev)
+{
+    perf_cntr_stop(PRFC1);
+    perf_cntr_clear(PRFC1);
+    perf_cntr_start(PRFC1, ev, PMCR_COUNT_CPU_CYCLES);
+}
+
+static unsigned ms_por_frame(uint64_t us, uint64_t frames)
+{
+    return (unsigned)((us + frames * 500u) / (frames * 1000u));
+}
+
 static void *hilo(void *arg)
 {
+    static const uint8_t *const FILAS_B[3] = { letra_l, letra_d, letra_e };
+    static const uint8_t *const FILAS_C[3] = { letra_j, letra_c, letra_a };
+    static const uint8_t *const FILAS_D[3] = { letra_i, letra_o, letra_f };
     uint8_t bm[ANCHO_B * ALTO];
-    uint64_t t0 = timer_ms_gettime64();
-    uint64_t f0 = s_host->frames;
+    Foto a, b;
     int v0 = pvr_get_vbl_count();
-    uint64_t dib0 = s_host->tex_us + s_host->draw_us, esp0 = render_espera_us();
-    unsigned ciclo = 0;
+    unsigned ciclo = 0, pct_i = 0, pct_o = 0;
+    uint64_t t_cache = timer_ms_gettime64();
 
     (void)arg;
+    foto(&a);
+    mide(PMCR_PIPELINE_FREEZE_BY_ICACHE_MISS_MODE);
     while (s_corriendo) {
-        uint64_t t1, f1;
+        unsigned pagina;
         int v1;
 
         thd_sleep(500);
-        t1 = timer_ms_gettime64();
-        f1 = s_host->frames;
+        foto(&b);
         v1 = pvr_get_vbl_count();
-        ciclo++;
-        /* Los fps se miden contra los vblank del PVR (60 Hz en 480p y 480i), que no dependen
-         * del reloj del hilo; sin PVR, contra el reloj. */
-        if (f1 > f0 && ((ciclo / 4u) & 1u) != 0u && t1 > t0) {
-            /* pagina B (2 s de cada 4): costes por frame en decimas de ms */
-            uint64_t df = f1 - f0, dib1 = s_host->tex_us + s_host->draw_us, esp1 = render_espera_us();
-            uint64_t per = (t1 - t0) * 10u / df;            /* periodo, decimas de ms */
-            uint64_t d = (dib1 - dib0) / (df * 100u);       /* dibujo + texturas + espera */
-            uint64_t e = (esp1 - esp0) / (df * 100u);
+        ciclo = (ciclo + 1u) % 16u;
+        pagina = ciclo / 4u;
 
-            dib0 = dib1;
-            esp0 = esp1;
-            dibuja_ms(bm, (unsigned)(per > d ? per - d : 0u), (unsigned)(d > e ? d - e : 0u),
-                      (unsigned)e);
-        } else if (v1 > v0)
-            dibuja(bm, (unsigned)((f1 - f0) * 600u / (unsigned)(v1 - v0)));
-        else if (t1 > t0)
-            dibuja(bm, (unsigned)((f1 - f0) * 10000u / (t1 - t0)));
-        else
-            goto sigue;
-        pinta(bm);
-sigue:
-        if (((ciclo / 4u) & 1u) == 0u) {     /* en la pagina A los acumulados siguen el paso */
-            dib0 = s_host->tex_us + s_host->draw_us;
-            esp0 = render_espera_us();
+        if (ciclo % 8u == 0u && b.t_ms > t_cache) {
+            /* 200 M de ciclos por segundo: 200 000 por ms */
+            unsigned pct = (unsigned)(perf_cntr_count(PRFC1) * 100u /
+                                      ((b.t_ms - t_cache) * 200000u));
+
+            if (ciclo == 8u) {
+                pct_i = pct;
+                mide(PMCR_PIPELINE_FREEZE_BY_DCACHE_MISS_MODE);
+            } else {
+                pct_o = pct;
+                mide(PMCR_PIPELINE_FREEZE_BY_ICACHE_MISS_MODE);
+            }
+            t_cache = b.t_ms;
         }
-        t0 = t1;
-        f0 = f1;
+
+        /* Con un frame de mas de 500 ms no hay nada que repartir: sigue acumulando. */
+        if (b.frames == a.frames)
+            continue;
+        if (pagina == 0u) {
+            /* Los fps se miden contra los vblank del PVR, que no dependen del reloj del hilo. */
+            if (v1 > v0)
+                dibuja(bm, (unsigned)((b.frames - a.frames) * 600u / (unsigned)(v1 - v0)));
+            else
+                dibuja(bm, (unsigned)((b.frames - a.frames) * 10000u / (b.t_ms - a.t_ms)));
+        } else {
+            uint64_t df = b.frames - a.frames;
+            unsigned periodo = (unsigned)((b.t_ms - a.t_ms) / df);
+            unsigned d = ms_por_frame(b.dibujo - a.dibujo, df);
+            unsigned e = ms_por_frame(b.espera - a.espera, df);
+            unsigned cd = ms_por_frame(b.archivos - a.archivos, df);
+            unsigned au = ms_por_frame(b.audio - a.audio, df);
+            unsigned w = ms_por_frame(b.reloj - a.reloj, df);
+            unsigned l = periodo > d ? periodo - d : 0u;   /* d ya incluye e */
+            unsigned v[3];
+
+            if (pagina == 1u) {
+                /* L = logica, D = dibujo en la CPU, E = espera al PVR */
+                v[0] = l; v[1] = d > e ? d - e : 0u; v[2] = e;
+                dibuja_filas(bm, FILAS_B, v);
+            } else if (pagina == 2u) {
+                /* L repartida: J = juego e interrupciones, C = archivos y CD, A = audio */
+                v[0] = l > cd + au + w ? l - cd - au - w : 0u; v[1] = cd; v[2] = au;
+                dibuja_filas(bm, FILAS_C, v);
+            } else {
+                /* I y O = % del tiempo parado por la cache, F = campos por frame x 10 */
+                v[0] = pct_i; v[1] = pct_o;
+                v[2] = (unsigned)((b.fields - a.fields) * 10u / df);
+                dibuja_filas(bm, FILAS_D, v);
+            }
+        }
+        pinta(bm);
+        a = b;
         v0 = v1;
     }
     return NULL;

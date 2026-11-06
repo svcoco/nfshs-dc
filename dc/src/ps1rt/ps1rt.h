@@ -67,6 +67,16 @@ typedef uint16_t ps1_u16a;
 #ifndef PS1_COUNT_ACCESS
 #define PS1_COUNT_ACCESS 1
 #endif
+/* La pila de diagnostico (ps1_push/ps1_pop). Dreamcast la apaga: nada de la logica la usa, y
+ * son dos llamadas por cada funcion del juego. */
+#ifndef PS1_STACK
+#define PS1_STACK 1
+#endif
+/* Dreamcast cuenta las ramas hacia atras en linea, con 32 bits, y solo hace las comprobaciones
+ * de ps1_tick al llegar al tope (mismo efecto: ver ps1_tick_lento en cpu.c). */
+#ifndef PS1_FAST_TICK
+#define PS1_FAST_TICK 0
+#endif
 
 typedef struct Cpu Cpu;
 
@@ -89,6 +99,12 @@ typedef struct Ps1Host {
 } Ps1Host;
 
 struct Cpu {
+    /* ---- lo mas usado, al principio: `mov.l @(disp,Rn)` del SH-4 solo llega a +60 ---- */
+    uint32_t cont;                       /* continuacion pendiente */
+    uint32_t tick_run;                   /* PS1_FAST_TICK: ramas aun sin anotar */
+    uint32_t tick_top;                   /* PS1_FAST_TICK: al llegar aqui, ps1_tick_lento */
+    uint8_t *ram;                        /* PS1_RAM_SIZE + PS1_RAM_PAD bytes */
+
     /* ---- estado del invitado: esto es lo que compara el test diferencial ---- */
     uint32_t r[32];
     uint32_t hi, lo;
@@ -99,13 +115,11 @@ struct Cpu {
     uint32_t gte_regs[64];
 
     /* ---- memoria ---- */
-    uint8_t *ram;                        /* PS1_RAM_SIZE + PS1_RAM_PAD bytes */
     uint8_t  scratch[PS1_SCRATCH_SIZE];
     uint16_t spu_volume[24];             /* sin IoBus: volumen ADSR que leen las voces */
     Ps1IoBus *bus;
 
     /* ---- control de flujo ---- */
-    uint32_t cont;                            /* continuacion pendiente */
     int (*dispatch)(Cpu *c, uint32_t addr);   /* los define dc/gen/dispatch.c */
     int (*dispatch_at)(Cpu *c, uint32_t pc);
     int (*inner_hook)(Cpu *c, uint32_t addr); /* consultado mientras corre el host */
@@ -191,7 +205,16 @@ void     ps1_call(Cpu *c, uint32_t addr);
 uint32_t ps1_call_nested(Cpu *c, uint32_t f, const uint32_t *args, uint32_t n);
 void     ps1_run_cont(Cpu *c);
 void     ps1_jump(Cpu *c, uint32_t pc);
+#if PS1_FAST_TICK
+void     ps1_tick_lento(Cpu *c);
+static inline __attribute__((always_inline)) void ps1_tick(Cpu *c)
+{
+    if (PS1_UNLIKELY(++c->tick_run >= c->tick_top))
+        ps1_tick_lento(c);
+}
+#else
 void     ps1_tick(Cpu *c);
+#endif
 void     ps1_syscall(Cpu *c);
 void     ps1_service_interrupts(Cpu *c);
 void     ps1_defer(Cpu *c, uint32_t f, const uint32_t *args, uint32_t n);
@@ -229,9 +252,13 @@ extern void (*ps1_on_enter)(Cpu *c, uint32_t f);
 
 static inline void ps1_push(Cpu *c, uint32_t f)
 {
+#if PS1_STACK
     if (PS1_LIKELY(c->stack_depth < PS1_STACK_MAX))
         c->stack[c->stack_depth] = f;
     c->stack_depth++;
+#else
+    (void)c; (void)f;
+#endif
 #if PS1_ENTER_HOOK
     if (ps1_on_enter != NULL)
         ps1_on_enter(c, f);
@@ -240,8 +267,12 @@ static inline void ps1_push(Cpu *c, uint32_t f)
 
 static inline void ps1_pop(Cpu *c)
 {
+#if PS1_STACK
     if (PS1_LIKELY(c->stack_depth != 0))
         c->stack_depth--;
+#else
+    (void)c;
+#endif
 }
 
 /* ---- cargas y almacenamientos sin alinear -------------------------------------- */

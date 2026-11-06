@@ -447,9 +447,9 @@ def safe_gen(f, known):
 # ---------------------------------------------------------------------------
 
 def cr(i):
-    """Registro del invitado. Igual que el backend Rust, no se pliega r0 a 0: eso
-    mantiene la paridad trivial con la version de referencia (ver --zero-reg)."""
-    return f'c->r[{i}]'
+    """Lectura de un registro del invitado. r0 vale siempre 0 (cset descarta sus escrituras),
+    asi que se emite la constante: en SH-4 cada lectura era una carga de memoria (M8)."""
+    return '0u' if i == 0 else f'c->r[{i}]'
 
 
 def cu(v):
@@ -610,6 +610,9 @@ def gen_function_c(f, known, comments=True):
     out.append('    uint32_t t, cnd, off;')
     out.append('    (void)t; (void)cnd; (void)off;')
     out.append(f'    ps1_push(c, {cu(f)});')
+    # Casi siempre se entra por el principio: sin esto, el switch lo busca en un arbol binario.
+    if f in leaders:
+        out.append(f'    if (pc == {cu(f)}) goto L_{f:08x};')
     if has_indirect:
         # Todas las instrucciones son leaders: indices densos (pc - base) >> 2 para que
         # gcc emita una tabla de N entradas en vez de una de 4N. La guarda `off & 3` es

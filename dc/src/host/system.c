@@ -36,9 +36,13 @@ void host_advance_to(GameHost *h, Cpu *c, uint64_t t)
      * la PS1. Si no, el driver de sonido cree que su stream va por delante de lo que el AICA
      * esta tocando y rellena encima de lo que aun no ha sonado (en la PS1 rellena el trozo
      * recien tocado, ~23 ms por detras de la voz; medido en la referencia, M4.md). */
-    if (h->real_clock && h->now_us != NULL)
+    if (h->real_clock && h->now_us != NULL && host_real_clock(h) < t) {
+        uint64_t t0 = h->now_us();
+
         while (host_real_clock(h) < t)
             ;
+        h->wait_us += h->now_us() - t0;
+    }
 
     c->pending_ticks += (uint32_t)(ticks_after - ticks_before);
 

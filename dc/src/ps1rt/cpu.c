@@ -66,10 +66,40 @@ void ps1_interp_report(FILE *f, unsigned top) { (void)f; (void)top; }
 
 /* Se llama en cada rama hacia atras, y tambien desde ps1_call. El codigo generado
  * NO tiquea en las llamadas directas f_X(c), igual que la referencia. */
+#if PS1_FAST_TICK
+/* Se llega aqui al alcanzar tick_top: anota las ramas contadas en linea, hace las mismas
+ * comprobaciones que la version normal y calcula el siguiente tope. El tope cae justo donde
+ * since_host llega a spin_limit, asi que el host corre idle en la misma rama que antes. */
+#define TICK_SIN_SPIN 0x100000u
+
+static void tick_anota(Cpu *c)
+{
+    c->ticks += c->tick_run;
+    c->since_host += c->tick_run;
+    c->tick_run = 0;
+}
+
+static void tick_tope(Cpu *c)
+{
+    if (c->spin_limit == 0)
+        c->tick_top = TICK_SIN_SPIN;
+    else if (c->since_host >= c->spin_limit)
+        c->tick_top = 1;                 /* dentro de una interrupcion: en cuanto salga */
+    else
+        c->tick_top = (uint32_t)(c->spin_limit - c->since_host);
+    if (c->tick_limit == 0)
+        c->tick_top = 1;
+}
+
+void ps1_tick_lento(Cpu *c)
+{
+    tick_anota(c);
+#else
 void ps1_tick(Cpu *c)
 {
     c->ticks++;
     c->since_host++;
+#endif
 
     /* El codigo lleva spin_limit ramas hacia atras sin pasar por el host: se da por
      * hecho que esta girando sobre memoria que solo cambiaria una interrupcion, y se
@@ -116,6 +146,9 @@ void ps1_tick(Cpu *c)
         }
         ps1_panic(c, "watchdog");
     }
+#if PS1_FAST_TICK
+    tick_tope(c);
+#endif
 }
 
 /* --------------------------------------------------------------------- despacho */
@@ -176,6 +209,9 @@ void ps1_call(Cpu *c, uint32_t addr)
     if (c->host != NULL) {
         Ps1Host *h = c->host;
         int handled;
+#if PS1_FAST_TICK
+        tick_anota(c);
+#endif
         if (c->since_host > c->max_since_host)
             c->max_since_host = c->since_host;
         c->since_host = 0;
@@ -186,6 +222,9 @@ void ps1_call(Cpu *c, uint32_t addr)
         c->host = NULL;
         handled = (h->call != NULL) ? h->call(c, h->self, addr) : 0;
         c->host = h;
+#if PS1_FAST_TICK
+        tick_tope(c);                    /* since_host a 0, y quiza el host pidio parar */
+#endif
 
         drain_deferred(c);
         ps1_service_interrupts(c);

@@ -7,5 +7,7 @@
 /* Conecta el stub del SPU al AICA. 0 si no hay sonido (el juego sigue, mudo). */
 int  aica_spu_init(SpuStub *spu);
 void aica_spu_report(void);
+/* M8: microsegundos gastados en audio (el hilo de las voces largas y las subidas). */
+uint64_t aica_spu_us(void);
 
 #endif /* PLATFORM_DC_AICA_SPU_H */

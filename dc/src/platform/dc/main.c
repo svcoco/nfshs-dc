@@ -20,6 +20,7 @@
 #include "aica_spu.h"
 #include "mando.h"
 #include "vmu.h"
+#include "silencio.h"
 #include "vmu_fps.h"
 #include <malloc.h>
 #include "render.h"
@@ -407,10 +408,14 @@ int main(int argc, char **argv)
     cpu.stack_depth = 0;
 
     t_start = timer_ms_gettime64();
-    thd_create(1, diag_thread, NULL);
     vmu_fps_init(&host);
-#ifndef NFSHS_SERIE
-    /* M7: sin mensajes por el serie (cuestan rendimiento). make dc SERIE=1 los deja. */
+#ifdef NFSHS_SERIE
+    thd_create(1, diag_thread, NULL);
+#else
+    /* Sin mensajes en los CDI, solo la VMU: cuestan rendimiento aunque nadie los lea (M8).
+     * make dc SERIE=1 los deja. */
+    (void)diag_thread;
+    serie_calla();
     dbgio_disable();
 #endif
     if (setjmp(cpu.stop_jmp) == 0) {

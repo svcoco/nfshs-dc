@@ -117,6 +117,7 @@ static HleFunc *find_hle(GameHost *h, uint32_t addr)
  * aqui mismo, con un diagnostico que dice por su nombre que falta. */
 /* Cuenta la llamada por direccion. Busqueda lineal: son unos cientos de direcciones
  * distintas y esto solo corre una vez por llamada al host. */
+#if PS1_DIAG
 static void note_seen(GameHost *h, const Cpu *c, uint32_t addr)
 {
     uint32_t i;
@@ -132,6 +133,7 @@ static void note_seen(GameHost *h, const Cpu *c, uint32_t addr)
         h->seen_addrs++;
     }
 }
+#endif
 
 static int host_call(Cpu *c, void *self, uint32_t addr)
 {
@@ -139,8 +141,8 @@ static int host_call(Cpu *c, void *self, uint32_t addr)
     HleFunc *f = find_hle(h, addr);
     uint32_t ret = 0;
 
-    note_seen(h, c, addr);
 #if PS1_DIAG
+    note_seen(h, c, addr);
     if (h->ram_at_call != 0u && !h->ram_dumped && c->calls >= h->ram_at_call) {
         h->ram_dumped = 1;
         if (dump_ram(c, h->ram_at_path))
@@ -182,8 +184,13 @@ static int host_call(Cpu *c, void *self, uint32_t addr)
         handled = host_system_call(h, c, addr, &ret);
     if (!handled)
         handled = host_gpu_call(h, c, addr, &ret);
-    if (!handled)
+    if (!handled) {
+        uint64_t t0 = h->now_us != NULL ? h->now_us() : 0u;
+
         handled = host_file_call(h, c, addr, &ret);
+        if (h->now_us != NULL)
+            h->file_us += h->now_us() - t0;
+    }
     if (!handled)
         handled = host_game_call(h, c, addr, &ret);
     if (!handled)

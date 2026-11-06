@@ -338,23 +338,17 @@ static inline uint32_t ps1_r8(Cpu *c, uint32_t a)
 
 static inline uint32_t ps1_r16(Cpu *c, uint32_t a)
 {
-    uint32_t p = a & 0x1FFFFFFFu;
-    if (PS1_LIKELY(p < PS1_IO_BASE)) {
-        uint32_t o = p & PS1_RAM_MASK;
-        PS1_NOTE(c, o, 2u);
-        return ps1_ld16(c->ram + o);
-    }
+    /* una sola prueba: en RAM y alineado. Lo demas, en la ruta lenta */
+    if (PS1_LIKELY((a & (0x1F800000u | 1u)) == 0u))
+        return *(const ps1_u16a *)(c->ram + (a & PS1_RAM_MASK));
     return ps1_r16_slow(c, a);
 }
 
 static inline uint32_t ps1_r32(Cpu *c, uint32_t a)
 {
-    uint32_t p = a & 0x1FFFFFFFu;
-    if (PS1_LIKELY(p < PS1_IO_BASE)) {
-        uint32_t o = p & PS1_RAM_MASK;
-        PS1_NOTE(c, o, 4u);
-        return ps1_ld32(c->ram + o);
-    }
+    /* una sola prueba: en RAM y alineado. Lo demas, en la ruta lenta */
+    if (PS1_LIKELY((a & (0x1F800000u | 3u)) == 0u))
+        return *(const ps1_u32a *)(c->ram + (a & PS1_RAM_MASK));
     return ps1_r32_slow(c, a);
 }
 
@@ -370,11 +364,8 @@ static inline void ps1_w8(Cpu *c, uint32_t a, uint32_t v)
 
 static inline void ps1_w16(Cpu *c, uint32_t a, uint32_t v)
 {
-    uint32_t p = a & 0x1FFFFFFFu;
-    if (PS1_LIKELY(p < PS1_IO_BASE)) {
-        uint32_t o = p & PS1_RAM_MASK;
-        PS1_NOTE(c, o, 2u);
-        ps1_st16(c->ram + o, v);
+    if (PS1_LIKELY((a & (0x1F800000u | 1u)) == 0u)) {
+        *(ps1_u16a *)(c->ram + (a & PS1_RAM_MASK)) = (uint16_t)v;
         return;
     }
     ps1_w16_slow(c, a, v);
@@ -382,11 +373,8 @@ static inline void ps1_w16(Cpu *c, uint32_t a, uint32_t v)
 
 static inline void ps1_w32(Cpu *c, uint32_t a, uint32_t v)
 {
-    uint32_t p = a & 0x1FFFFFFFu;
-    if (PS1_LIKELY(p < PS1_IO_BASE)) {
-        uint32_t o = p & PS1_RAM_MASK;
-        PS1_NOTE(c, o, 4u);
-        ps1_st32(c->ram + o, v);
+    if (PS1_LIKELY((a & (0x1F800000u | 3u)) == 0u)) {
+        *(ps1_u32a *)(c->ram + (a & PS1_RAM_MASK)) = v;
         return;
     }
     ps1_w32_slow(c, a, v);

@@ -126,7 +126,7 @@ DCBUILD   := $(BUILD)/dc
 # eleccion definitiva se decide midiendo ms/frame (docs/hitos/M1b.md, seccion 1).
 DCFLAGS   := -std=c11 -Os -fwrapv -fno-strict-aliasing -Wall -Wextra
 # Solo el juego, no las pruebas unitarias (que comprueban los contadores): M8.
-DCFAST    := -DPS1_COUNT_ACCESS=0 -DPS1_STACK=0 -DPS1_FAST_TICK=1
+DCFAST    := -DPS1_STACK=0 -DPS1_FAST_TICK=1
 DCTEST_OBJS := $(DCBUILD)/run_tests.o $(DCBUILD)/test_main.o                $(patsubst src/ps1rt/%.c,$(DCBUILD)/%.o,$(PS1RT_SRCS))
 
 dc-check:
@@ -191,6 +191,12 @@ $(DCBUILD)/o/%.o: %.c
 # El decodificador de video va a -O2 aunque el resto vaya a -Os: 28 ms por frame de la
 # intro frente a 44 (docs/hitos/M3.md, seccion 4).
 $(DCBUILD)/o/src/host/mdec.o: DCFLAGS += -O2
+
+# El dibujo y el runtime, tambien a -O2: son pocos KB y por ahi pasa todo (M8).
+DCRAPIDO := -O2 -fno-math-errno -fno-trapping-math
+$(DCBUILD)/o/src/render/%.o: DCFLAGS += $(DCRAPIDO)
+$(DCBUILD)/o/src/ps1rt/%.o: DCFLAGS += -O2
+$(DCBUILD)/o/src/platform/dc/render.o: DCFLAGS += $(DCRAPIDO)
 
 $(AICA_DRV_C):
 	@mkdir -p $(dir $@)

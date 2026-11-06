@@ -10,6 +10,7 @@ typedef struct {
     float cam[3];             /* posicion, en metros y en espacio de mundo */
     float row[3][3];          /* derecha, arriba y adelante, divididas por |adelante| */
     float focal;              /* projection, en pixeles de la pantalla de PS1 */
+    float fx, fy;             /* focal * kx y focal * ky */
     float ox, oy;             /* centro de la pantalla de salida */
     float kx, ky;             /* de pixeles de PS1 a pixeles de salida */
     /* M5: a pantalla partida, lo que caiga fuera de la franja y0..y1 de la vista se recorta

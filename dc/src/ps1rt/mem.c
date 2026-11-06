@@ -68,8 +68,16 @@ static uint8_t *slot(Cpu *c, uint32_t addr, uint32_t n, uint8_t io[4])
         }
         return io;
     }
-    (void)n;
-    return c->ram + (a & PS1_RAM_MASK);
+    /* a la RAM solo se llega aqui desalineado: los accesos alineados van por ps1_r32 y demas */
+    {
+        uint32_t o = a & PS1_RAM_MASK;
+
+        if ((o & (n - 1u)) != 0u)
+            c->misaligned++;
+        if (o > PS1_RAM_MASK - (n - 1u))
+            c->ram_edge++;
+        return c->ram + o;
+    }
 }
 
 uint32_t ps1_r8_slow(Cpu *c, uint32_t a)
@@ -82,6 +90,8 @@ uint32_t ps1_r8_slow(Cpu *c, uint32_t a)
 
 uint32_t ps1_r16_slow(Cpu *c, uint32_t a)
 {
+    if ((a & (0x1FFFFC00u | 1u)) == PS1_SCRATCH_BASE)
+        return *(const ps1_u16a *)(c->scratch + (a & 0x3FFu));
     uint8_t io[4];
     const uint8_t *p;
     if (on_bus(c, a))
@@ -92,6 +102,8 @@ uint32_t ps1_r16_slow(Cpu *c, uint32_t a)
 
 uint32_t ps1_r32_slow(Cpu *c, uint32_t a)
 {
+    if ((a & (0x1FFFFC00u | 3u)) == PS1_SCRATCH_BASE)
+        return *(const ps1_u32a *)(c->scratch + (a & 0x3FFu));
     uint8_t io[4];
     const uint8_t *p;
     if (on_bus(c, a))
@@ -113,6 +125,10 @@ void ps1_w8_slow(Cpu *c, uint32_t a, uint32_t v)
 
 void ps1_w16_slow(Cpu *c, uint32_t a, uint32_t v)
 {
+    if ((a & (0x1FFFFC00u | 1u)) == PS1_SCRATCH_BASE) {
+        *(ps1_u16a *)(c->scratch + (a & 0x3FFu)) = (uint16_t)v;
+        return;
+    }
     uint8_t io[4];
     uint8_t *p;
     if (on_bus(c, a)) {
@@ -126,6 +142,10 @@ void ps1_w16_slow(Cpu *c, uint32_t a, uint32_t v)
 
 void ps1_w32_slow(Cpu *c, uint32_t a, uint32_t v)
 {
+    if ((a & (0x1FFFFC00u | 3u)) == PS1_SCRATCH_BASE) {
+        *(ps1_u32a *)(c->scratch + (a & 0x3FFu)) = v;
+        return;
+    }
     uint8_t io[4];
     uint8_t *p;
     if (on_bus(c, a)) {

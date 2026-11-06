@@ -456,6 +456,13 @@ static void emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
     uint32_t k;
 
     P->plano = (m == NULL);
+    /* tri_pista pinta con el color plano del primer vertice. Un cuadro entero llega empezando
+     * por su vertice 1 (ver malla en track.c): su vertice 0 es el ultimo, y va delante. */
+    if (n == 4u) {
+        tri_pista(P, &v[3], &v[0], &v[1]);
+        tri_pista(P, &v[3], &v[1], &v[2]);
+        return;
+    }
     for (k = 2; k < n; k++)
         tri_pista(P, &v[0], &v[k - 1u], &v[k]);
 }

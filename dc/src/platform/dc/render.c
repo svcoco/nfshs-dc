@@ -225,32 +225,32 @@ static int a_la_banda(float *x0, float *y0, float *x1, float *y1)
 
 static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
 {
-    pvr_vertex_t pv;
+    int cielo = s_fase == FASE_CIELO;
     uint32_t k;
 
     (void)user;
-    if (s_fase == FASE_CIELO)
+    if (cielo)
         modo_pon(m != NULL ? MODO_CIELO_TEX : MODO_CIELO_PLANO);
-    pv.flags = PVR_CMD_VERTEX;
-    pv.oargb = 0;
     for (k = 0; k < n; k++) {
         /* el poligono como tira en zigzag: p0, p1, p(n-1), p2, p(n-2)... (con 4, la de
          * siempre: 0, 1, 3, 2) */
         uint32_t i = (k == 0u) ? 0u : ((k & 1u) ? (k + 1u) / 2u : n - k / 2u);
+        /* directo a la store queue, sin pasar por una copia y por pvr_prim (M8) */
+        pvr_vertex_t *pv = pvr_dr_target();
 
-        if (k == n - 1u)
-            pv.flags = PVR_CMD_VERTEX_EOL;
-        pv.x = v[i].x;
-        pv.y = v[i].y;
+        pv->flags = k == n - 1u ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+        pv->x = v[i].x;
+        pv->y = v[i].y;
         /* El cielo va al fondo: en la lista punch-through el PVR IGNORA "no escribir Z", asi que
          * la cupula (radio 100) escribia su 1/w y tapaba todo lo que hubiera mas alla de 100 m:
          * las colinas, los arboles lejanos y los edificios, que aparecian de golpe al acercarse.
          * Flycast hace lo mismo; el raster de PC, no. */
-        pv.z = s_fase == FASE_CIELO ? 0.0001f : v[i].z * s_zmul + s_zadd;
-        pv.u = v[i].u * s_umul + s_uadd;
-        pv.v = v[i].v * s_vmul + s_vadd;
-        pv.argb = v[i].argb;
-        pvr_prim(&pv, sizeof(pv));
+        pv->z = cielo ? 0.0001f : v[i].z * s_zmul + s_zadd;
+        pv->u = v[i].u * s_umul + s_uadd;
+        pv->v = v[i].v * s_vmul + s_vadd;
+        pv->argb = v[i].argb;
+        pv->oargb = 0;
+        pvr_dr_commit(pv);
     }
     s_tri += n - 2u;
 }

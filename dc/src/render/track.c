@@ -204,6 +204,8 @@ void view_init(View *vw, const struct RaceView *v, float sw, float sh)
     vw->focal = v->projection != 0u ? (float)v->projection : 190.0f;
     vw->kx = sw / pw;
     vw->ky = sh / ph;
+    vw->fx = vw->focal * vw->kx;
+    vw->fy = vw->focal * vw->ky;
     vw->ox = sw * 0.5f;
     vw->oy = sh * 0.5f;
     if (v->centre_on) {
@@ -239,8 +241,8 @@ static void proyecta(const View *vw, const Cv *c, TrackVert *o)
 {
     float inv = 1.0f / c->z;
 
-    o->x = vw->ox + c->x * vw->focal * inv * vw->kx;
-    o->y = vw->oy - c->y * vw->focal * inv * vw->ky;
+    o->x = vw->ox + c->x * vw->fx * inv;
+    o->y = vw->oy - c->y * vw->fy * inv;
     o->z = inv;               /* el PVR quiere 1/w */
     o->u = c->u;
     o->v = c->v;
@@ -307,6 +309,13 @@ static uint32_t recorta_borde(const View *vw, const Cv *in, uint32_t n, Cv *out,
 #define GUARD_Y0 (-480.0f)
 #define GUARD_Y1 960.0f
 
+/* Con z > 0, un punto de pantalla dentro de estos limites es lo mismo que borde_guarda >= 0
+ * en los cuatro bordes. */
+static inline int dentro_guarda(float x, float y)
+{
+    return x >= GUARD_X0 && x <= GUARD_X1 && y >= GUARD_Y0 && y <= GUARD_Y1;
+}
+
 /* Distancia a un borde de la banda de guarda en espacio de camara (>= 0 dentro). Como en
  * borde_y: son planos que pasan por la camara. */
 static float borde_guarda(const View *vw, const Cv *c, uint32_t b)
@@ -356,6 +365,19 @@ void triangulo(const View *vw, const Cv *tri, const TrackMat *m,
         return;
     }
     if (cuantos == 3) {
+        /* Lo normal: nada que recortar, y proyectar ya da lo que hace falta para saberlo. */
+        if (!vw->recorta_y) {
+            proyecta(vw, &tri[0], &out[0]);
+            proyecta(vw, &tri[1], &out[1]);
+            proyecta(vw, &tri[2], &out[2]);
+            if (dentro_guarda(out[0].x, out[0].y) && dentro_guarda(out[1].x, out[1].y) &&
+                dentro_guarda(out[2].x, out[2].y)) {
+                emit(user, out, 3u, m);
+                if (st != NULL)
+                    st->quads_out++;
+                return;
+            }
+        }
         n = 3u;
     } else {
         /* Sutherland-Hodgman sobre el plano cercano. */
@@ -500,42 +522,96 @@ static int de_frente(const Cv *a, const Cv *b, const Cv *c)
  * girada y escalada por el (3x3 por filas, ya transpuesta por quien llama). La pista usa
  * `mat` NULL; los objetos del escenario lo usan siempre. `dos_caras`: sin la prueba de cara
  * (los billboard; los materiales con el indicador 1 tampoco la pasan). */
+/* Un vertice de la malla ya transformado. Los cuadros comparten vertices (cada uno se usaba
+ * hasta cuatro veces), asi que se calcula la primera vez que se pide en esta malla. `ok`: esta
+ * delante del plano cercano y dentro de la banda de guarda, asi que no hay que recortar. */
+typedef struct {
+    uint32_t gen;
+    float x, y, z;
+    uint32_t argb;
+    float sx, sy, iz;
+    uint32_t ok;
+} MVert;
+
+#define MV_MAX 1024u
+static MVert s_mv[MV_MAX];
+static uint32_t s_mv_gen;
+
+static void mv_calcula(MVert *o, const View *vw, const int16_t *v, const uint32_t *light,
+                       const float p[3], const float *mat)
+{
+    float pz[3], g[3], w[3], d[3];
+    uint32_t s;
+
+    pz[0] = (float)v[0] / 64.0f;
+    pz[1] = (float)v[1] / 64.0f;
+    pz[2] = (float)v[2] / 64.0f;
+    if (mat != NULL) {
+        g[0] = mat[0] * pz[0] + mat[1] * pz[1] + mat[2] * pz[2];
+        g[1] = mat[3] * pz[0] + mat[4] * pz[1] + mat[5] * pz[2];
+        g[2] = mat[6] * pz[0] + mat[7] * pz[1] + mat[8] * pz[2];
+    } else {
+        g[0] = pz[0]; g[1] = pz[1]; g[2] = pz[2];
+    }
+    /* todo se calcula en espacio de PS1 y se espeja la X al final */
+    w[0] = -(p[0] + g[0]);
+    w[1] = p[1] + g[1];
+    w[2] = p[2] + g[2];
+    d[0] = w[0] - vw->cam[0];
+    d[1] = w[1] - vw->cam[1];
+    d[2] = w[2] - vw->cam[2];
+    o->x = vw->row[0][0] * d[0] + vw->row[0][1] * d[1] + vw->row[0][2] * d[2];
+    o->y = vw->row[1][0] * d[0] + vw->row[1][1] * d[1] + vw->row[1][2] * d[2];
+    o->z = vw->row[2][0] * d[0] + vw->row[2][1] * d[1] + vw->row[2][2] * d[2];
+    s = (uint32_t)(uint16_t)v[3] & 0xFFu;
+    /* de noche, la pista dentro del haz de los faros */
+    if (s_haz != NULL && mat == NULL)
+        s = sombra_haz(s_haz, w, s);
+    o->argb = color_sombra(light, s);
+    o->ok = 0;
+    if (o->z >= NEAR && !vw->recorta_y) {
+        o->iz = 1.0f / o->z;
+        o->sx = vw->ox + o->x * vw->fx * o->iz;
+        o->sy = vw->oy - o->y * vw->fy * o->iz;
+        o->ok = dentro_guarda(o->sx, o->sy);
+    }
+}
+
+/* El doble del area en pantalla (la Y va hacia abajo): negativa si el triangulo mira a la
+ * camara. Delante del plano cercano es la misma prueba que de_frente, con menos cuentas. */
+static float area_pantalla(const MVert *a, const MVert *b, const MVert *c)
+{
+    return (b->sx - a->sx) * (c->sy - a->sy) - (c->sx - a->sx) * (b->sy - a->sy);
+}
+
+static void tv_pon(TrackVert *o, const MVert *p, float u, float v)
+{
+    o->x = p->sx;
+    o->y = p->sy;
+    o->z = p->iz;
+    o->u = u;
+    o->v = v;
+    o->argb = p->argb;
+}
+
 static void malla(const Track *t, const View *vw, const uint32_t *light,
                   const float o[3], const float *mat, int dos_caras,
                   const int16_t *verts, uint32_t nv,
                   const uint16_t *quads, uint32_t nq,
                   TrackEmit emit, void *user, TrackStats *st)
 {
+    float au = (float)t->atlas_w, av = (float)t->atlas_h;
     uint32_t q;
 
-    if (getenv("PS1_TRACKDBG") != NULL && nq != 0u) {
-        const int16_t *v0 = verts;
-        float w0[3], d0[3], z0;
-
-        w0[0] = o[0] - (float)v0[0] / 64.0f;
-        w0[1] = o[1] + (float)v0[1] / 64.0f;
-        w0[2] = o[2] + (float)v0[2] / 64.0f;
-        d0[0] = w0[0] - vw->cam[0];
-        d0[1] = w0[1] - vw->cam[1];
-        d0[2] = w0[2] - vw->cam[2];
-        z0 = vw->row[2][0] * d0[0] + vw->row[2][1] * d0[1] + vw->row[2][2] * d0[2];
-        printf("    DBG cam (%.1f %.1f %.1f) adelante (%.3f %.3f %.3f) "
-               "origen (%.1f %.1f %.1f) v0 (%.1f %.1f %.1f) z=%.2f\n",
-               (double)vw->cam[0], (double)vw->cam[1], (double)vw->cam[2],
-               (double)vw->row[2][0], (double)vw->row[2][1], (double)vw->row[2][2],
-               (double)o[0], (double)o[1], (double)o[2],
-               (double)w0[0], (double)w0[1], (double)w0[2], (double)z0);
-    }
+    s_mv_gen++;
     for (q = 0; q < nq; q++) {
         const uint16_t *f = quads + q * 5u;
         const TrackMat *m = &t->mat[f[4] < t->mats ? f[4] : 0u];
-        Cv cv[4];
-        Cv tri[3];
+        MVert propio[4];
+        const MVert *pv[4];
+        float cu[4], cvv[4], u[4], v[4];
         uint32_t k;
         int dos;
-        float au = (float)t->atlas_w, av = (float)t->atlas_h;
-        /* las cuatro esquinas del rectangulo del material, en el atlas */
-        float cu[4], cvv[4];
 
         if (st != NULL)
             st->quads_in++;
@@ -551,64 +627,85 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
         cu[3] = (float)(m->x + m->w) - 0.5f;  cvv[3] = (float)(m->y + m->h) - 0.5f;
 
         for (k = 0; k < 4u; k++) {
-            uint32_t vi = f[k];
-            const int16_t *v;
-            float w[3], d[3];
-            uint32_t e = m->corner[k] & 3u;
+            uint32_t vi = f[k], e = m->corner[k] & 3u;
+            MVert *p;
 
             if (vi >= nv)
                 vi = 0;
-            v = verts + (size_t)vi * 4u;
-            {
-                float pz[3], g[3];
-
-                pz[0] = (float)v[0] / 64.0f;
-                pz[1] = (float)v[1] / 64.0f;
-                pz[2] = (float)v[2] / 64.0f;
-                if (mat != NULL) {
-                    g[0] = mat[0] * pz[0] + mat[1] * pz[1] + mat[2] * pz[2];
-                    g[1] = mat[3] * pz[0] + mat[4] * pz[1] + mat[5] * pz[2];
-                    g[2] = mat[6] * pz[0] + mat[7] * pz[1] + mat[8] * pz[2];
-                } else {
-                    g[0] = pz[0]; g[1] = pz[1]; g[2] = pz[2];
+            if (vi < MV_MAX) {
+                p = &s_mv[vi];
+                if (p->gen != s_mv_gen) {
+                    mv_calcula(p, vw, verts + (size_t)vi * 4u, light, o, mat);
+                    p->gen = s_mv_gen;
                 }
-                /* todo se calcula en espacio de PS1 y se espeja la X al final */
-                w[0] = -(o[0] + g[0]);
-                w[1] = o[1] + g[1];
-                w[2] = o[2] + g[2];
+            } else {
+                p = &propio[k];
+                mv_calcula(p, vw, verts + (size_t)vi * 4u, light, o, mat);
             }
-            d[0] = w[0] - vw->cam[0];
-            d[1] = w[1] - vw->cam[1];
-            d[2] = w[2] - vw->cam[2];
-            cv[k].x = vw->row[0][0] * d[0] + vw->row[0][1] * d[1] + vw->row[0][2] * d[2];
-            cv[k].y = vw->row[1][0] * d[0] + vw->row[1][1] * d[1] + vw->row[1][2] * d[2];
-            cv[k].z = vw->row[2][0] * d[0] + vw->row[2][1] * d[1] + vw->row[2][2] * d[2];
-            cv[k].u = cu[e] / au;
-            cv[k].v = cvv[e] / av;
-            {
-                uint32_t s = (uint32_t)(uint16_t)v[3] & 0xFFu;
+            pv[k] = p;
+            u[k] = cu[e] / au;
+            v[k] = cvv[e] / av;
+        }
+        dos = dos_caras || (m->flags & 1u) != 0u;
 
-                /* de noche, la pista dentro del haz de los faros */
-                if (s_haz != NULL && mat == NULL)
-                    s = sombra_haz(s_haz, w, s);
-                cv[k].argb = color_sombra(light, s);
+        /* Lo normal: nada que recortar. El cuadro va como UNA tira de cuatro vertices y no
+         * como dos triangulos de tres. El sumidero la monta 0, 1, 3, 2: empezando por el
+         * vertice 1 la diagonal es la 0-2, la misma de (0,1,2) y (0,2,3). */
+        if (pv[0]->ok && pv[1]->ok && pv[2]->ok && pv[3]->ok) {
+            int f1 = dos || area_pantalla(pv[0], pv[1], pv[2]) < 0.0f;
+            int f2 = dos || area_pantalla(pv[0], pv[2], pv[3]) < 0.0f;
+            TrackVert out[4];
+
+            if (f1 && f2) {
+                tv_pon(&out[0], pv[1], u[1], v[1]);
+                tv_pon(&out[1], pv[2], u[2], v[2]);
+                tv_pon(&out[2], pv[3], u[3], v[3]);
+                tv_pon(&out[3], pv[0], u[0], v[0]);
+                emit(user, out, 4u, m);
+                if (st != NULL)
+                    st->quads_out += 2u;
+            } else if (f1 || f2) {
+                uint32_t b = f1 ? 1u : 2u;
+
+                tv_pon(&out[0], pv[0], u[0], v[0]);
+                tv_pon(&out[1], pv[b], u[b], v[b]);
+                tv_pon(&out[2], pv[b + 1u], u[b + 1u], v[b + 1u]);
+                emit(user, out, 3u, m);
+                if (st != NULL) {
+                    st->quads_out++;
+                    st->espalda++;
+                }
+            } else if (st != NULL) {
+                st->espalda += 2u;
             }
+            continue;
         }
 
         /* Los vertices del cuadro van en orden CICLICO alrededor de el, no en zigzag,
          * asi que se parte en (0,1,2) y (0,2,3). Partirlo como una tira deja huecos
          * triangulares por toda la pista. */
-        dos = dos_caras || (m->flags & 1u) != 0u;
-        tri[0] = cv[0]; tri[1] = cv[1]; tri[2] = cv[2];
-        if (dos || de_frente(&tri[0], &tri[1], &tri[2]))
-            triangulo(vw, tri, m, emit, user, st);
-        else if (st != NULL)
-            st->espalda++;
-        tri[0] = cv[0]; tri[1] = cv[2]; tri[2] = cv[3];
-        if (dos || de_frente(&tri[0], &tri[1], &tri[2]))
-            triangulo(vw, tri, m, emit, user, st);
-        else if (st != NULL)
-            st->espalda++;
+        {
+            Cv tri[3];
+            static const uint8_t TRI[2][3] = { {0, 1, 2}, {0, 2, 3} };
+            uint32_t a;
+
+            for (a = 0; a < 2u; a++) {
+                for (k = 0; k < 3u; k++) {
+                    uint32_t i = TRI[a][k];
+
+                    tri[k].x = pv[i]->x;
+                    tri[k].y = pv[i]->y;
+                    tri[k].z = pv[i]->z;
+                    tri[k].u = u[i];
+                    tri[k].v = v[i];
+                    tri[k].argb = pv[i]->argb;
+                }
+                if (dos || de_frente(&tri[0], &tri[1], &tri[2]))
+                    triangulo(vw, tri, m, emit, user, st);
+                else if (st != NULL)
+                    st->espalda++;
+            }
+        }
     }
 }
 

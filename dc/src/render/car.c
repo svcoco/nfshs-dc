@@ -233,6 +233,8 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
     float ejes[3][3];            /* x, y, z del coche, en espacio de mundo */
     float pos[3], up[3];
     uint32_t pi, k, tono;
+    int directo;
+    float rm[3][3], rt[3];       /* del modelo a la camara (ver `directo`) */
 
     if (st != NULL)
         memset(st, 0, sizeof(*st));
@@ -316,8 +318,26 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
     if (solo_resta)
         tono = 128u;
 
+    /* Lo normal (carroceria y partes que se restan, sin espejo) va con UNA matriz, del modelo
+     * a la camara: la del coche por la de la vista. Las demas pasadas necesitan el mundo. */
+    directo = !reflejo && !d->mirror;
+    if (directo) {
+        float dp[3];
+        uint32_t f;
+
+        for (k = 0; k < 3u; k++)
+            dp[k] = pos[k] - vw.cam[k];
+        for (f = 0; f < 3u; f++) {
+            for (k = 0; k < 3u; k++)
+                rm[f][k] = vw.row[f][0] * ejes[k][0] + vw.row[f][1] * ejes[k][1] +
+                           vw.row[f][2] * ejes[k][2];
+            rt[f] = vw.row[f][0] * dp[0] + vw.row[f][1] * dp[1] + vw.row[f][2] * dp[2];
+        }
+    }
+
     for (pi = 0; pi < m->parts && pi < 57u; pi++) {
         const CarPart *p = &m->part[pi];
+        float sesgo = pasada == CAR_PASS_BODY && SESGO[pi] < 0 ? (float)(-SESGO[pi]) * 0.003f : 0.0f;
         uint8_t on = d->parts[pi];
         float rw[3][3];          /* giro propio de la parte (las ruedas) */
         int es_rueda = p->wheel != 0xFFu;
@@ -373,6 +393,26 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                 } else {
                     q[0] = lv[0]; q[1] = lv[1]; q[2] = lv[2];
                 }
+                if (directo) {
+                    tri[k].x = rm[0][0] * q[0] + rm[0][1] * q[1] + rm[0][2] * q[2] + rt[0];
+                    tri[k].y = rm[1][0] * q[0] + rm[1][1] * q[1] + rm[1][2] * q[2] + rt[1];
+                    tri[k].z = rm[2][0] * q[0] + rm[2][1] * q[1] + rm[2][2] * q[2] + rt[2];
+                    /* hacia la camara, que aqui es el origen. La distancia sale del espacio de
+                     * camara, que lleva la Y un poco aplastada: unos mm de sesgo de diferencia. */
+                    if (sesgo != 0.0f) {
+                        float dist = sqrtf(tri[k].x * tri[k].x + tri[k].y * tri[k].y +
+                                           tri[k].z * tri[k].z);
+
+                        if (dist > 1e-4f) {
+                            float e = 1.0f - sesgo / dist;
+
+                            tri[k].x *= e;
+                            tri[k].y *= e;
+                            tri[k].z *= e;
+                        }
+                    }
+                    goto color;
+                }
                 /* del espacio del modelo al mundo: las columnas son los ejes del coche */
                 wld[k][0] = pos[0] + ejes[0][0] * q[0] + ejes[1][0] * q[1] + ejes[2][0] * q[2];
                 wld[k][1] = pos[1] + ejes[0][1] * q[0] + ejes[1][1] * q[1] + ejes[2][1] * q[2];
@@ -382,6 +422,7 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                 if (d->mirror)
                     wld[k][1] = -wld[k][1];
 
+color:
                 memcpy(&c, &v[5], sizeof c);
                 tri[k].u = v[3];
                 tri[k].v = v[4];
@@ -462,7 +503,7 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
             }
             /* las partes que van por encima, un poco hacia la camara (ver SESGO); tambien el
              * reflejo del showroom, que tiene que caer justo sobre ellas */
-            if ((pasada == CAR_PASS_BODY || showroom) && SESGO[pi] < 0) {
+            if (!directo && (pasada == CAR_PASS_BODY || showroom) && SESGO[pi] < 0) {
                 float tira = (float)(-SESGO[pi]) * 0.003f;
 
                 for (k = 0; k < 3u; k++) {
@@ -477,7 +518,7 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                             wld[k][j] += hacia[j] / dist * tira;
                 }
             }
-            for (k = 0; k < 3u; k++) {
+            for (k = 0; k < 3u && !directo; k++) {
                 float dd[3];
                 uint32_t j;
 

@@ -328,15 +328,14 @@ static inline void ps1_st32(uint8_t *p, uint32_t v)
  * se ejecuta igual (el generador emite (void)(ps1_r8(...)) en 149 sitios), y una
  * lectura de IO tiene efecto lateral.
  */
-static inline uint32_t ps1_r8(Cpu *c, uint32_t a)
+static inline __attribute__((always_inline)) uint32_t ps1_r8(Cpu *c, uint32_t a)
 {
-    uint32_t p = a & 0x1FFFFFFFu;
-    if (PS1_LIKELY(p < PS1_IO_BASE))
-        return c->ram[p & PS1_RAM_MASK];
+    if (PS1_LIKELY((a & 0x1F800000u) == 0u))
+        return c->ram[a & PS1_RAM_MASK];
     return ps1_r8_slow(c, a);
 }
 
-static inline uint32_t ps1_r16(Cpu *c, uint32_t a)
+static inline __attribute__((always_inline)) uint32_t ps1_r16(Cpu *c, uint32_t a)
 {
     /* una sola prueba: en RAM y alineado. Lo demas, en la ruta lenta */
     if (PS1_LIKELY((a & (0x1F800000u | 1u)) == 0u))
@@ -344,7 +343,7 @@ static inline uint32_t ps1_r16(Cpu *c, uint32_t a)
     return ps1_r16_slow(c, a);
 }
 
-static inline uint32_t ps1_r32(Cpu *c, uint32_t a)
+static inline __attribute__((always_inline)) uint32_t ps1_r32(Cpu *c, uint32_t a)
 {
     /* una sola prueba: en RAM y alineado. Lo demas, en la ruta lenta */
     if (PS1_LIKELY((a & (0x1F800000u | 3u)) == 0u))
@@ -352,17 +351,16 @@ static inline uint32_t ps1_r32(Cpu *c, uint32_t a)
     return ps1_r32_slow(c, a);
 }
 
-static inline void ps1_w8(Cpu *c, uint32_t a, uint32_t v)
+static inline __attribute__((always_inline)) void ps1_w8(Cpu *c, uint32_t a, uint32_t v)
 {
-    uint32_t p = a & 0x1FFFFFFFu;
-    if (PS1_LIKELY(p < PS1_IO_BASE)) {
-        c->ram[p & PS1_RAM_MASK] = (uint8_t)v;
+    if (PS1_LIKELY((a & 0x1F800000u) == 0u)) {
+        c->ram[a & PS1_RAM_MASK] = (uint8_t)v;
         return;
     }
     ps1_w8_slow(c, a, v);
 }
 
-static inline void ps1_w16(Cpu *c, uint32_t a, uint32_t v)
+static inline __attribute__((always_inline)) void ps1_w16(Cpu *c, uint32_t a, uint32_t v)
 {
     if (PS1_LIKELY((a & (0x1F800000u | 1u)) == 0u)) {
         *(ps1_u16a *)(c->ram + (a & PS1_RAM_MASK)) = (uint16_t)v;
@@ -371,7 +369,7 @@ static inline void ps1_w16(Cpu *c, uint32_t a, uint32_t v)
     ps1_w16_slow(c, a, v);
 }
 
-static inline void ps1_w32(Cpu *c, uint32_t a, uint32_t v)
+static inline __attribute__((always_inline)) void ps1_w32(Cpu *c, uint32_t a, uint32_t v)
 {
     if (PS1_LIKELY((a & (0x1F800000u | 3u)) == 0u)) {
         *(ps1_u32a *)(c->ram + (a & PS1_RAM_MASK)) = v;
@@ -379,5 +377,42 @@ static inline void ps1_w32(Cpu *c, uint32_t a, uint32_t v)
     }
     ps1_w32_slow(c, a, v);
 }
+
+/* M8: el codigo generado de Dreamcast. Las funciones calientes (PS1_HOT) llevan los accesos en
+ * linea, y la multiplicacion tambien; las demas llaman a una sola copia (mem.c), porque en
+ * linea en las 3 674 funciones no caben: 8,46 MB de codigo frente a 16 MB de RAM con 8 de BSS. */
+uint32_t ps1_r8_x(Cpu *c, uint32_t a);
+uint32_t ps1_r16_x(Cpu *c, uint32_t a);
+uint32_t ps1_r32_x(Cpu *c, uint32_t a);
+void     ps1_w8_x(Cpu *c, uint32_t a, uint32_t v);
+void     ps1_w16_x(Cpu *c, uint32_t a, uint32_t v);
+void     ps1_w32_x(Cpu *c, uint32_t a, uint32_t v);
+#if defined(PS1_EXT_ACCESS) && !defined(PS1_HOT)
+#define ps1_r8  ps1_r8_x
+#define ps1_r16 ps1_r16_x
+#define ps1_r32 ps1_r32_x
+#define ps1_w8  ps1_w8_x
+#define ps1_w16 ps1_w16_x
+#define ps1_w32 ps1_w32_x
+#endif
+#ifdef PS1_HOT
+static inline __attribute__((always_inline)) void ps1_mult_h(Cpu *c, uint32_t a, uint32_t b)
+{
+    int64_t p = (int64_t)(int32_t)a * (int64_t)(int32_t)b;
+
+    c->lo = (uint32_t)p;
+    c->hi = (uint32_t)((uint64_t)p >> 32);
+}
+
+static inline __attribute__((always_inline)) void ps1_multu_h(Cpu *c, uint32_t a, uint32_t b)
+{
+    uint64_t p = (uint64_t)a * (uint64_t)b;
+
+    c->lo = (uint32_t)p;
+    c->hi = (uint32_t)(p >> 32);
+}
+#define ps1_mult  ps1_mult_h
+#define ps1_multu ps1_multu_h
+#endif
 
 #endif /* PS1RT_H */

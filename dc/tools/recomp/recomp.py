@@ -605,7 +605,9 @@ def gen_function_c(f, known, comments=True):
         out.append(f'/* `{n}`' + (f' ({SRC[dev]})' if dev in SRC else '') + ' */')
     out.append(f'void f_{f:08x}(Cpu *c) {{ f_{f:08x}_at(c, {cu(f)}); }}')
     out.append('')
-    out.append(f'void f_{f:08x}_at(Cpu *c, uint32_t pc)')
+    # restrict: la RAM del invitado no esta en Cpu (el scratchpad, si, pero va por funciones que
+    # reciben c), asi que el compilador no recarga c->r[] tras cada escritura a RAM (M8)
+    out.append(f'void f_{f:08x}_at(Cpu *restrict c, uint32_t pc)')
     out.append('{')
     out.append('    uint32_t t, cnd, off;')
     out.append('    (void)t; (void)cnd; (void)off;')
@@ -730,14 +732,25 @@ def emit_c(funcs, known, out_dir, instrs_per_part=4000, comments=True):
               '(NTSC-U SLUS-00826). No editar a mano. */')
 
     # --- reparto por instrucciones -----------------------------------------
-    parts, cur, cur_instrs = [], [], 0
-    for f in funcs:
-        n = (func_end(f) - f) // 4
-        if cur and cur_instrs + n > instrs_per_part:
-            parts.append(cur); cur, cur_instrs = [], 0
-        cur.append(f); cur_instrs += n
-    if cur:
-        parts.append(cur)
+    # Las funciones calientes (hot_funcs.txt, M8) van aparte: en Dreamcast, a -O2 y con los
+    # accesos a memoria en linea. Al enlazar quedan seguidas.
+    hot_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hot_funcs.txt')
+    hot_set = {int(l.split()[0], 16) for l in open(hot_path) if l.strip() and not l.startswith('#')}
+
+    def reparte(lista):
+        out, cur, cur_instrs = [], [], 0
+        for f in lista:
+            n = (func_end(f) - f) // 4
+            if cur and cur_instrs + n > instrs_per_part:
+                out.append(cur); cur, cur_instrs = [], 0
+            cur.append(f); cur_instrs += n
+        if cur:
+            out.append(cur)
+        return out
+
+    hot_parts = reparte([f for f in funcs if f in hot_set])
+    parts = [(f'hot_{k:02}', sub) for k, sub in enumerate(hot_parts)]
+    parts += [(f'part_{k:02}', sub) for k, sub in enumerate(reparte([f for f in funcs if f not in hot_set]))]
 
     # --- funcs.h -----------------------------------------------------------
     h = [banner, '#ifndef NFS4RC_FUNCS_H', '#define NFS4RC_FUNCS_H', '',
@@ -762,18 +775,19 @@ def emit_c(funcs, known, out_dir, instrs_per_part=4000, comments=True):
 
     # --- part_XX.c ---------------------------------------------------------
     manifest, stubs = {}, 0
-    for k, sub in enumerate(parts):
-        body = [banner, '', '#include "funcs.h"', '']
+    for nombre, sub in parts:
+        body = [banner, ''] + (['#define PS1_HOT 1'] if nombre.startswith('hot_') else [])
+        body += ['#include "funcs.h"', '']
         for f in sub:
             src = safe_gen_c(f, known, comments)
             is_stub = src.startswith(f'void f_{f:08x}(Cpu *c) {{ ps1_panic')
             stubs += is_stub
             manifest[f'{f:#010x}'] = {
                 'start': f, 'end': func_end(f), 'instrs': (func_end(f) - f) // 4,
-                'part': k, 'stub': is_stub,
+                'part': nombre, 'stub': is_stub,
             }
             body.append(src)
-        open(os.path.join(out_dir, f'part_{k:02}.c'), 'w', encoding='utf-8').write('\n'.join(body))
+        open(os.path.join(out_dir, f'{nombre}.c'), 'w', encoding='utf-8').write('\n'.join(body))
 
     # --- dispatch.c --------------------------------------------------------
     d = [banner, '', '#include "funcs.h"', '']
@@ -834,7 +848,7 @@ def emit_c(funcs, known, out_dir, instrs_per_part=4000, comments=True):
     # --- parts.mk y manifest.json ------------------------------------------
     mk = ['# Generado por recomp.py. Incluir desde el Makefile para compilar con -j.',
           'GEN_SRCS := \\']
-    mk += [f'\tpart_{k:02}.c \\' for k in range(len(parts))]
+    mk += [f'\t{nombre}.c \\' for nombre, _ in parts]
     mk += ['\tdispatch.c', '']
     open(os.path.join(out_dir, 'parts.mk'), 'w', encoding='utf-8').write('\n'.join(mk))
     import json

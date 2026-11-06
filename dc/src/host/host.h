@@ -38,7 +38,11 @@
 #define PAD_SCRIPT_MAX 4096u
 /* Tabla de TODAS las llamadas que ve el host, por direccion (HLE y no HLE), para
  * poder diferenciarla contra la de la referencia. */
+#if defined(PS1_DIAG) && !PS1_DIAG
+#define HOST_SEEN_MAX 1u          /* Dreamcast no los anota (note_seen) */
+#else
 #define HOST_SEEN_MAX 4096u
+#endif
 
 /* Reloj virtual del host, en unidades de 1/1920 de segundo (los mismos valores que
  * TICK y FIELD en src/ps1/host/mod.rs de la referencia): 1920/15 = 128 Hz para el

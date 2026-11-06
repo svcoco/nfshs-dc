@@ -15,6 +15,8 @@ _Static_assert(sizeof(TrackMat) == 16, "TrackMat tiene que medir 16 bytes");
 /* Plano cercano, en metros. Por delante de el no se puede dividir por z. */
 #define NEAR 0.25f
 
+#include "vmath.h"
+
 /* ---- carga ---- */
 
 static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
@@ -239,7 +241,7 @@ void view_size(const struct RaceView *v, float dw, float dh, float W, float H,
 
 static void proyecta(const View *vw, const Cv *c, TrackVert *o)
 {
-    float inv = 1.0f / c->z;
+    float inv = vm_inv(c->z);
 
     o->x = vw->ox + c->x * vw->fx * inv;
     o->y = vw->oy - c->y * vw->fy * inv;
@@ -537,40 +539,50 @@ typedef struct {
 static MVert s_mv[MV_MAX];
 static uint32_t s_mv_gen;
 
-static void mv_calcula(MVert *o, const View *vw, const int16_t *v, const uint32_t *light,
-                       const float p[3], const float *mat)
+/* La matriz de una malla: de las coordenadas enteras del horneado (1/64 de metro) a la camara.
+ * Es lo que se hacia por vertice: girar con `mat`, sumar `p`, espejar la X, restar la camara y
+ * aplicar la vista. */
+static void mv_matriz(const View *vw, const float p[3], const float *mat, float mm[3][3], float tt[3])
 {
-    float pz[3], g[3], w[3], d[3];
+    float d[3];
+    uint32_t f, k;
+
+    d[0] = -p[0] - vw->cam[0];
+    d[1] = p[1] - vw->cam[1];
+    d[2] = p[2] - vw->cam[2];
+    for (f = 0; f < 3u; f++) {
+        for (k = 0; k < 3u; k++) {
+            float g0 = mat != NULL ? mat[k] : (k == 0u ? 1.0f : 0.0f);
+            float g1 = mat != NULL ? mat[3u + k] : (k == 1u ? 1.0f : 0.0f);
+            float g2 = mat != NULL ? mat[6u + k] : (k == 2u ? 1.0f : 0.0f);
+
+            mm[f][k] = (-vw->row[f][0] * g0 + vw->row[f][1] * g1 + vw->row[f][2] * g2) / 64.0f;
+        }
+        tt[f] = vw->row[f][0] * d[0] + vw->row[f][1] * d[1] + vw->row[f][2] * d[2];
+    }
+}
+
+static inline void mv_calcula(MVert *o, const View *vw, const int16_t *v, const uint32_t *light,
+                              const float mm[3][3], const float tt[3],
+                              const float p[3], const float *mat)
+{
     uint32_t s;
 
-    pz[0] = (float)v[0] / 64.0f;
-    pz[1] = (float)v[1] / 64.0f;
-    pz[2] = (float)v[2] / 64.0f;
-    if (mat != NULL) {
-        g[0] = mat[0] * pz[0] + mat[1] * pz[1] + mat[2] * pz[2];
-        g[1] = mat[3] * pz[0] + mat[4] * pz[1] + mat[5] * pz[2];
-        g[2] = mat[6] * pz[0] + mat[7] * pz[1] + mat[8] * pz[2];
-    } else {
-        g[0] = pz[0]; g[1] = pz[1]; g[2] = pz[2];
-    }
-    /* todo se calcula en espacio de PS1 y se espeja la X al final */
-    w[0] = -(p[0] + g[0]);
-    w[1] = p[1] + g[1];
-    w[2] = p[2] + g[2];
-    d[0] = w[0] - vw->cam[0];
-    d[1] = w[1] - vw->cam[1];
-    d[2] = w[2] - vw->cam[2];
-    o->x = vw->row[0][0] * d[0] + vw->row[0][1] * d[1] + vw->row[0][2] * d[2];
-    o->y = vw->row[1][0] * d[0] + vw->row[1][1] * d[1] + vw->row[1][2] * d[2];
-    o->z = vw->row[2][0] * d[0] + vw->row[2][1] * d[1] + vw->row[2][2] * d[2];
+    vm_aplica(mm, tt, (float)v[0], (float)v[1], (float)v[2], &o->x, &o->y, &o->z);
     s = (uint32_t)(uint16_t)v[3] & 0xFFu;
     /* de noche, la pista dentro del haz de los faros */
-    if (s_haz != NULL && mat == NULL)
+    if (s_haz != NULL && mat == NULL) {
+        float w[3];
+
+        w[0] = -(p[0] + (float)v[0] / 64.0f);
+        w[1] = p[1] + (float)v[1] / 64.0f;
+        w[2] = p[2] + (float)v[2] / 64.0f;
         s = sombra_haz(s_haz, w, s);
+    }
     o->argb = color_sombra(light, s);
     o->ok = 0;
     if (o->z >= NEAR && !vw->recorta_y) {
-        o->iz = 1.0f / o->z;
+        o->iz = vm_inv(o->z);
         o->sx = vw->ox + o->x * vw->fx * o->iz;
         o->sy = vw->oy - o->y * vw->fy * o->iz;
         o->ok = dentro_guarda(o->sx, o->sy);
@@ -601,8 +613,13 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
                   TrackEmit emit, void *user, TrackStats *st)
 {
     float au = (float)t->atlas_w, av = (float)t->atlas_h;
+    float mm[3][3], tt[3];
     uint32_t q;
 
+    if (nq == 0u)
+        return;
+    mv_matriz(vw, o, mat, mm, tt);
+    vm_carga(mm, tt);
     s_mv_gen++;
     for (q = 0; q < nq; q++) {
         const uint16_t *f = quads + q * 5u;
@@ -635,12 +652,12 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
             if (vi < MV_MAX) {
                 p = &s_mv[vi];
                 if (p->gen != s_mv_gen) {
-                    mv_calcula(p, vw, verts + (size_t)vi * 4u, light, o, mat);
+                    mv_calcula(p, vw, verts + (size_t)vi * 4u, light, mm, tt, o, mat);
                     p->gen = s_mv_gen;
                 }
             } else {
                 p = &propio[k];
-                mv_calcula(p, vw, verts + (size_t)vi * 4u, light, o, mat);
+                mv_calcula(p, vw, verts + (size_t)vi * 4u, light, mm, tt, o, mat);
             }
             pv[k] = p;
             u[k] = cu[e] / au;

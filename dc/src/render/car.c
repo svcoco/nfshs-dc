@@ -1,5 +1,6 @@
 /* Los coches en pantalla. Ver car.h para el porque. */
 #include "host.h"
+#include "vmath.h"
 #include "car.h"
 #include "trackint.h"
 
@@ -333,6 +334,7 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                            vw.row[f][2] * ejes[k][2];
             rt[f] = vw.row[f][0] * dp[0] + vw.row[f][1] * dp[1] + vw.row[f][2] * dp[2];
         }
+        vm_carga(rm, rt);
     }
 
     for (pi = 0; pi < m->parts && pi < 57u; pi++) {
@@ -394,9 +396,7 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                     q[0] = lv[0]; q[1] = lv[1]; q[2] = lv[2];
                 }
                 if (directo) {
-                    tri[k].x = rm[0][0] * q[0] + rm[0][1] * q[1] + rm[0][2] * q[2] + rt[0];
-                    tri[k].y = rm[1][0] * q[0] + rm[1][1] * q[1] + rm[1][2] * q[2] + rt[1];
-                    tri[k].z = rm[2][0] * q[0] + rm[2][1] * q[1] + rm[2][2] * q[2] + rt[2];
+                    vm_aplica(rm, rt, q[0], q[1], q[2], &tri[k].x, &tri[k].y, &tri[k].z);
                     /* hacia la camara, que aqui es el origen. La distancia sale del espacio de
                      * camara, que lleva la Y un poco aplastada: unos mm de sesgo de diferencia. */
                     if (sesgo != 0.0f) {

@@ -206,7 +206,7 @@ $(AICA_DRV_C):
 # El C generado no se recompila aqui: lo hace dc-gen, que son 71 unidades y tarda.
 dc-gen: dc-check $(GEN)/parts.mk
 	@mkdir -p $(DCBUILD)/gen $(TMPDIR)
-	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(DCFAST) $(GENFLAGS)" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
+	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(DCFAST) -DPS1_EXT_ACCESS $(GENFLAGS)" HOTFLAGS="-O2" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
 
 $(DCBUILD)/nfshs.elf: dc-check dc-gen $(DC_OBJS)
 	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o $(DCSILENCIO) -o $@

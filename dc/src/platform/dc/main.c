@@ -23,6 +23,7 @@
 #include "silencio.h"
 #include "vmu_fps.h"
 #include <malloc.h>
+extern void *sbrk(intptr_t);
 #include "render.h"
 #include "video.h"
 #include "movie.h"
@@ -176,7 +177,7 @@ static void *diag_thread(void *arg)
                        (unsigned long)ve, (unsigned long)vf, (unsigned long)vms);
         }
         printf("        memoria: RAM libre %lu KB, VRAM libre %lu KB\n",
-               (unsigned long)(mallinfo().fordblks / 1024u),
+               (unsigned long)((mallinfo().fordblks + ((uintptr_t)_arch_mem_top - 65536u - (uintptr_t)sbrk(0))) / 1024u),
                (unsigned long)(pvr_mem_available() / 1024u));
         printf("        archivos %lu ok / %lu fallidos  BIGF %lu ok / %lu fallidos\n",
                (unsigned long)host.files.opens, (unsigned long)host.files.opens_failed,

@@ -191,3 +191,11 @@ void ps1_load_exe(Cpu *c, const uint8_t *exe, size_t len)
         avail = t_size;
     ps1_write_bytes(c, t_addr, exe + 0x800, (uint32_t)avail);
 }
+
+/* La copia unica de los accesos, para el codigo generado que no los lleva en linea (ps1rt.h). */
+uint32_t ps1_r8_x(Cpu *c, uint32_t a)  { return ps1_r8(c, a); }
+uint32_t ps1_r16_x(Cpu *c, uint32_t a) { return ps1_r16(c, a); }
+uint32_t ps1_r32_x(Cpu *c, uint32_t a) { return ps1_r32(c, a); }
+void ps1_w8_x(Cpu *c, uint32_t a, uint32_t v)  { ps1_w8(c, a, v); }
+void ps1_w16_x(Cpu *c, uint32_t a, uint32_t v) { ps1_w16(c, a, v); }
+void ps1_w32_x(Cpu *c, uint32_t a, uint32_t v) { ps1_w32(c, a, v); }

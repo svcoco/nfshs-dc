@@ -139,7 +139,7 @@ int host_gpu_call(GameHost *h, Cpu *c, uint32_t addr, uint32_t *ret)
         if (h->mode == HOST_RACE && ps1_r32(c, SIM_PAUSED) == 0u) {
             if (h->hud_lists < HUD_LISTS_MAX)
                 h->hud_start[h->hud_lists++] = h->overlay.n;
-            if (h->otags_frame > 0u || overlay_ot_len(c, a0) < 1500u)
+            if (h->otags_frame > 0u || overlay_ot_len(c, a0, 1500u) < 1500u)
                 overlay_record_ot(h, c, a0);
             h->hud_end = h->overlay.n;
             h->otags_frame++;

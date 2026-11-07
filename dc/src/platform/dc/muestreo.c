@@ -35,7 +35,11 @@ extern const uint32_t  perfil_tab_n __attribute__((weak));
 
 #define HZ_MUESTREO  997u            /* primo: no va en fase con los 60 Hz ni con el reloj de KOS */
 #define MUESTRAS     40000u          /* unos 40 s */
+#ifdef NFSHS_SERIE
+#define ESPERA_MS    5000u           /* con guion, en Flycast, para el volcado de perfil_orden.py */
+#else
 #define ESPERA_MS    35000u          /* tras empezar la carrera: salta la carga y da tiempo a llegar al trafico */
+#endif
 #define TURNO_MS     4000u
 #define HILO_AJENO   0x80u
 
@@ -124,6 +128,38 @@ static void fila(unsigned col, const char *txt)
     bfont_draw_str_vram_fmt(24u + col * 300u, 30u + s_fila * 24u, true, "%s", txt);
 }
 
+#ifdef NFSHS_SERIE
+/* Todo el perfil por el puerto serie, para tools/recomp/perfil_orden.py: "PF <addr> <seccion> <n>";
+ * la seccion HSEC_N son los otros hilos. */
+static void volcado(uint32_t n, uint32_t nsim)
+{
+    uint32_t *t = calloc((size_t)nsim * (HSEC_N + 1u), sizeof *t);
+    uint32_t i;
+
+    if (t == NULL) {
+        printf("PF-SIN-MEMORIA\n");
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        int k = simbolo(s_pc[i]);
+        uint32_t sec = (s_sec[i] & HILO_AJENO) ? HSEC_N : (s_sec[i] & 0x7Fu);
+
+        if (k >= 0 && sec <= HSEC_N)
+            t[(uint32_t)k * (HSEC_N + 1u) + sec]++;
+    }
+    for (i = 0; i < nsim; i++) {
+        uint32_t j;
+
+        for (j = 0; j <= HSEC_N; j++)
+            if (t[i * (HSEC_N + 1u) + j] != 0u)
+                printf("PF %08lx %lu %lu\n", (unsigned long)perfil_tab[i].addr, (unsigned long)j,
+                       (unsigned long)t[i * (HSEC_N + 1u) + j]);
+    }
+    printf("PF-FIN\n");
+    free(t);
+}
+#endif
+
 static uint32_t *s_cuenta;
 
 static int cmp_cuenta(const void *a, const void *b)
@@ -193,6 +229,11 @@ static void informe(uint64_t frames, uint64_t campos, uint64_t ms)
             orden[i] = i;
         qsort(orden, nsim, sizeof *orden, cmp_cuenta);
     }
+
+#ifdef NFSHS_SERIE
+    if (nsim != 0u)
+        volcado(n, nsim);
+#endif
 
     for (;;) {
         unsigned total = 2u + PAGINAS_TOP;

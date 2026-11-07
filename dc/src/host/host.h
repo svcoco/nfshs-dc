@@ -610,7 +610,7 @@ void host_glows_reset(GameHost *h);
 
 /* El HUD de carrera: grabar una tabla de ordenacion en DrawOTag, y componer las del
  * frame en la frontera. Ver overlay.c. */
-uint32_t overlay_ot_len(Cpu *c, uint32_t start);
+uint32_t overlay_ot_len(Cpu *c, uint32_t start, uint32_t tope);
 void     overlay_record_ot(GameHost *h, Cpu *c, uint32_t start);
 void     overlay_race_compose(GameHost *h);
 void host_unlock_everything(GameHost *h, Cpu *c);

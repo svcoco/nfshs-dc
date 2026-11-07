@@ -223,6 +223,12 @@ CPPFLAGS += -DNFSHS_PERFIL
 endif
 DCPBUILD := $(BUILD)/dcp
 
+# El orden de .text sale de un perfil (tools/recomp/perfil_orden.py). ORDEN= lo quita, para comparar.
+ORDEN ?= tools/recomp/orden_text.ld
+ifneq ($(wildcard $(ORDEN)),)
+DCORDEN := -Wl,--section-ordering-file=$(ORDEN)
+endif
+
 dc-perfil:
 	@$(MAKE) --no-print-directory dc PERFIL=1 DCBUILD=$(DCPBUILD)
 	sh-elf-nm -n $(DCPBUILD)/nfshs.elf > $(DCPBUILD)/nm1.txt
@@ -234,15 +240,15 @@ dc-perfil:
 	@sh-elf-size $(DCPBUILD)/nfshs.elf
 
 dc-perfil-enlaza:
-	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o $(DCBUILD)/perfil_tab.o $(DCSILENCIO) -o $(DCBUILD)/nfshs.elf
+	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o $(DCBUILD)/perfil_tab.o $(DCSILENCIO) $(DCORDEN) -o $(DCBUILD)/nfshs.elf
 
 # El C generado no se recompila aqui: lo hace dc-gen, que son 71 unidades y tarda.
 dc-gen: dc-check $(GEN)/parts.mk
 	@mkdir -p $(DCBUILD)/gen $(TMPDIR)
-	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(DCFAST) -DPS1_EXT_ACCESS $(GENFLAGS)" HOTFLAGS="-O2" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
+	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(DCFAST) -DPS1_EXT_ACCESS -ffunction-sections $(GENFLAGS)" HOTFLAGS="-O2" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
 
 $(DCBUILD)/nfshs.elf: dc-check dc-gen $(DC_OBJS)
-	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o $(DCSILENCIO) -o $@
+	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o $(DCSILENCIO) $(DCORDEN) -o $@
 	@sh-elf-size $@
 
 # Horneado de pistas (M2b paso 2): GRP + PSH -> un .TRK que el SH-4 dibuja sin parsear

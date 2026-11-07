@@ -72,6 +72,7 @@ typedef struct {
     uint32_t largo;                                /* muestras */
     uint32_t freq;                                 /* Hz */
     uint32_t vol, pan;                             /* 0-255 */
+    uint8_t  pend;                                 /* cambios que aun no se han mandado al canal (PEND_*) */
     uint64_t fin_us;                               /* sin bucle: cuando acaba */
     uint16_t vl, vr;                               /* ultimos volumenes fijos (magnitud) */
     /* VOZ LARGA: su canal toca en bucle el anillo `anillo`; aqui va la voz de PS1 que lo
@@ -93,6 +94,9 @@ typedef struct {
     uint8_t  drv_vuelta;                           /* el driver ya dio la vuelta al anillo */
     uint32_t vueltas;                              /* saltos a la repeticion (vueltas al anillo) */
 } Voz;
+
+#define PEND_FREQ 1u
+#define PEND_VOL  2u
 
 /* El bloque de la RAM de sonido de cada tramo (28 muestras) escrito en un anillo: para la IRQ
  * por direccion y para ver si el driver pisa algo que aun no ha sonado. */
@@ -123,6 +127,7 @@ static uint32_t s_subido_ms[BLOQUES];              /* cuando subio el driver cad
 static uint32_t s_keyons, s_bloques, s_largos, s_sin_anillo, s_vacios, s_largas_max;
 static uint64_t s_hilo_us, s_bus_us, s_subida_us;
 static uint32_t s_n_subidas, s_saltados, s_n_registros, s_n_niveles, s_tarde;
+static uint32_t s_upd_pedidos, s_upd_enviados;
 static uint32_t s_dist[4], s_irqs, s_tarde_ant, s_paradas, s_adelantos, s_atrasos;
 
 /* ---- muestras ---- */
@@ -198,6 +203,7 @@ static void pisados(Voz *v, uint32_t b0, uint32_t b1);
 static void sigue_al_driver(Voz *v, uint32_t b0, uint32_t b1);
 static void retoma(Voz *v, uint64_t ahora);
 static void rev_aplica(const uint16_t *regs);
+static void manda_cambios(void);
 
 static void subida(void *ctx, const uint8_t *ram, uint32_t addr, uint32_t len)
 {
@@ -617,6 +623,7 @@ static void *hilo_largas(void *arg)
         thd_sleep(20);
         mutex_lock(&s_mtx);
         t0 = timer_us_gettime64();
+        manda_cambios();
         for (unsigned n = 0; n < VOCES; n++)
             if (s_v[n].suena && s_v[n].larga && s_v[n].anillo >= 0)
                 rellena(&s_v[n], t0);
@@ -704,9 +711,33 @@ static void revolumen(Voz *v, const uint16_t *regs, unsigned n)
     uint32_t vol = v->vol, pan = v->pan;
 
     volumen(v, regs, n);
-    if (v->suena && (!v->larga || v->anillo >= 0) && (vol != v->vol || pan != v->pan))
-        canal(v->canal, AICA_CH_CMD_UPDATE | AICA_CH_UPDATE_SET_VOL | AICA_CH_UPDATE_SET_PAN,
-              0, 0, 0, 0, 0, v->vol, v->pan);
+    if (v->suena && (!v->larga || v->anillo >= 0) && (vol != v->vol || pan != v->pan)) {
+        v->pend |= PEND_VOL;
+        s_upd_pedidos++;
+    }
+}
+
+/* Cada paquete al AICA son 16 escrituras y 4 lecturas por el bus G2. El driver cambia tono y
+ * volumen a rafagas, varias veces por campo, y solo cuenta el ultimo valor: lo manda el hilo de
+ * las voces, cada 20 ms y en un solo paquete por voz (M8). */
+static void manda_cambios(void)
+{
+    for (unsigned n = 0; n < VOCES; n++) {
+        Voz *v = &s_v[n];
+        uint32_t cmd = AICA_CH_CMD_UPDATE;
+
+        if (v->pend == 0u)
+            continue;
+        if (v->pend & PEND_FREQ)
+            cmd |= AICA_CH_UPDATE_SET_FREQ;
+        if (v->pend & PEND_VOL)
+            cmd |= AICA_CH_UPDATE_SET_VOL | AICA_CH_UPDATE_SET_PAN;
+        v->pend = 0;
+        if (v->suena && (!v->larga || v->anillo >= 0)) {
+            canal(v->canal, cmd, 0, 0, 0, 0, v->freq, v->vol, v->pan);
+            s_upd_enviados++;
+        }
+    }
 }
 
 /* ---- la reverb: el DSP del AICA ----
@@ -848,7 +879,8 @@ static void registro_(const uint16_t *regs, uint32_t off, uint16_t val)
                 uint32_t f = frecuencia(regs, n);
                 if (f != v->freq && f != 0u) {
                     v->freq = f;
-                    canal(v->canal, AICA_CH_CMD_UPDATE | AICA_CH_UPDATE_SET_FREQ, 0, 0, 0, 0, f, 0, 0);
+                    v->pend |= PEND_FREQ;
+                    s_upd_pedidos++;
                 }
             }
             break;
@@ -1015,6 +1047,8 @@ void aica_spu_report(void)
            (unsigned long)s_largas_max, (unsigned long)s_sin_anillo, (unsigned long)s_vacios, (unsigned long)s_tarde, (unsigned long)(s_tarde - s_tarde_ant), (unsigned long)s_irqs, (unsigned long)s_paradas,
            (unsigned long)(s_hilo_us / 1000u));
     s_tarde_ant = s_tarde;
+    printf("        audio: cambios de tono y volumen %lu, paquetes %lu\n",
+           (unsigned long)s_upd_pedidos, (unsigned long)s_upd_enviados);
     printf("        audio: reverb %s, anillo del DSP en %#lx (area de PS1 desde el bloque %#lx), %lu configuraciones, pico de salida %ld\n",
            s_rev_on && s_rev_anillo ? "encendida" : "apagada", (unsigned long)s_rev_anillo,
            (unsigned long)s_rev_lo, (unsigned long)s_rev_cambios, (long)s_rev_pico);

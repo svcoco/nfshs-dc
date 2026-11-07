@@ -415,12 +415,12 @@ void overlay_record_packets(GameHost *h, Cpu *c, uint32_t start, uint32_t end)
  * (src/ps1/host/overlay.rs y frame.rs).
  */
 
-/* Paquetes de una tabla, siguiendo los punteros hasta el final. */
-uint32_t overlay_ot_len(Cpu *c, uint32_t start)
+/* Paquetes de una tabla, siguiendo los punteros hasta el final o hasta `tope`. */
+uint32_t overlay_ot_len(Cpu *c, uint32_t start, uint32_t tope)
 {
     uint32_t a = start, n = 0;
 
-    while (n < 20000u) {
+    while (n < tope) {
         uint32_t next = ps1_r32(c, a) & 0xFFFFFFu;
 
         n++;

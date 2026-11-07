@@ -13,6 +13,13 @@
 #   mkdisc.sh ... --minimal       solo lo que la ejecucion medida toca (~90 MB)
 #   mkdisc.sh ... --script dc/test/diff/scripts/into_race.txt   entrada guionizada
 #   mkdisc.sh ... --video ntsc   fuerza el modo en vez de detectar el cable
+#   mkdisc.sh ... --cdi-tool /ruta/cdi4dc   usa el generador externo Audio/Data: es el que
+#                                           arranca en la consola real (docs/BUILD_CDI_GDEMU.md)
+#
+# El CDI sale como nfshs_<yyyyMMddHHmm>.cdi, para saber que build se esta probando.
+#
+# Un disco de PRUEBA pequeno (para grabarlo en cualquier CD-R y ver si la consola lo arranca):
+#   mkdir vacio && mkdisc.sh --elf dc/build/dc/run_tests.elf --data vacio --baked ninguno --out ...
 #
 # ---- las dos disposiciones, y por que CDI por omision ----
 #
@@ -29,7 +36,7 @@
 # ISO9660 son absolutos y KOS los lee tal cual (ver docs/hitos/M1b.md).
 set -eu
 
-ELF=""; DATA="gamedata"; OUT=""; MINIMAL=0; SCRIPT=""; FORMAT="cdi"; VIDEO=""
+ELF=""; DATA="gamedata"; OUT=""; MINIMAL=0; SCRIPT=""; FORMAT="cdi"; VIDEO=""; CDI_TOOL=""
 BAKED="dc/build/baked"
 KOS_BASE="${KOS_BASE:-/opt/toolchains/dc/kos}"
 AQUI=$(dirname "$0")
@@ -44,6 +51,7 @@ while [ $# -gt 0 ]; do
         --format)  FORMAT=$2; shift 2 ;;
         --video)   VIDEO=$2; shift 2 ;;
         --minimal) MINIMAL=1; shift ;;
+        --cdi-tool) CDI_TOOL=$2; shift 2 ;;
         *) echo "opcion desconocida: $1" >&2; exit 2 ;;
     esac
 done
@@ -106,12 +114,23 @@ if [ "$MINIMAL" -eq 1 ]; then
 else
     set -- "$@" "/=$DATA"
 fi
-xorriso "$@" 2>&1 | grep -iE "^xorriso.*(FAILURE|SORRY)|produced" || true
+# No esconder el error con una tuberia: podria empaquetar un ISO viejo o incompleto.
+if ! xorriso "$@" > "$TMP/xorriso.log" 2>&1; then
+    cat "$TMP/xorriso.log" >&2
+    exit 1
+fi
+grep -iE "produced" "$TMP/xorriso.log" || true
 
 if [ "$FORMAT" = cdi ]; then
+    # Cada build lleva su fecha y hora, para saber cual se esta probando.
+    CDI="$OUT/nfshs_$(date +%Y%m%d%H%M).cdi"
     echo "+ CDI"
-    python -I "$AQUI/mkcdi.py" "$TMP/datos.iso" "$OUT/nfshs.cdi"
-    echo "listo: $OUT/nfshs.cdi   (arranca con la BIOS real)"
+    if [ -n "$CDI_TOOL" ]; then
+        "$CDI_TOOL" "$TMP/datos.iso" "$CDI"
+    else
+        python -I "$AQUI/mkcdi.py" "$TMP/datos.iso" "$CDI"
+    fi
+    echo "listo: $CDI   (pendiente de verificar en Dreamcast real)"
 else
     echo "+ GDI (pistas de relleno de baja densidad y el indice)"
     cp "$TMP/datos.iso" "$OUT/track03.iso"

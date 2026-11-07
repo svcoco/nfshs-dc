@@ -82,6 +82,9 @@ static uint8_t *slot(Cpu *c, uint32_t addr, uint32_t n, uint8_t io[4])
 
 uint32_t ps1_r8_slow(Cpu *c, uint32_t a)
 {
+#if PS1_PROF
+    ps1_prof_note(a);
+#endif
     uint8_t io[4];
     if (on_bus(c, a))
         return (uint8_t)bus_read(c, a, 1);
@@ -90,6 +93,9 @@ uint32_t ps1_r8_slow(Cpu *c, uint32_t a)
 
 uint32_t ps1_r16_slow(Cpu *c, uint32_t a)
 {
+#if PS1_PROF
+    ps1_prof_note(a);
+#endif
     if ((a & (0x1FFFFC00u | 1u)) == PS1_SCRATCH_BASE)
         return *(const ps1_u16a *)(c->scratch + (a & 0x3FFu));
     uint8_t io[4];
@@ -102,6 +108,9 @@ uint32_t ps1_r16_slow(Cpu *c, uint32_t a)
 
 uint32_t ps1_r32_slow(Cpu *c, uint32_t a)
 {
+#if PS1_PROF
+    ps1_prof_note(a);
+#endif
     if ((a & (0x1FFFFC00u | 3u)) == PS1_SCRATCH_BASE)
         return *(const ps1_u32a *)(c->scratch + (a & 0x3FFu));
     uint8_t io[4];
@@ -115,6 +124,9 @@ uint32_t ps1_r32_slow(Cpu *c, uint32_t a)
 
 void ps1_w8_slow(Cpu *c, uint32_t a, uint32_t v)
 {
+#if PS1_PROF
+    ps1_prof_note(a);
+#endif
     uint8_t io[4];
     if (on_bus(c, a)) {
         bus_write(c, a, v & 0xFFu, 1);
@@ -125,6 +137,9 @@ void ps1_w8_slow(Cpu *c, uint32_t a, uint32_t v)
 
 void ps1_w16_slow(Cpu *c, uint32_t a, uint32_t v)
 {
+#if PS1_PROF
+    ps1_prof_note(a);
+#endif
     if ((a & (0x1FFFFC00u | 1u)) == PS1_SCRATCH_BASE) {
         *(ps1_u16a *)(c->scratch + (a & 0x3FFu)) = (uint16_t)v;
         return;
@@ -142,6 +157,9 @@ void ps1_w16_slow(Cpu *c, uint32_t a, uint32_t v)
 
 void ps1_w32_slow(Cpu *c, uint32_t a, uint32_t v)
 {
+#if PS1_PROF
+    ps1_prof_note(a);
+#endif
     if ((a & (0x1FFFFC00u | 3u)) == PS1_SCRATCH_BASE) {
         *(ps1_u32a *)(c->scratch + (a & 0x3FFu)) = v;
         return;

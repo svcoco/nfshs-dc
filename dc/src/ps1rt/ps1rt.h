@@ -250,6 +250,20 @@ extern uint64_t ps1_interp_hits[PS1_INTERP_TOP];
 extern void (*ps1_on_enter)(Cpu *c, uint32_t f);
 #endif
 
+/* Perfil por funcion (M8, solo PC): el generador con --prof pone un contador en cada bloque y en
+ * cada entrada de funcion (make perfil). ps1_prof_cur dice en que bloque esta el juego, para
+ * atribuirle los accesos de la ruta lenta. */
+#ifndef PS1_PROF
+#define PS1_PROF 0
+#endif
+#if PS1_PROF
+extern uint64_t ps1_prof_n[], ps1_prof_fn[];
+extern uint32_t ps1_prof_cur;
+void ps1_prof_note(uint32_t a);
+#define PS1_PROF_BLK(i) (ps1_prof_n[i]++, ps1_prof_cur = (i))
+#define PS1_PROF_FN(i)  (ps1_prof_fn[i]++)
+#endif
+
 static inline void ps1_push(Cpu *c, uint32_t f)
 {
 #if PS1_STACK

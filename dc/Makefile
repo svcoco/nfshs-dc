@@ -42,7 +42,7 @@ export TMPDIR
 export TMP  := $(TMPDIR)
 export TEMP := $(TMPDIR)
 
-.PHONY: help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size dc-bench-mdec bake bake-coches disc diff clean
+.PHONY: perfil help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size dc-bench-mdec bake bake-coches disc diff clean
 
 help:
 	@echo "Analisis y generacion (Python, funcionan ya):"
@@ -111,6 +111,18 @@ pc: $(BUILD)/nfshs-dc
 $(BUILD)/nfshs-dc: genobj $(HLE_TABLE) $(PS1RT_SRCS) $(HOST_SRCS) $(PC_SRCS)
 	@mkdir -p $(BUILD) $(TMPDIR)
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(PCDIAG) -o $@ $(PS1RT_SRCS) $(RENDER_SRCS) $(HOST_SRCS) $(PC_SRCS) $(HLE_TABLE) $(BUILD)/gen/*.o
+
+# Perfil por funcion (M8): el mismo host de PC con un contador por bloque basico en el codigo
+# generado. Nada de esto toca gen/ ni build/nfshs-dc. Se ejecuta con tools/recomp/prof_run.py.
+PROFDIR := $(BUILD)/prof
+PROFCPP := -Isrc/ps1rt -Isrc/render -I$(PROFDIR)/gen -Isrc/host -DPS1_PROF=1
+
+perfil: $(HLE_TABLE)
+	@mkdir -p $(PROFDIR)/gen $(PROFDIR)/obj $(TMPDIR)
+	$(PYTHON) -I tools/recomp/recomp.py $(PROFDIR)/gen --lang c --all --prof
+	@$(MAKE) --no-print-directory -f tools/genobj.mk 		CC="$(CC)" CFLAGS="$(CFLAGS) $(GENFLAGS)" CPPFLAGS="$(PROFCPP) $(PCDIAG)" 		GEN="$(PROFDIR)/gen" OBJDIR="$(PROFDIR)/obj"
+	$(CC) $(CFLAGS) $(PROFCPP) $(PCDIAG) -o $(PROFDIR)/nfshs-prof $(PS1RT_SRCS) $(RENDER_SRCS) $(HOST_SRCS) $(PC_SRCS) $(HLE_TABLE) $(PROFDIR)/obj/*.o
+	@echo "listo: $(PROFDIR)/nfshs-prof"
 
 # ---------------------------------------------------------------- Dreamcast (M1b)
 #

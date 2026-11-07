@@ -158,6 +158,31 @@ try:
 except FileNotFoundError:
     pass
 
+# Perfil por funcion (M8, `--prof`): cada bloque basico lleva un contador y cada funcion uno de
+# entradas. Las cuentas ESTATICAS de cada bloque (instrucciones, accesos, GTE, ramas) se escriben
+# aparte, en prof_blocks.csv: asi lo ejecutado por funcion sale de multiplicar. Solo para PC.
+PROF = False
+PROF_BLOCKS = []      # (func, start, instr, nop, ld, st, gte, br)
+PROF_FUNCS = []       # (start, end)
+_LOADS = {0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x32}
+_STORES = {0x28, 0x29, 0x2a, 0x2b, 0x2e, 0x3a}
+
+
+def prof_block_stats(f, words, start, end_pc):
+    n = nop = ld = st = gte = br = 0
+    for pc in range(start, end_pc, 4):
+        w = words.get(pc, e.word(pc))
+        if w == 0:
+            nop += 1
+            continue
+        n += 1
+        op = w >> 26
+        ld += op in _LOADS
+        st += op in _STORES
+        gte += op == 0x12
+        br += branch_info_c(w, pc) is not None
+    return (f, start, n, nop, ld, st, gte, br)
+
 
 
 def collect(roots):
@@ -612,6 +637,9 @@ def gen_function_c(f, known, comments=True):
     out.append('    uint32_t t, cnd, off;')
     out.append('    (void)t; (void)cnd; (void)off;')
     out.append(f'    ps1_push(c, {cu(f)});')
+    prof_base, prof_local, prof_fi = len(PROF_BLOCKS), [], len(PROF_FUNCS)
+    if PROF:
+        out.append(f'    PS1_PROF_FN({prof_fi});')
     # Casi siempre se entra por el principio: sin esto, el switch lo busca en un arbol binario.
     if f in leaders:
         out.append(f'    if (pc == {cu(f)}) goto L_{f:08x};')
@@ -638,6 +666,8 @@ def gen_function_c(f, known, comments=True):
     for li, start in enumerate(leaders):
         stop = leaders[li + 1] if li + 1 < len(leaders) else end
         out.append(f'L_{start:08x}:')
+        if PROF:
+            out.append(f'{ind}PS1_PROF_BLK({prof_base + li});')
         pc = start
         terminated = False
         while pc < stop:
@@ -702,6 +732,8 @@ def gen_function_c(f, known, comments=True):
             break
         if not terminated:
             out.append(f'{ind}{jump(stop)}')
+        if PROF:
+            prof_local.append(prof_block_stats(f, words, start, pc))
     # el control salio de la extension trazada (cae en la funcion vecina): continuacion
     out.append('L_out:')
     out.append(f'{ind}ps1_pop(c); c->cont = pc; return;')
@@ -709,6 +741,9 @@ def gen_function_c(f, known, comments=True):
         out.append('    }')
     out.append('}')
     out.append('')
+    if PROF:
+        PROF_BLOCKS.extend(prof_local)
+        PROF_FUNCS.append((f, end))
     return '\n'.join(out)
 
 
@@ -719,6 +754,67 @@ def safe_gen_c(f, known, comments=True):
         return (f'void f_{f:08x}(Cpu *c) {{ ps1_panic(c, "f_{f:08x}: not code"); }}\n'
                 f'void f_{f:08x}_at(Cpu *c, uint32_t pc) '
                 f'{{ (void)pc; ps1_panic(c, "f_{f:08x}: not code"); }}\n')
+
+
+def emit_prof(out_dir, hot_set):
+    nb, nf = len(PROF_BLOCKS), len(PROF_FUNCS)
+    with open(os.path.join(out_dir, 'prof_blocks.csv'), 'w', encoding='utf-8') as fh:
+        fh.write('idx,func,start,instr,nop,ld,st,gte,br\n')
+        for i, (f, st, n, nop, ld, sto, gte, br) in enumerate(PROF_BLOCKS):
+            fh.write(f'{i},{f:#x},{st:#x},{n},{nop},{ld},{sto},{gte},{br}\n')
+    with open(os.path.join(out_dir, 'prof_funcs.csv'), 'w', encoding='utf-8') as fh:
+        fh.write('fi,start,end,instrs,hot,name\n')
+        for i, (f, end) in enumerate(PROF_FUNCS):
+            nm = NAMES.get(f, ('',))[0]
+            fh.write(f'{i},{f:#x},{end:#x},{(end - f) // 4},{int(f in hot_set)},{nm}\n')
+    t = ['/* Generado por recomp.py --prof. Solo para PC (-DPS1_PROF=1). */', '',
+         '#include "funcs.h"', '#include <stdio.h>', '#include <stdlib.h>', '#include <string.h>', '',
+         f'#define NB {nb}u', f'#define NF {nf}u',
+         'uint64_t ps1_prof_n[NB];', 'uint64_t ps1_prof_fn[NF];',
+         'uint32_t ps1_prof_scr[NB], ps1_prof_io[NB], ps1_prof_oth[NB];',
+         'uint32_t ps1_prof_cur;',
+         'static uint64_t s_from, s_now;', '',
+         'void ps1_prof_note(uint32_t a)',
+         '{',
+         '    uint32_t p = a & 0x1FFFFFFFu, i = ps1_prof_cur;',
+         '    if (p >= 0x1F800000u && p < 0x1F800400u) ps1_prof_scr[i]++;',
+         '    else if (p >= 0x1F800400u) ps1_prof_io[i]++;',
+         '    else ps1_prof_oth[i]++;',
+         '}', '',
+         'static void prof_reset(void)',
+         '{',
+         '    memset(ps1_prof_n, 0, sizeof ps1_prof_n); memset(ps1_prof_fn, 0, sizeof ps1_prof_fn);',
+         '    memset(ps1_prof_scr, 0, sizeof ps1_prof_scr); memset(ps1_prof_io, 0, sizeof ps1_prof_io);',
+         '    memset(ps1_prof_oth, 0, sizeof ps1_prof_oth);',
+         '}', '',
+         '/* El host la llama al empezar cada frame; NFSHS_PROF_FROM pone a cero los contadores en ese frame. */',
+         'void ps1_prof_frame(uint64_t f)',
+         '{',
+         '    const char *v = getenv("NFSHS_PROF_FROM");',
+         '    if (f == 1u && v != NULL) s_from = strtoull(v, NULL, 0);',
+         '    if (v != NULL && f == s_from && f != 0u) prof_reset();',
+         '    s_now = f;',
+         '}', '',
+         'static void prof_dump(void)',
+         '{',
+         '    const char *path = getenv("NFSHS_PROF");',
+         '    FILE *fh;',
+         '    uint32_t i;',
+         '    if (path == NULL) return;',
+         '    fh = fopen(path, "w");',
+         '    if (fh == NULL) return;',
+         '    fprintf(fh, "frames,%llu\\n", (unsigned long long)(s_now - s_from));',
+         '    for (i = 0; i < NB; i++)',
+         '        if (ps1_prof_n[i] != 0u)',
+         '            fprintf(fh, "B,%u,%llu,%u,%u,%u\\n", i, (unsigned long long)ps1_prof_n[i],',
+         '                    ps1_prof_scr[i], ps1_prof_io[i], ps1_prof_oth[i]);',
+         '    for (i = 0; i < NF; i++)',
+         '        if (ps1_prof_fn[i] != 0u)',
+         '            fprintf(fh, "F,%u,%llu\\n", i, (unsigned long long)ps1_prof_fn[i]);',
+         '    fclose(fh);',
+         '}', '',
+         '__attribute__((constructor)) static void prof_init(void) { atexit(prof_dump); }', '']
+    open(os.path.join(out_dir, 'prof_table.c'), 'w', encoding='utf-8').write('\n'.join(t))
 
 
 def emit_c(funcs, known, out_dir, instrs_per_part=4000, comments=True):
@@ -849,8 +945,10 @@ def emit_c(funcs, known, out_dir, instrs_per_part=4000, comments=True):
     mk = ['# Generado por recomp.py. Incluir desde el Makefile para compilar con -j.',
           'GEN_SRCS := \\']
     mk += [f'\t{nombre}.c \\' for nombre, _ in parts]
-    mk += ['\tdispatch.c', '']
+    mk += ['\tdispatch.c \\', '\tprof_table.c', ''] if PROF else ['\tdispatch.c', '']
     open(os.path.join(out_dir, 'parts.mk'), 'w', encoding='utf-8').write('\n'.join(mk))
+    if PROF:
+        emit_prof(out_dir, hot_set)
     import json
     with open(os.path.join(out_dir, 'manifest.json'), 'w', encoding='utf-8') as fh:
         json.dump({'funcs': len(funcs), 'parts': len(parts), 'stubs': stubs,
@@ -874,6 +972,8 @@ if __name__ == '__main__':
     lang = 'rust'
     if '--lang' in args:
         i = args.index('--lang'); lang = args[i + 1]; args = args[:i] + args[i + 2:]
+    if '--prof' in args:
+        PROF = True; args = [a for a in args if a != '--prof']
     comments = True
     if '--no-comments' in args:
         comments = False; args = [a for a in args if a != '--no-comments']

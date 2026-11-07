@@ -247,6 +247,9 @@ static void pausa_presenta(GameHost *h)
 void host_frame_top(GameHost *h, Cpu *c)
 {
     h->frames++;
+#if PS1_PROF
+    { extern void ps1_prof_frame(uint64_t); ps1_prof_frame(h->frames); }
+#endif
     /* El HUD de carrera, en el mismo punto que la referencia (al empezar frame_top): de
      * las tablas grabadas en el frame se tira la del mundo y la lista se da la vuelta. */
     h->otags_frame = 0;

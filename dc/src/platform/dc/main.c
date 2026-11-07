@@ -27,6 +27,7 @@ extern void *sbrk(intptr_t);
 #include "render.h"
 #include "video.h"
 #include "movie.h"
+#include "muestreo.h"
 
 KOS_INIT_FLAGS(INIT_DEFAULT);
 
@@ -61,6 +62,7 @@ static void on_frame(GameHost *h)
      * paso del guion dejaria los botones a 0 y se perderia el "mantener hasta la
      * linea siguiente" (pad_write solo escribe en los frames que tienen paso). */
     vmu_fps_punto(h->mode == HOST_RACE ? PUNTO_CARRERA : PUNTO_MENUS);
+    muestreo_frame(h);
     if (h->mode == HOST_RACE && race_frame0 == 0u) {
         race_frame0 = h->frames;
         race_ms0 = timer_ms_gettime64() - t_start;
@@ -210,8 +212,8 @@ static void *diag_thread(void *arg)
         printf("        coches: %lu vistos (vista 0), %llu triangulos   objetos %lu\n",
                (unsigned long)host.cap[0].cars_n, (unsigned long long)render_car_tris(),
                (unsigned long)host.cap[0].objects_n);
-        printf("        efectos restados: %llu triangulos\n",
-               (unsigned long long)render_fx_tris());
+        printf("        efectos restados: %llu triangulos; grabados como mucho %lu vertices\n",
+               (unsigned long long)render_fx_tris(), (unsigned long)render_ef_max());
         printf("        destellos: %llu cuadros dibujados en total; reflejos %llu triangulos\n",
                (unsigned long long)render_glow_quads(),
                (unsigned long long)render_refl_tris());

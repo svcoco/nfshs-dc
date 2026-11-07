@@ -153,6 +153,10 @@ static void foto(Foto *o)
  * de la de datos. */
 static void mide(perf_cntr_event_t ev)
 {
+#ifdef NFSHS_PERFIL
+    (void)ev;                  /* PRFC1 es del muestreador; la pagina de I y O no vale aqui */
+    return;
+#endif
     perf_cntr_stop(PRFC1);
     perf_cntr_clear(PRFC1);
     perf_cntr_start(PRFC1, ev, PMCR_COUNT_CPU_CYCLES);

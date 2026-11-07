@@ -219,9 +219,62 @@ static int parte_env(uint32_t pi)
     return -1;
 }
 
-void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView *view,
-              int pasada, float sw, float sh, TrackEmit emit, void *user, TrackStats *st)
+/* M8: donde van los triangulos de un coche. Lo normal es que no haya nada que recortar: se
+ * proyectan aqui y se juntan en lotes, para no pasar por `triangulo` y por una llamada a `emit`
+ * con cada uno. El orden de emision es el mismo: antes de un triangulo que hay que recortar se
+ * vacia el lote. */
+#define LOTE_TRIS 32u
+
+typedef struct {
+    TrackVert      v[LOTE_TRIS * 3u];
+    uint32_t       n;
+    TrackEmit      emit;
+    TrackEmitLote  lote;
+    void          *user;
+    const TrackMat *mat;
+    TrackStats    *st;
+} Salida;
+
+static void sal_vacia(Salida *s)
 {
+    uint32_t i;
+
+    if (s->n == 0u)
+        return;
+    if (s->lote != NULL)
+        s->lote(s->user, s->v, s->n, s->mat);
+    else
+        for (i = 0; i < s->n; i++)
+            s->emit(s->user, &s->v[i * 3u], 3u, s->mat);
+    s->n = 0;
+}
+
+static inline void sal_tri(Salida *s, const View *vw, const Cv *tri)
+{
+    if (tri[0].z >= NEAR && tri[1].z >= NEAR && tri[2].z >= NEAR && !vw->recorta_y) {
+        TrackVert *o = &s->v[s->n * 3u];
+
+        proyecta(vw, &tri[0], &o[0]);
+        proyecta(vw, &tri[1], &o[1]);
+        proyecta(vw, &tri[2], &o[2]);
+        if (dentro_guarda(o[0].x, o[0].y) && dentro_guarda(o[1].x, o[1].y) &&
+            dentro_guarda(o[2].x, o[2].y)) {
+            if (s->st != NULL)
+                s->st->quads_out++;
+            if (++s->n == LOTE_TRIS)
+                sal_vacia(s);
+            return;
+        }
+    }
+    sal_vacia(s);
+    triangulo(vw, tri, s->mat, s->emit, s->user, s->st);
+}
+
+void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView *view,
+              int pasada, float sw, float sh, TrackEmit emit, TrackEmitLote lote, void *user,
+              TrackStats *st)
+{
+    int cuerpo = pasada == CAR_PASS_BODY || pasada == CAR_PASS_RACE;
     int solo_resta = pasada == CAR_PASS_SUBTRACT;
     int showroom = pasada == CAR_PASS_ENV_SR;
     int reflejo = pasada == CAR_PASS_ENV_A || pasada == CAR_PASS_ENV_B || showroom;
@@ -236,7 +289,15 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
     uint32_t pi, k, tono;
     int directo;
     float rm[3][3], rt[3];       /* del modelo a la camara (ver `directo`) */
+    float cara = 0.0f;           /* signo para saber si un triangulo mira a la camara; 0: no se mira */
+    Salida sal;
 
+    sal.n = 0;
+    sal.emit = emit;
+    sal.lote = lote;
+    sal.user = user;
+    sal.mat = NULL;
+    sal.st = st;
     if (st != NULL)
         memset(st, 0, sizeof(*st));
     if (m->raw == NULL)
@@ -262,6 +323,7 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
     }
     view_init(&vw, view, sw, sh);
     memset(&mat, 0, sizeof mat);
+    sal.mat = &mat;
 
     /* Las filas de `orient` son derecha, arriba y adelante en espacio de PS1; en mundo la
      * X va espejada. El modelo tiene +Y arriba, +Z adelante y +X a la IZQUIERDA del
@@ -335,11 +397,22 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
             rt[f] = vw.row[f][0] * dp[0] + vw.row[f][1] * dp[1] + vw.row[f][2] * dp[2];
         }
         vm_carga(rm, rt);
+        /* El sentido de giro. En el mundo un triangulo mira a la camara si
+         * -(e1 x e2) . (cam - p0) > 0 (como el NCLIP de los reflejos, abajo). Pasar al espacio de
+         * la camara multiplica ese producto mixto por el determinante de la vista, asi que basta
+         * con su signo; alli la camara es el origen. */
+        if (pasada == CAR_PASS_RACE) {
+            float det = vw.row[0][0] * (vw.row[1][1] * vw.row[2][2] - vw.row[1][2] * vw.row[2][1]) -
+                        vw.row[0][1] * (vw.row[1][0] * vw.row[2][2] - vw.row[1][2] * vw.row[2][0]) +
+                        vw.row[0][2] * (vw.row[1][0] * vw.row[2][1] - vw.row[1][1] * vw.row[2][0]);
+
+            cara = det > 0.0f ? -1.0f : 1.0f;
+        }
     }
 
     for (pi = 0; pi < m->parts && pi < 57u; pi++) {
         const CarPart *p = &m->part[pi];
-        float sesgo = pasada == CAR_PASS_BODY && SESGO[pi] < 0 ? (float)(-SESGO[pi]) * 0.003f : 0.0f;
+        float sesgo = cuerpo && SESGO[pi] < 0 ? (float)(-SESGO[pi]) * 0.003f : 0.0f;
         uint8_t on = d->parts[pi];
         float rw[3][3];          /* giro propio de la parte (las ruedas) */
         int es_rueda = p->wheel != 0xFFu;
@@ -375,6 +448,67 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
             rw[2][0] = -sv; rw[2][1] = cv * sg;  rw[2][2] = cv * cg;
         }
 
+        /* Lo normal, con la matriz unica: transformar, descartar y solo entonces lo demas. */
+        if (directo) {
+            const float *v = m->vert + (size_t)p->vert_off * 6u;
+
+            for (t = 0; t + 3u <= p->vert_n; t += 3u, v += 18) {
+                Cv tri[3];
+
+                for (k = 0; k < 3u; k++) {
+                    const float *w = v + k * 6u;
+
+                    if (es_rueda) {
+                        float qx = rw[0][0] * w[0] + rw[0][1] * w[1] + rw[0][2] * w[2] + p->hub[0];
+                        float qy = rw[1][0] * w[0] + rw[1][1] * w[1] + rw[1][2] * w[2] + p->hub[1];
+                        float qz = rw[2][0] * w[0] + rw[2][1] * w[1] + rw[2][2] * w[2] + p->hub[2];
+
+                        vm_aplica(rm, rt, qx, qy, qz, &tri[k].x, &tri[k].y, &tri[k].z);
+                    } else {
+                        vm_aplica(rm, rt, w[0], w[1], w[2], &tri[k].x, &tri[k].y, &tri[k].z);
+                    }
+                }
+                if (cara != 0.0f) {
+                    float ax = tri[1].x - tri[0].x, ay = tri[1].y - tri[0].y, az = tri[1].z - tri[0].z;
+                    float bx = tri[2].x - tri[0].x, by = tri[2].y - tri[0].y, bz = tri[2].z - tri[0].z;
+                    float mixto = (ay * bz - az * by) * -tri[0].x + (az * bx - ax * bz) * -tri[0].y +
+                                  (ax * by - ay * bx) * -tri[0].z;
+
+                    if (cara * mixto <= 0.0f) {
+                        if (st != NULL)
+                            st->espalda++;
+                        continue;
+                    }
+                }
+                for (k = 0; k < 3u; k++) {
+                    const float *w = v + k * 6u;
+                    uint32_t c;
+
+                    /* hacia la camara, que aqui es el origen. La distancia sale del espacio de
+                     * camara, que lleva la Y un poco aplastada: unos mm de sesgo de diferencia. */
+                    if (sesgo != 0.0f) {
+                        float dist = sqrtf(tri[k].x * tri[k].x + tri[k].y * tri[k].y +
+                                           tri[k].z * tri[k].z);
+
+                        if (dist > 1e-4f) {
+                            float e = 1.0f - sesgo / dist;
+
+                            tri[k].x *= e;
+                            tri[k].y *= e;
+                            tri[k].z *= e;
+                        }
+                    }
+                    memcpy(&c, &w[5], sizeof c);
+                    tri[k].u = w[3];
+                    tri[k].v = w[4];
+                    tri[k].argb = 0xFF000000u | (tinta((c >> 16) & 0xFFu, tono) << 16) |
+                                  (tinta((c >> 8) & 0xFFu, tono) << 8) | tinta(c & 0xFFu, tono);
+                }
+                sal_tri(&sal, &vw, tri);
+            }
+            continue;
+        }
+
         for (t = 0; t + 3u <= p->vert_n; t += 3u) {
             Cv tri[3];
             float wld[3][3];
@@ -395,24 +529,6 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                 } else {
                     q[0] = lv[0]; q[1] = lv[1]; q[2] = lv[2];
                 }
-                if (directo) {
-                    vm_aplica(rm, rt, q[0], q[1], q[2], &tri[k].x, &tri[k].y, &tri[k].z);
-                    /* hacia la camara, que aqui es el origen. La distancia sale del espacio de
-                     * camara, que lleva la Y un poco aplastada: unos mm de sesgo de diferencia. */
-                    if (sesgo != 0.0f) {
-                        float dist = sqrtf(tri[k].x * tri[k].x + tri[k].y * tri[k].y +
-                                           tri[k].z * tri[k].z);
-
-                        if (dist > 1e-4f) {
-                            float e = 1.0f - sesgo / dist;
-
-                            tri[k].x *= e;
-                            tri[k].y *= e;
-                            tri[k].z *= e;
-                        }
-                    }
-                    goto color;
-                }
                 /* del espacio del modelo al mundo: las columnas son los ejes del coche */
                 wld[k][0] = pos[0] + ejes[0][0] * q[0] + ejes[1][0] * q[1] + ejes[2][0] * q[2];
                 wld[k][1] = pos[1] + ejes[0][1] * q[0] + ejes[1][1] * q[1] + ejes[2][1] * q[2];
@@ -422,7 +538,6 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
                 if (d->mirror)
                     wld[k][1] = -wld[k][1];
 
-color:
                 memcpy(&c, &v[5], sizeof c);
                 tri[k].u = v[3];
                 tri[k].v = v[4];
@@ -503,7 +618,7 @@ color:
             }
             /* las partes que van por encima, un poco hacia la camara (ver SESGO); tambien el
              * reflejo del showroom, que tiene que caer justo sobre ellas */
-            if (!directo && (pasada == CAR_PASS_BODY || showroom) && SESGO[pi] < 0) {
+            if ((cuerpo || showroom) && SESGO[pi] < 0) {
                 float tira = (float)(-SESGO[pi]) * 0.003f;
 
                 for (k = 0; k < 3u; k++) {
@@ -518,7 +633,7 @@ color:
                             wld[k][j] += hacia[j] / dist * tira;
                 }
             }
-            for (k = 0; k < 3u && !directo; k++) {
+            for (k = 0; k < 3u; k++) {
                 float dd[3];
                 uint32_t j;
 
@@ -528,9 +643,10 @@ color:
                 tri[k].y = vw.row[1][0] * dd[0] + vw.row[1][1] * dd[1] + vw.row[1][2] * dd[2];
                 tri[k].z = vw.row[2][0] * dd[0] + vw.row[2][1] * dd[1] + vw.row[2][2] * dd[2];
             }
-            triangulo(&vw, tri, &mat, emit, user, st);
+            sal_tri(&sal, &vw, tri);
         }
     }
+    sal_vacia(&sal);
 }
 
 /* ---- la sombra en el suelo ---- */

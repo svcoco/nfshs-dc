@@ -16,6 +16,7 @@ Unlike upstream's copy, paths resolve from the repository root instead of the cu
 directory, so it runs from anywhere.
 """
 import os
+import re
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
@@ -155,6 +156,20 @@ try:
     for line in open(os.path.join(ROOT, 're', 'nfs4_funcs.tsv'), encoding='latin1'):
         a, loc, n = line.split(chr(9))[:3]
         SRC[int(a, 16)] = loc.split('nfs4' + chr(92))[-1]
+except FileNotFoundError:
+    pass
+
+# Funciones que en Dreamcast (y en PC) tienen una version nativa: se prueba al entrar por el principio y,
+# si devuelve 1, la funcion ya esta hecha (deja los registros exactamente como el MIPS); si devuelve 0,
+# corre el codigo generado de siempre. Ver ps1rt.h.
+NATIVE_ENTRY = {0x800FEE8C: 'ps1_game_udiv64'}
+
+# Funciones con el scratchpad en la ruta rapida de sus accesos (ps1_r32s y companeras): perfil de M8,
+# tools/recomp/scratch_funcs.txt.
+SCRATCH_SET = set()
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scratch_funcs.txt')) as _fh:
+        SCRATCH_SET = {int(l.split()[0], 16) for l in _fh if l.strip() and not l.startswith('#')}
 except FileNotFoundError:
     pass
 
@@ -630,8 +645,8 @@ def gen_function_c(f, known, comments=True):
         out.append(f'/* `{n}`' + (f' ({SRC[dev]})' if dev in SRC else '') + ' */')
     out.append(f'void f_{f:08x}(Cpu *c) {{ f_{f:08x}_at(c, {cu(f)}); }}')
     out.append('')
-    # restrict: la RAM del invitado no esta en Cpu (el scratchpad, si, pero va por funciones que
-    # reciben c), asi que el compilador no recarga c->r[] tras cada escritura a RAM (M8)
+    # restrict: la RAM del invitado no esta en Cpu (el scratchpad, si, pero se llega a el a traves de
+    # c, en linea o por funciones que lo reciben), asi que el compilador no recarga c->r[] tras cada escritura a RAM (M8)
     out.append(f'void f_{f:08x}_at(Cpu *restrict c, uint32_t pc)')
     out.append('{')
     out.append('    uint32_t t, cnd, off;')
@@ -640,6 +655,8 @@ def gen_function_c(f, known, comments=True):
     prof_base, prof_local, prof_fi = len(PROF_BLOCKS), [], len(PROF_FUNCS)
     if PROF:
         out.append(f'    PS1_PROF_FN({prof_fi});')
+    if f in NATIVE_ENTRY:
+        out.append(f'    if (pc == {cu(f)} && {NATIVE_ENTRY[f]}(c)) {{ ps1_pop(c); return; }}')
     # Casi siempre se entra por el principio: sin esto, el switch lo busca en un arbol binario.
     if f in leaders:
         out.append(f'    if (pc == {cu(f)}) goto L_{f:08x};')
@@ -744,7 +761,10 @@ def gen_function_c(f, known, comments=True):
     if PROF:
         PROF_BLOCKS.extend(prof_local)
         PROF_FUNCS.append((f, end))
-    return '\n'.join(out)
+    text = '\n'.join(out)
+    if f in SCRATCH_SET:
+        text = re.sub(r'\bps1_(r8|r16|r32|w8|w16|w32)\(', r'ps1_\1s(', text)
+    return text
 
 
 def safe_gen_c(f, known, comments=True):
@@ -794,6 +814,12 @@ def emit_prof(out_dir, hot_set):
          '    if (f == 1u && v != NULL) s_from = strtoull(v, NULL, 0);',
          '    if (v != NULL && f == s_from && f != 0u) prof_reset();',
          '    s_now = f;',
+         '}', '',
+         '/* NFSHS_PROF_CAMPOS=n: desde NFSHS_PROF_FROM, n campos por frame de carrera, como en la consola. */',
+         'uint32_t ps1_prof_campos(uint64_t f)',
+         '{',
+         '    const char *v = getenv("NFSHS_PROF_CAMPOS");',
+         '    return (v != NULL && f >= s_from && atoi(v) > 1) ? (uint32_t)(atoi(v) - 1) : 0u;',
          '}', '',
          'static void prof_dump(void)',
          '{',

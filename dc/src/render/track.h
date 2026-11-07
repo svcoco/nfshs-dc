@@ -115,6 +115,9 @@ typedef struct {
 
 /* Quien pinta. `n` es 3 o 4 y los vertices vienen como abanico. */
 typedef void (*TrackEmit)(void *user, const TrackVert *v, uint32_t n, const TrackMat *m);
+/* M8: `ntri` triangulos seguidos, de 3 vertices cada uno. Equivale a llamar a TrackEmit con cada
+ * uno, pero el bucle de quien emite y el de quien recibe se quedan cada uno en la I-cache. */
+typedef void (*TrackEmitLote)(void *user, const TrackVert *v, uint32_t ntri, const TrackMat *m);
 
 typedef struct {
     /* medidas del ultimo track_draw */

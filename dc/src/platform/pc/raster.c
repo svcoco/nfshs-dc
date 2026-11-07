@@ -447,7 +447,7 @@ static void cuadro_destello(Pista *P, const GameHost *h, const uint16_t *texbuf,
 }
 
 typedef struct {
-    uint32_t coches_tri, efectos_tri, marcas_tri, marcas_det, reflejo_tri;
+    uint32_t coches_tri, coches_espalda, efectos_tri, marcas_tri, marcas_det, reflejo_tri;
 } RasterCuentas;
 
 static void emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
@@ -561,8 +561,9 @@ static void raster_vista(const GameHost *h, uint32_t vi, const Track *track,
             }
             car_paint(&modelo, d->paint, pintado);
             P->atlas = pintado; P->aw = modelo.atlas_w; P->ah = modelo.atlas_h;
-            car_draw(&modelo, d, &vista, 0, sw, sh, emite, P, &cst);
+            car_draw(&modelo, d, &vista, CAR_PASS_RACE, sw, sh, emite, NULL, P, &cst);
             rc->coches_tri += cst.quads_out;
+            rc->coches_espalda += cst.espalda;
         }
         P->atlas = track->atlas; P->aw = track->atlas_w; P->ah = track->atlas_h;
 
@@ -603,7 +604,7 @@ static void raster_vista(const GameHost *h, uint32_t vi, const Track *track,
                     continue;
                 P->atlas = refl; P->aw = CAR_REFL_SIZE; P->ah = CAR_REFL_SIZE;
                 P->abr = abr;
-                car_draw(&modelo, d, &vista, CAR_PASS_ENV_A, sw, sh, emite, P, &est);
+                car_draw(&modelo, d, &vista, CAR_PASS_ENV_A, sw, sh, emite, NULL, P, &est);
                 rc->reflejo_tri += est.quads_out;
                 P->abr = -1;
             }
@@ -637,12 +638,12 @@ static void raster_vista(const GameHost *h, uint32_t vi, const Track *track,
             if (strncmp(modelo.code, d->code, sizeof modelo.code) == 0 && modelo.raw != NULL) {
                 car_paint(&modelo, d->paint, pintado);
                 P->atlas = pintado; P->aw = modelo.atlas_w; P->ah = modelo.atlas_h;
-                car_draw(&modelo, d, &vista, CAR_PASS_SUBTRACT, sw, sh, emite, P, &est);
+                car_draw(&modelo, d, &vista, CAR_PASS_SUBTRACT, sw, sh, emite, NULL, P, &est);
                 rc->efectos_tri += est.quads_out;
                 /* y el mapa B del reflejo, que resta */
                 if (car_env_abr(d, CAR_PASS_ENV_B) == 2) {
                     P->atlas = s_refl; P->aw = CAR_REFL_SIZE; P->ah = CAR_REFL_SIZE;
-                    car_draw(&modelo, d, &vista, CAR_PASS_ENV_B, sw, sh, emite, P, &est);
+                    car_draw(&modelo, d, &vista, CAR_PASS_ENV_B, sw, sh, emite, NULL, P, &est);
                     rc->reflejo_tri += est.quads_out;
                 }
             }
@@ -737,7 +738,8 @@ int raster_track(const GameHost *h, const Track *track, const uint16_t *texbuf,
     printf("  efectos restados: %u triangulos, marcas de neumatico: %u de %u\n",
            (unsigned)rc.efectos_tri, (unsigned)rc.marcas_tri, (unsigned)h->skids_n);
     printf("  (marcas: %u triangulos detras de la camara)\n", (unsigned)rc.marcas_det);
-    printf("  coches: %u triangulos; %u pixeles pintados\n", (unsigned)rc.coches_tri,
+    printf("  coches: %u triangulos, %u de espaldas sin dibujar; %u pixeles pintados\n",
+           (unsigned)rc.coches_tri, (unsigned)rc.coches_espalda,
            (unsigned)P.pintados);
 
     f = fopen(path, "wb");

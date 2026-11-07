@@ -12,6 +12,10 @@
 /* El reloj avanza en unidades de 1/1920 s. Cada frontera de HOST_TICK encola una
  * interrupcion del root counter de 128 Hz (la que ps1_service_interrupts entrega), y
  * cada frontera de HOST_FIELD, la devolucion de VSync del campo de video. */
+#ifdef NFSHS_PERFIL
+volatile unsigned char host_seccion;
+#endif
+
 uint64_t host_real_clock(GameHost *h)
 {
     uint64_t ahora = h->now_us();
@@ -38,9 +42,16 @@ void host_advance_to(GameHost *h, Cpu *c, uint64_t t)
      * recien tocado, ~23 ms por detras de la voz; medido en la referencia, M4.md). */
     if (h->real_clock && h->now_us != NULL && host_real_clock(h) < t) {
         uint64_t t0 = h->now_us();
+#ifdef NFSHS_PERFIL
+        unsigned char sec = host_seccion;
 
+        HOST_SEC(HSEC_RELOJ);
+#endif
         while (host_real_clock(h) < t)
             ;
+#ifdef NFSHS_PERFIL
+        HOST_SEC(sec);
+#endif
         h->wait_us += h->now_us() - t0;
     }
 

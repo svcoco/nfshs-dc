@@ -68,6 +68,10 @@ void car_free(CarModel *m);
 #define CAR_PASS_ENV_A    2   /* el reflejo, mapa A (sobre los mapas de la pista) */
 #define CAR_PASS_ENV_B    3   /* el reflejo, mapa B: desplazado, en los poligonos 0x3F3 */
 #define CAR_PASS_ENV_SR   4   /* el mapa A del showroom (de la VRAM); ver car_draw */
+/* El coche en carrera: como BODY, y sin los triangulos que miran al otro lado. La PS1 los dibuja
+ * de una sola cara (DrawC_Prim se salta los de NCLIP no positivo), y asi lo hace la referencia
+ * (front_facing en world.rs); en el showroom y en los pasos de rueda, no. */
+#define CAR_PASS_RACE     5
 
 /* Dibuja un coche. `m` es su modelo y `d` lo que el juego decidio de el este frame.
  *
@@ -89,8 +93,10 @@ void car_free(CarModel *m);
  * solapan, el reflejo del de debajo tambien pasaria una prueba de "mas cerca" y se sumaria
  * dos veces (puntos claros en las aristas). La PS1 no lo sufre porque el panel de encima
  * se pinta despues y tapa al otro con su reflejo. */
+/* `lote` es opcional: si no es NULL, los triangulos que no hay que recortar van por ahi. */
 void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView *view,
-              int pasada, float sw, float sh, TrackEmit emit, void *user, TrackStats *st);
+              int pasada, float sw, float sh, TrackEmit emit, TrackEmitLote lote, void *user,
+              TrackStats *st);
 
 /* El modo de mezcla de PS1 de un mapa de reflejo (el de su pagina de textura), o -1 si el
  * juego no le dio ese mapa al coche este frame. */

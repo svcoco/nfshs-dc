@@ -255,6 +255,33 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
     s_tri += n - 2u;
 }
 
+/* M8: lo mismo que pista_emite con `ntri` triangulos de 3 vertices, para los coches: el cielo no
+ * pasa por aqui, y lo que no cambia va en locales. */
+static void pista_lote(void *user, const TrackVert *v, uint32_t ntri, const TrackMat *m)
+{
+    const float zmul = s_zmul, zadd = s_zadd, umul = s_umul, uadd = s_uadd, vmul = s_vmul, vadd = s_vadd;
+    uint32_t i, k;
+
+    (void)user;
+    (void)m;
+    for (i = 0; i < ntri; i++, v += 3) {
+        for (k = 0; k < 3u; k++) {
+            pvr_vertex_t *pv = pvr_dr_target();
+
+            pv->flags = k == 2u ? PVR_CMD_VERTEX_EOL : PVR_CMD_VERTEX;
+            pv->x = v[k].x;
+            pv->y = v[k].y;
+            pv->z = v[k].z * zmul + zadd;
+            pv->u = v[k].u * umul + uadd;
+            pv->v = v[k].v * vmul + vadd;
+            pv->argb = v[k].argb;
+            pv->oargb = 0;
+            pvr_dr_commit(pv);
+        }
+    }
+    s_tri += ntri;
+}
+
 /* ---- los coches (M2c paso 4) ----
  *
  * Cada modelo trae su propio atlas (512x256, un cuarto de megabyte), asi que hay una
@@ -461,8 +488,8 @@ static void coches_dibuja(GameHost *h)
         cxt.gen.culling = PVR_CULLING_NONE;
         pvr_poly_compile(&hdr, &cxt);
         pvr_prim(&hdr, sizeof(hdr));
-        car_draw(&s_coches[k].modelo, d, &s_rv, 0, s_sw, s_sh,
-                 pista_emite, NULL, &cst);
+        car_draw(&s_coches[k].modelo, d, &s_rv, CAR_PASS_RACE, s_sw, s_sh,
+                 pista_emite, pista_lote, NULL, &cst);
         s_tri_coches += cst.quads_out;
     }
 }
@@ -504,8 +531,23 @@ static void coches_dibuja(GameHost *h)
 static void efecto_ctx(pvr_ptr_t atlas, uint32_t w, uint32_t hh);
 static float s_bx0, s_by0, s_bx1, s_by1;     /* la caja de los efectos, en pantalla */
 
-/* Sumidero que solo acumula la caja: no emite nada al PVR. */
-static void caja_emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
+/* M8: la caja solo se sabe despues de transformar los efectos, y hay que dibujarla antes que
+ * ellos. Antes se recorrian dos veces (una entera solo para la caja, con sus pasadas de coche);
+ * ahora se graban en la primera y se reproducen. Medido: como mucho 726 vertices en una
+ * persecucion de 5 000 frames (`render_ef_max`); si un frame no cabe, se recalcula. */
+#define EF_VERTS 4096u
+#define EF_CTX   40u                 /* 1 + 3 por coche, con CARS_MAX 8 */
+
+static TrackVert s_ef_v[EF_VERTS];
+static uint8_t   s_ef_n[EF_VERTS / 3u];       /* los vertices de cada poligono */
+static struct { pvr_ptr_t atlas; uint32_t w, h, poli; } s_ef_ctx[EF_CTX];
+static uint32_t  s_ef_nv, s_ef_np, s_ef_nc, s_ef_max;
+static int       s_ef_lleno;
+
+uint32_t render_ef_max(void) { return s_ef_max; }
+
+/* Sumidero de la primera pasada: acumula la caja y guarda el poligono. */
+static void ef_graba(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
 {
     uint32_t k;
 
@@ -517,20 +559,60 @@ static void caja_emite(void *user, const TrackVert *v, uint32_t n, const TrackMa
         if (v[k].y < s_by0) s_by0 = v[k].y;
         if (v[k].y > s_by1) s_by1 = v[k].y;
     }
+    if (s_ef_nv + n > EF_VERTS || s_ef_np >= EF_VERTS / 3u) {
+        s_ef_lleno = 1;
+        return;
+    }
+    memcpy(&s_ef_v[s_ef_nv], v, n * sizeof *v);
+    s_ef_nv += n;
+    s_ef_n[s_ef_np++] = (uint8_t)n;
 }
 
-/* Recorre los efectos con el sumidero que se le de. Con `dibuja` a 0 es el recorrido de la
- * caja y no toca el PVR; con 1 pone el contexto de cada atlas antes de cada pieza. */
+/* El contexto de un atlas: al PVR si se dibuja, o a la grabacion. */
+static void ef_ctx(int dibuja, pvr_ptr_t atlas, uint32_t w, uint32_t hh)
+{
+    if (dibuja) {
+        efecto_ctx(atlas, w, hh);
+    } else if (s_ef_nc >= EF_CTX) {
+        s_ef_lleno = 1;
+    } else {
+        s_ef_ctx[s_ef_nc].atlas = atlas;
+        s_ef_ctx[s_ef_nc].w = w;
+        s_ef_ctx[s_ef_nc].h = hh;
+        s_ef_ctx[s_ef_nc].poli = s_ef_np;
+        s_ef_nc++;
+    }
+}
+
+/* Lo grabado, en su orden. */
+static void ef_reproduce(void)
+{
+    const TrackVert *v = s_ef_v;
+    uint32_t p, c = 0;
+
+    for (p = 0; p <= s_ef_np; p++) {
+        while (c < s_ef_nc && s_ef_ctx[c].poli == p) {
+            efecto_ctx(s_ef_ctx[c].atlas, s_ef_ctx[c].w, s_ef_ctx[c].h);
+            c++;
+        }
+        if (p < s_ef_np) {
+            pista_emite(NULL, v, s_ef_n[p], NULL);
+            v += s_ef_n[p];
+        }
+    }
+}
+
+/* Recorre los efectos con el sumidero que se le de. Con `dibuja` a 0 graba; con 1 (solo si la
+ * grabacion se ha llenado) pone el contexto de cada atlas en el PVR antes de cada pieza. */
 static void efectos_recorre(GameHost *h, TrackEmit emit, int dibuja)
 {
     uint32_t ci;
     TrackStats kst;
 
-    if (dibuja)
-        efecto_ctx(s_atlas, s_track.atlas_w, s_track.atlas_h);
+    ef_ctx(dibuja, s_atlas, s_track.atlas_w, s_track.atlas_h);
     /* las marcas de neumatico: en el suelo, asi que van antes que las sombras */
     skids_draw(&s_track, h->skids, h->skids_n, &s_rv, s_sw, s_sh, emit, NULL, &kst);
-    if (dibuja)
+    if (!dibuja)
         s_tri_efectos += kst.quads_out;
 
     for (ci = 0; ci < s_vc->cars_n && ci < CARS_MAX; ci++) {
@@ -541,30 +623,27 @@ static void efectos_recorre(GameHost *h, TrackEmit emit, int dibuja)
         if (d->code[0] == 0)
             continue;
         /* la sombra del suelo usa SHAD, que vive en el atlas de la pista */
-        if (dibuja)
-            efecto_ctx(s_atlas, s_track.atlas_w, s_track.atlas_h);
+        ef_ctx(dibuja, s_atlas, s_track.atlas_w, s_track.atlas_h);
         car_shadow(&s_track, d, &s_rv, s_sw, s_sh, emit, NULL, &est);
-        if (dibuja)
+        if (!dibuja)
             s_tri_efectos += est.quads_out;
 
         /* y la de los pasos de rueda, que son partes del propio coche y su atlas */
         k = coche_de(h, d->code);
         if (k != 0xFFFFFFFFu && s_coches[k].modelo.raw != NULL &&
             coche_textura(k, d->paint) != NULL) {
-            if (dibuja)
-                efecto_ctx(coche_textura(k, d->paint), s_coches[k].modelo.atlas_w,
-                           s_coches[k].modelo.atlas_h);
+            ef_ctx(dibuja, coche_textura(k, d->paint), s_coches[k].modelo.atlas_w,
+                   s_coches[k].modelo.atlas_h);
             car_draw(&s_coches[k].modelo, d, &s_rv, CAR_PASS_SUBTRACT, s_sw, s_sh,
-                     emit, NULL, &est);
-            if (dibuja)
+                     emit, NULL, NULL, &est);
+            if (!dibuja)
                 s_tri_efectos += est.quads_out;
             /* y el mapa B del reflejo, que resta (modo 2 de su pagina de textura) */
             if (s_refl != NULL && car_env_abr(d, CAR_PASS_ENV_B) == 2) {
-                if (dibuja)
-                    efecto_ctx(s_refl, CAR_REFL_SIZE, CAR_REFL_SIZE);
+                ef_ctx(dibuja, s_refl, CAR_REFL_SIZE, CAR_REFL_SIZE);
                 car_draw(&s_coches[k].modelo, d, &s_rv, CAR_PASS_ENV_B, s_sw, s_sh,
-                         emit, NULL, &est);
-                if (dibuja)
+                         emit, NULL, NULL, &est);
+                if (!dibuja)
                     s_tri_reflejo += est.quads_out;
             }
         }
@@ -657,7 +736,7 @@ static void reflejos_dibuja(GameHost *h)
         pvr_poly_compile(&hdr, &cxt);
         pvr_prim(&hdr, sizeof(hdr));
         car_draw(&s_coches[k].modelo, d, &s_rv, CAR_PASS_ENV_A, s_sw, s_sh,
-                 pista_emite, NULL, &est);
+                 pista_emite, pista_lote, NULL, &est);
         s_tri_reflejo += est.quads_out;
     }
 }
@@ -671,9 +750,13 @@ static void efectos_dibuja(GameHost *h)
     s_fase = FASE_RESTO;         /* el sumidero no cambia de contexto por su cuenta */
     s_zmul = 1.003f;
 
-    /* 1. la caja que ocupan los efectos, sin dibujar nada */
+    /* 1. la caja que ocupan los efectos, grabandolos sin dibujar nada */
     s_bx0 = 1e9f; s_by0 = 1e9f; s_bx1 = -1e9f; s_by1 = -1e9f;
-    efectos_recorre(h, caja_emite, 0);
+    s_ef_nv = s_ef_np = s_ef_nc = 0;
+    s_ef_lleno = 0;
+    efectos_recorre(h, ef_graba, 0);
+    if (s_ef_nv > s_ef_max)
+        s_ef_max = s_ef_nv;
     if (s_bx1 >= s_bx0 && s_by1 >= s_by0) {
         float x0 = floorf(s_bx0) - 1.0f, y0 = floorf(s_by0) - 1.0f;
         float x1 = ceilf(s_bx1) + 1.0f, y1 = ceilf(s_by1) + 1.0f;
@@ -681,7 +764,10 @@ static void efectos_dibuja(GameHost *h)
         if (a_la_banda(&x0, &y0, &x1, &y1)) {
             /* 2. invertir, 3. sumar los efectos, 4. invertir otra vez: B - F */
             inversion(x0, y0, x1, y1);
-            efectos_recorre(h, pista_emite, 1);
+            if (s_ef_lleno)
+                efectos_recorre(h, pista_emite, 1);   /* no cabian: se recalculan */
+            else
+                ef_reproduce();
             inversion(x0, y0, x1, y1);
         }
     }
@@ -716,17 +802,22 @@ static void pista_dibuja(GameHost *h)
      * doble cara) y del resto se encarga el Z-buffer. */
     s_modo = -1;
     s_fase = FASE_CIELO;
+    HOST_SEC(HSEC_D_CIELO);
     sky_draw(&s_track, &h->sky, &s_rv, s_sw, s_sh, pista_emite, NULL, &sst);
     s_fase = FASE_RESTO;
     modo_pon(MODO_PISTA);
+    HOST_SEC(HSEC_D_PISTA);
     track_draw(&s_track, &s_rv, h->light_ok ? h->light_table : NULL,
                s_sw, s_sh, pista_emite, NULL, &st);
     /* Los objetos van en la misma pasada: mismos materiales y mismo atlas. */
+    HOST_SEC(HSEC_D_OBJETOS);
     objects_draw(&s_track, s_vc->objects, s_vc->objects_n, &s_rv,
                  h->light_ok ? h->light_table : NULL,
                  s_sw, s_sh, pista_emite, NULL, &ost);
     /* y los coches, cada uno con su atlas */
+    HOST_SEC(HSEC_D_COCHES);
     coches_dibuja(h);
+    HOST_SEC(HSEC_D_RESTO);
     }
     s_tri_frames++;
     pvr_list_finish();
@@ -1376,7 +1467,7 @@ static void showroom_coches(GameHost *h)
         s_zmul = s->mirrored ? Z_REFLEJO : 1.0f;
         s_zadd = (s->mirrored ? Z_FONDO : 0.0f) + Z_BANDA * (float)s_sr_vista[(uint16_t)q->pts[0][0]];
         car_draw(&s_coches[k].modelo, &d, &rv, CAR_PASS_BODY, 640.0f, 480.0f,
-                 pista_emite, NULL, &cst);
+                 pista_emite, NULL, NULL, &cst);
         s_tri_coches += cst.quads_out;
     }
     s_zmul = 1.0f;
@@ -1435,7 +1526,7 @@ static void showroom_reflejos(GameHost *h, int espejo, uint32_t vista)
         s_zmul = s->mirrored ? Z_REFLEJO : 1.0f;
         s_zadd = (s->mirrored ? Z_FONDO : 0.0f) + Z_BANDA * (float)vista;
         car_draw(&s_coches[k].modelo, &d, &rv, CAR_PASS_ENV_SR, 640.0f, 480.0f,
-                 pista_emite, NULL, &cst);
+                 pista_emite, NULL, NULL, &cst);
         s_tri_reflejo += cst.quads_out;
     }
     s_umul = 1.0f;
@@ -1489,7 +1580,9 @@ void render_frame(GameHost *h)
     {
         uint64_t e0 = timer_us_gettime64();
 
+        HOST_SEC(HSEC_ESPERA_PVR);
         pvr_wait_ready();
+        HOST_SEC(HSEC_D_RESTO);
         s_espera_us += timer_us_gettime64() - e0;
     }
     if (h->texcache.conversiones != subidas_vistas) {
@@ -1518,6 +1611,7 @@ void render_frame(GameHost *h)
         pvr_list_finish();
     }
     pvr_list_begin(PVR_LIST_TR_POLY);
+    HOST_SEC(HSEC_D_TRANS);
     for (k = 0; k < h->views_n && k < VIEWS_MAX; k++) {
         vista_pon(h, k);
         /* el flare del sol: sobre el cielo y debajo del mundo */
@@ -1532,6 +1626,7 @@ void render_frame(GameHost *h)
         /* y el clima, encima de todo el 3D y debajo del HUD */
         clima_dibuja(h, sx, sy);
     }
+    HOST_SEC(HSEC_D_2D);
     /* el 2D de la pantalla (front end, HUD) ya no es de ninguna vista */
     s_ox2 = 0.0f;
     s_oy2 = 0.0f;
@@ -1592,6 +1687,7 @@ void render_frame(GameHost *h)
     if (s_suelos > 0u)
         showroom_suelos(h, sx, sy, vista_sig > 0u ? vista_sig - 1u : 0u);
 
+    HOST_SEC(HSEC_D_RESTO);
     pvr_list_finish();
     pvr_scene_finish();
     s_frames++;

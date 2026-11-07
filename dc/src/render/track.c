@@ -12,9 +12,6 @@
  * exactamente el que hornea bake.rs. */
 _Static_assert(sizeof(TrackMat) == 16, "TrackMat tiene que medir 16 bytes");
 
-/* Plano cercano, en metros. Por delante de el no se puede dividir por z. */
-#define NEAR 0.25f
-
 #include "vmath.h"
 
 /* ---- carga ---- */
@@ -239,18 +236,6 @@ void view_size(const struct RaceView *v, float dw, float dh, float W, float H,
     }
 }
 
-static void proyecta(const View *vw, const Cv *c, TrackVert *o)
-{
-    float inv = vm_inv(c->z);
-
-    o->x = vw->ox + c->x * vw->fx * inv;
-    o->y = vw->oy - c->y * vw->fy * inv;
-    o->z = inv;               /* el PVR quiere 1/w */
-    o->u = c->u;
-    o->v = c->v;
-    o->argb = c->argb;
-}
-
 /* Interpola entre dos vertices de camara, en `s` de 0 a 1. */
 static void mezcla(Cv *o, const Cv *a, const Cv *b, float s)
 {
@@ -300,22 +285,6 @@ static uint32_t recorta_borde(const View *vw, const Cv *in, uint32_t n, Cv *out,
             mezcla(&out[m++], a, b, da / (da - db));
     }
     return m;
-}
-
-/* La banda de guarda: el PVR no recorta y sus coordenadas de pantalla tienen un alcance
- * finito. Sin este recorte, un vertice recien cortado por el plano cercano sale a decenas de
- * miles de pixeles (la banda del horizonte tiene radio 32000: 32000 * 190 / 0,25 = 2,4e7).
- * Una pantalla de margen a cada lado es de sobra: lo que cae fuera de la pantalla no se pinta. */
-#define GUARD_X0 (-640.0f)
-#define GUARD_X1 1280.0f
-#define GUARD_Y0 (-480.0f)
-#define GUARD_Y1 960.0f
-
-/* Con z > 0, un punto de pantalla dentro de estos limites es lo mismo que borde_guarda >= 0
- * en los cuatro bordes. */
-static inline int dentro_guarda(float x, float y)
-{
-    return x >= GUARD_X0 && x <= GUARD_X1 && y >= GUARD_Y0 && y <= GUARD_Y1;
 }
 
 /* Distancia a un borde de la banda de guarda en espacio de camara (>= 0 dentro). Como en

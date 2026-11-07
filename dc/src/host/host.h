@@ -52,6 +52,20 @@
 /* Con reloj real, campos que puede avanzar el juego como mucho en un frame (4: hasta 15 fps
  * el juego va a su velocidad; ver host_frame_top). */
 #define HOST_REAL_MAX_FIELDS 4u
+
+/* M8, muestreador en consola (make dc-perfil, platform/dc/muestreo.c): en que parte del frame esta
+ * el host. Fuera de esa build no genera codigo. */
+enum {
+    HSEC_JUEGO, HSEC_VISTA, HSEC_OBJETOS, HSEC_DESTELLOS, HSEC_CIELO_HUD, HSEC_COCHES, HSEC_FRONTERA,
+    HSEC_TEXTURAS, HSEC_ESPERA_PVR, HSEC_D_CIELO, HSEC_D_PISTA, HSEC_D_OBJETOS, HSEC_D_COCHES,
+    HSEC_D_TRANS, HSEC_D_2D, HSEC_D_RESTO, HSEC_RELOJ, HSEC_N
+};
+#ifdef NFSHS_PERFIL
+extern volatile unsigned char host_seccion;
+#define HOST_SEC(n) (host_seccion = (unsigned char)(n))
+#else
+#define HOST_SEC(n) ((void)0)
+#endif
 #define HOST_HZ     1920u
 
 /* Espejo de la VRAM del PS1: 1024 x 512 pixeles de 16 bits (1 MB). El juego escribe

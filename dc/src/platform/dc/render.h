@@ -27,5 +27,7 @@ uint64_t render_car_tris(void);
 uint64_t render_car_paints(void);
 
 uint64_t render_fx_tris(void);
+/* El mayor numero de vertices grabados de los efectos en un frame (el tope es EF_VERTS). */
+uint32_t render_ef_max(void);
 
 #endif /* PLATFORM_DC_RENDER_H */

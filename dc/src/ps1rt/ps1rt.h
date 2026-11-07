@@ -215,6 +215,51 @@ static inline __attribute__((always_inline)) void ps1_tick(Cpu *c)
 #else
 void     ps1_tick(Cpu *c);
 #endif
+/* Anota n ramas hacia atras de golpe, pero SOLO si ninguna de ellas haria otra cosa que contar
+ * (ni idle del host, ni interrupciones, ni parada, ni watchdog): entonces es exactamente lo
+ * mismo que n llamadas a ps1_tick. Devuelve 0, sin tocar nada, si alguna haria algo. */
+static inline __attribute__((always_inline)) int ps1_tick_bulk(Cpu *c, uint32_t n)
+{
+#if PS1_FAST_TICK
+    if (c->tick_run + n < c->tick_top) {
+        c->tick_run += n;
+        return 1;
+    }
+    return 0;
+#else
+    if (c->tick_limit == 0 || c->ticks + n > c->tick_limit)
+        return 0;
+    if (c->spin_limit != 0 && !c->in_irq && c->since_host + n >= c->spin_limit)
+        return 0;
+    c->ticks += n;
+    c->since_host += n;
+    return 1;
+#endif
+}
+
+/* M8: la division sin signo de 64 / 32 bits por desplazamiento y resta (0x800FEE8C): a1:a0 entre
+ * a2, cociente en v0 y resto en a1, en 32 vueltas con 31 ramas hacia atras. Era el 14,7 % de las
+ * instrucciones de una carrera (perfil en PC). Cuando el resultado de las 32 vueltas es el de la
+ * division de verdad (a1 < a2 y a2 < 2^31, para que 2 * resto + 1 no desborde) se calcula de una
+ * vez, dejando los registros EXACTAMENTE como los deja el bucle; si no, devuelve 0 y corre el
+ * bucle original. Devuelve 1 si ya esta hecho. */
+static inline int ps1_game_udiv64(Cpu *c)
+{
+    uint32_t lo = c->r[4], hi = c->r[5], d = c->r[6];
+    uint64_t n, q;
+
+    if (hi >= d || d > 0x7FFFFFFFu || !ps1_tick_bulk(c, 31u))
+        return 0;
+    n = ((uint64_t)hi << 32) | lo;
+    q = n / d;
+    c->r[2] = (uint32_t)q;                       /* v0: cociente */
+    c->r[5] = (uint32_t)(n - q * d);             /* a1: resto */
+    c->r[4] = 0u;                                /* a0: desplazado 32 veces */
+    c->r[9] = 0xFFFFFFFFu;                       /* t1: acaba en -1 */
+    c->r[10] = lo & 1u;                          /* t2: el ultimo bit que entro */
+    c->r[11] = (uint32_t)!(q & 1u);              /* t3: la ultima comparacion (1 si no resto) */
+    return 1;
+}
 void     ps1_syscall(Cpu *c);
 void     ps1_service_interrupts(Cpu *c);
 void     ps1_defer(Cpu *c, uint32_t f, const uint32_t *args, uint32_t n);
@@ -391,6 +436,87 @@ static inline __attribute__((always_inline)) void ps1_w32(Cpu *c, uint32_t a, ui
     }
     ps1_w32_slow(c, a, v);
 }
+
+/* M8: variantes con el scratchpad en la ruta rapida. El juego usa el scratchpad (1 KB en 0x1F800000)
+ * como memoria de trabajo: en una carrera el 26 % de los accesos del codigo recompilado va ahi, y
+ * sin esto cada uno es una llamada a ps1_*_slow. Poner la prueba en linea en TODOS los accesos de
+ * las funciones calientes crecia el codigo 650 KB (+15 %), asi que solo la llevan las funciones
+ * de tools/recomp/scratch_funcs.txt (medido: del 78 al 83 % de esos accesos, en el 19 % del codigo caliente). */
+static inline __attribute__((always_inline)) uint32_t ps1_r8s(Cpu *c, uint32_t a)
+{
+    if (PS1_LIKELY((a & 0x1F800000u) == 0u))
+        return c->ram[a & PS1_RAM_MASK];
+    if (PS1_LIKELY((a & 0x1FFFFC00u) == PS1_SCRATCH_BASE))
+        return c->scratch[a & 0x3FFu];
+    return ps1_r8_slow(c, a);
+}
+
+static inline __attribute__((always_inline)) uint32_t ps1_r16s(Cpu *c, uint32_t a)
+{
+    if (PS1_LIKELY((a & (0x1F800000u | 1u)) == 0u))
+        return *(const ps1_u16a *)(c->ram + (a & PS1_RAM_MASK));
+    if (PS1_LIKELY((a & 0x1FFFFC01u) == PS1_SCRATCH_BASE))
+        return *(const ps1_u16a *)(c->scratch + (a & 0x3FFu));
+    return ps1_r16_slow(c, a);
+}
+
+static inline __attribute__((always_inline)) uint32_t ps1_r32s(Cpu *c, uint32_t a)
+{
+    if (PS1_LIKELY((a & (0x1F800000u | 3u)) == 0u))
+        return *(const ps1_u32a *)(c->ram + (a & PS1_RAM_MASK));
+    if (PS1_LIKELY((a & 0x1FFFFC03u) == PS1_SCRATCH_BASE))
+        return *(const ps1_u32a *)(c->scratch + (a & 0x3FFu));
+    return ps1_r32_slow(c, a);
+}
+
+static inline __attribute__((always_inline)) void ps1_w8s(Cpu *c, uint32_t a, uint32_t v)
+{
+    if (PS1_LIKELY((a & 0x1F800000u) == 0u)) {
+        c->ram[a & PS1_RAM_MASK] = (uint8_t)v;
+        return;
+    }
+    if (PS1_LIKELY((a & 0x1FFFFC00u) == PS1_SCRATCH_BASE)) {
+        c->scratch[a & 0x3FFu] = (uint8_t)v;
+        return;
+    }
+    ps1_w8_slow(c, a, v);
+}
+
+static inline __attribute__((always_inline)) void ps1_w16s(Cpu *c, uint32_t a, uint32_t v)
+{
+    if (PS1_LIKELY((a & (0x1F800000u | 1u)) == 0u)) {
+        *(ps1_u16a *)(c->ram + (a & PS1_RAM_MASK)) = (uint16_t)v;
+        return;
+    }
+    if (PS1_LIKELY((a & 0x1FFFFC01u) == PS1_SCRATCH_BASE)) {
+        *(ps1_u16a *)(c->scratch + (a & 0x3FFu)) = (uint16_t)v;
+        return;
+    }
+    ps1_w16_slow(c, a, v);
+}
+
+static inline __attribute__((always_inline)) void ps1_w32s(Cpu *c, uint32_t a, uint32_t v)
+{
+    if (PS1_LIKELY((a & (0x1F800000u | 3u)) == 0u)) {
+        *(ps1_u32a *)(c->ram + (a & PS1_RAM_MASK)) = v;
+        return;
+    }
+    if (PS1_LIKELY((a & 0x1FFFFC03u) == PS1_SCRATCH_BASE)) {
+        *(ps1_u32a *)(c->scratch + (a & 0x3FFu)) = v;
+        return;
+    }
+    ps1_w32_slow(c, a, v);
+}
+
+#if PS1_PROF
+/* el perfil mide la ruta lenta tal como era: sin el scratchpad en linea */
+#define ps1_r8s  ps1_r8
+#define ps1_r16s ps1_r16
+#define ps1_r32s ps1_r32
+#define ps1_w8s  ps1_w8
+#define ps1_w16s ps1_w16
+#define ps1_w32s ps1_w32
+#endif
 
 /* M8: el codigo generado de Dreamcast. Las funciones calientes (PS1_HOT) llevan los accesos en
  * linea, y la multiplicacion tambien; las demas llaman a una sola copia (mem.c), porque en

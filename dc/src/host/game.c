@@ -83,6 +83,7 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
     uint32_t args[2];
     uint32_t n;
 
+    HOST_SEC(HSEC_VISTA);
     /* Lo que se grabe de esta vista va a su hueco, el de la vista que va a ocupar. */
     h->vc = &h->cap[h->views_n < VIEWS_MAX ? h->views_n : VIEWS_MAX - 1u];
 
@@ -131,10 +132,13 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
 
     /* Los objetos del escenario: hay que grabarlos DESPUES de la lista de trozos,
      * porque es sobre ella sobre la que el juego decide. */
+    HOST_SEC(HSEC_OBJETOS);
     host_record_objects(h, c);
+    HOST_SEC(HSEC_DESTELLOS);
     /* y, en el mismo punto que la referencia, lo que el juego construye como 2D: farolas,
      * humo, clima y el flare del sol */
     host_record_glows(h, c, n);
+    HOST_SEC(HSEC_CIELO_HUD);
     sky_read(h, c);
 
     /* La captura de la vista: camara, proyeccion, recorte y lista de trozos. A partir
@@ -173,8 +177,10 @@ static void race_view_logic(GameHost *h, Cpu *c, uint32_t view, uint32_t player)
 
     /* Los coches van DESPUES del HUD, en el mismo orden que la referencia: el original
      * los dibuja ahi y ese orden decide que ve cada rutina. */
+    HOST_SEC(HSEC_COCHES);
     host_record_cars(h, c);
     host_record_halos(h, c);
+    HOST_SEC(HSEC_JUEGO);
     /* (las marcas de neumatico se leen en la frontera de frame: ver host_frame_top) */
 }
 

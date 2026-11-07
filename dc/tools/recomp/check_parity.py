@@ -54,7 +54,7 @@ RUST_TOKENS = [
 ]
 C_TOKENS = [
     (r'ps1_push\(c, (0x[0-9a-f]+)u\)', 'push:{}'),
-    (r'ps1_(r8|r16|r32|w8|w16|w32)\(c,', '{}'),
+    (r'ps1_(r8|r16|r32|w8|w16|w32)s?\(c,', '{}'),
     (r'ps1_(lwl|lwr|swl|swr)\(c,', '{}'),
     (r'ps1_(mult|multu|div|divu)\(c,', '{}'),
     (r'ps1_gte\(c, (0x[0-9a-f]+)u\)', 'gte:{}'),
@@ -88,6 +88,9 @@ def tokenize(text, table):
 
 
 RUST_LEADER = re.compile(r'^\s{12}(0x[0-9a-f]+) => \{$', re.M)
+# La entrada nativa (NATIVE_ENTRY en recomp.py) no es parte de la traduccion: la cubren las pruebas
+# unitarias y el test diferencial.
+C_NATIVE = re.compile(r'if \(pc == 0x[0-9a-f]+u && ps1_game_\w+\(c\)\) \{ ps1_pop\(c\); return; \}')
 C_LEADER = re.compile(r'^L_([0-9a-f]{8}):$', re.M)
 
 
@@ -102,7 +105,7 @@ def main():
     tok_total = 0
     for f in funcs:
         rs = RUST_COMMENT.sub('', recomp.safe_gen(f, known))
-        cs = C_COMMENT.sub('', recomp.safe_gen_c(f, known))
+        cs = C_NATIVE.sub('', C_COMMENT.sub('', recomp.safe_gen_c(f, known)))
         rl = [int(x, 16) for x in RUST_LEADER.findall(rs)]
         cl = [int(x, 16) for x in C_LEADER.findall(cs)]
         rt = tokenize(rs, RUST_TOKENS)

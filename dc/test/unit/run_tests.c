@@ -337,6 +337,96 @@ static void test_call_order(void)
 }
 
 /* ------------------------------------------------------------- tick y parada */
+static void test_game_udiv64(void)
+{
+    Cpu *c = fresh();
+    uint64_t seed = 0x9E3779B97F4A7C15ull;
+    uint32_t i, nativas = 0;
+
+    puts("division 64/32 del juego (0x800FEE8C): nativa contra el bucle de 32 vueltas");
+    for (i = 0; i < 200000u; i++) {
+        uint32_t lo, hi, d, v0 = 0, a0, a1, t1 = 32, t2, t3, k;
+        Cpu *n = c;
+
+        seed = seed * 6364136223846793005ull + 1442695040888963407ull;
+        lo = (uint32_t)(seed >> 32);
+        seed = seed * 6364136223846793005ull + 1442695040888963407ull;
+        hi = (uint32_t)(seed >> 32);
+        seed = seed * 6364136223846793005ull + 1442695040888963407ull;
+        d = (uint32_t)(seed >> 32);
+        /* mezcla de casos: divisores pequenos, grandes, restos que desbordan, hi >= d, d = 0 */
+        switch (i & 7u) {
+        case 0: d >>= 16; break;
+        case 1: d |= 0x80000000u; break;
+        case 2: hi %= (d ? d : 1u); break;
+        case 3: hi %= (d ? d : 1u); d >>= 1; if (hi >= d) hi = d ? d - 1u : 0u; break;
+        case 4: d = 0; break;
+        case 5: hi = 0; break;
+        default: hi %= (d ? d : 1u); break;
+        }
+        /* el bucle del MIPS, literal */
+        a0 = lo; a1 = hi; t1--; t2 = t3 = 0;
+        for (;;) {
+            v0 <<= 1; a1 <<= 1; t2 = a0 >> 31; a1 += t2; t3 = a1 < d; a0 <<= 1;
+            if (!t3) { a1 -= d; v0++; }
+            k = t1; t1--;
+            if (k == 0) break;
+        }
+        n->r[4] = lo; n->r[5] = hi; n->r[6] = d;
+        n->r[2] = n->r[9] = n->r[10] = n->r[11] = 0x12345678u;
+        n->ticks = 0; n->since_host = 0; n->spin_limit = 0; n->tick_limit = UINT64_MAX;
+        if (!ps1_game_udiv64(n))
+            continue;              /* fuera del caso exacto: corre el bucle generado */
+        nativas++;
+        if (n->r[2] != v0 || n->r[5] != a1 || n->r[4] != a0 || n->r[9] != t1 ||
+            n->r[10] != t2 || n->r[11] != t3 || n->ticks != 31u) {
+            printf("  DIFIERE con a1:a0 = %08x:%08x, a2 = %08x\n", (unsigned)hi, (unsigned)lo, (unsigned)d);
+            CHECK(0);
+            return;
+        }
+    }
+    printf("  %u de 200000 por la ruta nativa\n", nativas);
+    CHECK(nativas > 50000u);
+
+    /* fuera del caso exacto no toca nada: ni registros ni ticks */
+    c->r[2] = c->r[9] = c->r[10] = c->r[11] = 0x12345678u;
+    c->ticks = 7; c->since_host = 7; c->spin_limit = 0; c->tick_limit = UINT64_MAX;
+    c->r[4] = 1; c->r[5] = 5; c->r[6] = 5;           /* a1 >= a2 */
+    CHECK_EQ(ps1_game_udiv64(c), 0u);
+    c->r[5] = 0; c->r[6] = 0;                        /* entre cero */
+    CHECK_EQ(ps1_game_udiv64(c), 0u);
+    c->r[5] = 1; c->r[6] = 0x80000000u;              /* a2 >= 2^31 */
+    CHECK_EQ(ps1_game_udiv64(c), 0u);
+    CHECK_EQ(c->r[2], 0x12345678u);
+    CHECK_EQ(c->ticks, 7u);
+    CHECK_EQ(c->since_host, 7u);
+
+    /* el tope exacto: a2 = 2^31 - 1, a1 = a2 - 1, a0 = todo unos */
+    c->r[4] = 0xFFFFFFFFu; c->r[5] = 0x7FFFFFFEu; c->r[6] = 0x7FFFFFFFu;
+    CHECK_EQ(ps1_game_udiv64(c), 1u);
+    CHECK_EQ(c->r[2], 0xFFFFFFFFu);
+    CHECK_EQ(c->r[5], 0x7FFFFFFEu);
+
+    /* ps1_tick_bulk: los bordes de las tres cosas que haria un tick de verdad */
+    c->ticks = 0; c->tick_limit = UINT64_MAX; c->in_irq = 0; c->spin_limit = 100;
+    c->since_host = 69;                              /* el ultimo llegaria a spin_limit */
+    CHECK_EQ(ps1_tick_bulk(c, 31u), 0u);
+    CHECK_EQ(c->ticks, 0u);
+    c->since_host = 68;
+    CHECK_EQ(ps1_tick_bulk(c, 31u), 1u);
+    CHECK_EQ(c->since_host, 99u);
+    c->since_host = 500; c->in_irq = 1;              /* dentro de una interrupcion no hace idle */
+    CHECK_EQ(ps1_tick_bulk(c, 31u), 1u);
+    c->in_irq = 0; c->spin_limit = 0;
+    c->tick_limit = 0;                               /* parada pedida */
+    CHECK_EQ(ps1_tick_bulk(c, 31u), 0u);
+    c->ticks = 100; c->tick_limit = 131;             /* justo en el limite no salta el watchdog */
+    CHECK_EQ(ps1_tick_bulk(c, 31u), 1u);
+    c->ticks = 101;
+    CHECK_EQ(ps1_tick_bulk(c, 31u), 0u);
+    c->tick_limit = UINT64_MAX;
+}
+
 static void test_tick(void)
 {
     Cpu *c = fresh();
@@ -975,6 +1065,7 @@ int main(void)
     test_load_exe();
     test_call_order();
     test_tick();
+    test_game_udiv64();
     test_stop();
     test_cont();
     test_call_nested();

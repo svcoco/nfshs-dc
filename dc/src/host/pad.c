@@ -246,6 +246,7 @@ static void pausa_presenta(GameHost *h)
  * La referencia hace estas tres cosas en su frame_top, y por eso aqui tambien. */
 void host_frame_top(GameHost *h, Cpu *c)
 {
+    HOST_SEC(HSEC_FRONTERA);
     h->frames++;
 #if PS1_PROF
     { extern void ps1_prof_frame(uint64_t); ps1_prof_frame(h->frames); }
@@ -339,6 +340,15 @@ void host_frame_top(GameHost *h, Cpu *c)
             if (real > t)
                 t = real;
         }
+#if PS1_PROF
+        /* el perfil: la consola avanza varios campos por frame y el reloj virtual, uno */
+        {
+            extern uint32_t ps1_prof_campos(uint64_t f);
+            uint32_t extra = h->mode == HOST_RACE ? ps1_prof_campos(h->frames) : 0u;
+
+            t += (uint64_t)extra * HOST_FIELD;
+        }
+#endif
         host_advance_to(h, c, t);
     }
     h->last_top = h->clock;
@@ -365,7 +375,9 @@ void host_frame_top(GameHost *h, Cpu *c)
     {
         uint64_t t0 = h->now_us ? h->now_us() : 0u, t1;
 
+        HOST_SEC(HSEC_TEXTURAS);
         host_build_textures(h);
+        HOST_SEC(HSEC_D_RESTO);
         t1 = h->now_us ? h->now_us() : 0u;
         if (h->on_draw != NULL)
             h->on_draw(h);
@@ -374,6 +386,7 @@ void host_frame_top(GameHost *h, Cpu *c)
             h->draw_us += h->now_us() - t1;
         }
     }
+    HOST_SEC(HSEC_FRONTERA);
     overlay_reset(&h->overlay);
     h->hud_cmds_n = 0;
     h->sroom_n = 0;
@@ -385,6 +398,7 @@ void host_frame_top(GameHost *h, Cpu *c)
     /* fin del guion: parada ordenada, para que el arnes imprima su informe */
     if (h->pad_end != 0u && h->frames >= h->pad_end)
         c->tick_limit = 0;
+    HOST_SEC(HSEC_JUEGO);
 }
 
 void pad_write(GameHost *h, Cpu *c)

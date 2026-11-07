@@ -42,7 +42,7 @@ export TMPDIR
 export TMP  := $(TMPDIR)
 export TEMP := $(TMPDIR)
 
-.PHONY: perfil help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size dc-bench-mdec bake bake-coches disc diff clean
+.PHONY: dc-perfil dc-perfil-enlaza perfil help m0 metrics gen gen-rust parity test genobj gen-hle pc dc dc-check dc-gen dc-test dc-size dc-bench-mdec bake bake-coches disc diff clean
 
 help:
 	@echo "Analisis y generacion (Python, funcionan ya):"
@@ -214,6 +214,27 @@ $(AICA_DRV_C):
 	@mkdir -p $(dir $@)
 	git -C $(KOS_BASE) show $(AICA_DRV_COMMIT):kernel/arch/dreamcast/sound/arm/stream.drv.prebuilt > $(DCBUILD)/aica/stream.drv
 	$(KOS_BASE)/utils/bin2c/bin2c $(DCBUILD)/aica/stream.drv $@ aica_drv_viejo
+
+# M8: el juego con el muestreador en consola (src/platform/dc/muestreo.c), en su propio directorio
+# para no mezclar objetos. Se enlaza dos veces: la segunda, con la tabla de simbolos de la primera.
+#   make dc-perfil     -> build/dcp/nfshs.elf
+ifdef PERFIL
+CPPFLAGS += -DNFSHS_PERFIL
+endif
+DCPBUILD := $(BUILD)/dcp
+
+dc-perfil:
+	@$(MAKE) --no-print-directory dc PERFIL=1 DCBUILD=$(DCPBUILD)
+	sh-elf-nm -n $(DCPBUILD)/nfshs.elf > $(DCPBUILD)/nm1.txt
+	$(PYTHON) -I tools/recomp/perfil_syms.py $(DCPBUILD)/nm1.txt $(DCPBUILD)/perfil_tab.c
+	$(KOS_CC_W) -c $(DCPBUILD)/perfil_tab.c -o $(DCPBUILD)/perfil_tab.o
+	@$(MAKE) --no-print-directory dc-perfil-enlaza PERFIL=1 DCBUILD=$(DCPBUILD)
+	sh-elf-nm -n $(DCPBUILD)/nfshs.elf > $(DCPBUILD)/nm2.txt
+	$(PYTHON) -I tools/recomp/perfil_syms.py --compara $(DCPBUILD)/nm1.txt $(DCPBUILD)/nm2.txt
+	@sh-elf-size $(DCPBUILD)/nfshs.elf
+
+dc-perfil-enlaza:
+	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o $(DCBUILD)/perfil_tab.o $(DCSILENCIO) -o $(DCBUILD)/nfshs.elf
 
 # El C generado no se recompila aqui: lo hace dc-gen, que son 71 unidades y tarda.
 dc-gen: dc-check $(GEN)/parts.mk

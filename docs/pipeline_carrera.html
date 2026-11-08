@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qué hace el SH-4 durante una carrera — nfshs-dc</title>
+<style>
+:root{
+  --bg:#12151b; --panel:#1a1f28; --panel2:#212733; --line:#2f3745; --txt:#e6e9ef; --dim:#9aa4b5;
+  --sh4:#4f9cf7; --ps1:#a78bfa; --host:#34d3b0; --rend:#f5a524; --pvr:#f26b5b; --aica:#7bd35a; --io:#9aa4b5;
+}
+@media (prefers-color-scheme: light){
+  :root{ --bg:#f6f7f9; --panel:#fff; --panel2:#eef1f5; --line:#d5dbe4; --txt:#1b2230; --dim:#566178;
+  --sh4:#1f6fd6; --ps1:#7c4ddb; --host:#0c9b7c; --rend:#c27800; --pvr:#d2402f; --aica:#3f9a1f; --io:#6b768a; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 system-ui,Segoe UI,Roboto,sans-serif}
+header{padding:36px 24px 20px;max-width:1100px;margin:0 auto}
+h1{margin:0 0 6px;font-size:30px}
+h2{font-size:22px;margin:0 0 6px}
+h3{font-size:16px;margin:18px 0 6px}
+.sub{color:var(--dim);max-width:820px}
+nav{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);z-index:5}
+nav div{max-width:1100px;margin:0 auto;padding:8px 24px;display:flex;gap:6px;flex-wrap:wrap}
+nav a{color:var(--dim);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:99px;border:1px solid var(--line)}
+nav a:hover{color:var(--txt);border-color:var(--sh4)}
+main{max-width:1100px;margin:0 auto;padding:0 24px 60px}
+section{margin-top:42px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-top:14px}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi b{display:block;font-size:26px;line-height:1.1}
+.kpi span{color:var(--dim);font-size:13px}
+code,.mono{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;background:var(--panel2);padding:1px 6px;border-radius:5px}
+.tag{display:inline-block;font-size:11px;font-weight:600;padding:1px 8px;border-radius:99px;color:#fff;vertical-align:middle}
+.t-sh4{background:var(--sh4)}.t-pvr{background:var(--pvr)}.t-aica{background:var(--aica)}.t-io{background:var(--io)}
+.note{border-left:3px solid var(--rend);background:var(--panel2);padding:10px 14px;border-radius:0 8px 8px 0;margin-top:12px;font-size:14px}
+.note.ok{border-color:var(--host)}
+.dim{color:var(--dim)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+/* capas */
+.layer{display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:stretch;margin-top:8px}
+.layer .l{border-radius:10px;padding:10px 12px;color:#fff;font-weight:700;font-size:13px;display:flex;flex-direction:column;justify-content:center}
+.layer .l small{font-weight:400;opacity:.9}
+.layer .r{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:14px}
+/* flujo vertical */
+.flow{position:relative;margin-top:14px}
+.step{display:grid;grid-template-columns:44px 1fr;gap:12px;margin-top:0;position:relative}
+.step:not(:last-child)::after{content:"";position:absolute;left:21px;top:42px;bottom:-4px;width:2px;background:var(--line)}
+.num{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:#fff;font-size:15px;z-index:1}
+.body{padding-bottom:16px}
+details{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+details[open]{border-color:var(--sh4)}
+summary{cursor:pointer;font-weight:600;list-style:none}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"▸ ";color:var(--dim)}
+details[open] summary::before{content:"▾ "}
+details p,details ul{margin:8px 0 2px;font-size:14px}
+details ul{padding-left:20px}
+.bar{display:flex;height:46px;border-radius:8px;overflow:hidden;border:1px solid var(--line);margin-top:10px}
+.bar div{display:grid;place-items:center;color:#fff;font-size:12px;font-weight:600;white-space:nowrap}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--dim);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+svg{max-width:100%;height:auto;display:block}
+svg text{fill:var(--txt);font-family:system-ui,Segoe UI,sans-serif}
+svg .d{fill:var(--dim)}
+.cols{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+pre{background:var(--panel2);border-radius:8px;padding:12px 14px;overflow:auto;font-size:12.5px;line-height:1.5;margin:10px 0 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Qué hace el SH-4 durante una carrera</h1>
+  <p class="sub">Mapa de la lógica del juego y del pipeline de vídeo en NFS High Stakes para Dreamcast. Está sacado del código (<code>dc/src/</code>) y de las medidas de <code>docs/hitos/</code>, a fecha del tercer paquete de M8 (2026-11-06). Cada cifra dice si está <b>medida</b> o si es <b>inferida</b>.</p>
+</header>
+<nav><div>
+  <a href="#resumen">1 · Resumen</a><a href="#capas">2 · Capas</a><a href="#frame">3 · Un frame</a>
+  <a href="#logica">4 · La lógica</a><a href="#reloj">5 · El reloj</a><a href="#captura">6 · Captura de la vista</a>
+  <a href="#dibujo">7 · Dibujo</a><a href="#vertice">8 · Un vértice</a><a href="#presupuesto">9 · Presupuesto</a>
+  <a href="#fuera">10 · Fuera del SH-4</a><a href="#cuellos">11 · Cuellos</a>
+</div></nav>
+<main>
+
+<!-- ============ 1 ============ -->
+<section id="resumen">
+  <h2>1 · La idea en un párrafo</h2>
+  <div class="card">
+    <p style="margin:0">El juego original (MIPS de PS1) se tradujo a C antes de compilar. En la consola, el <b>SH-4 ejecuta esa lógica tal cual</b>, y además hace de «GPU lógica»: cada vez que el juego pide dibujar la vista 3D, el host <b>no deja que dibuje</b>, sino que <b>apunta qué decidió</b> (cámara, trozos de pista, objetos, coches). Al final del frame, el SH-4 convierte esas decisiones en vértices de pantalla y se los manda al <span class="tag t-pvr">PVR</span>, que es quien rasteriza. El SH-4 <b>no rasteriza ni un píxel</b> (decisión de Jorge, 2026-10-25).</p>
+  </div>
+  <div class="grid" style="margin-top:14px">
+    <div class="kpi"><b>3 674</b><span>funciones MIPS recompiladas a C (<code>-Os</code> el resto, <code>-O2</code> las 438 calientes)</span></div>
+    <div class="kpi"><b>~38 700</b><span>accesos a memoria PS1 por frame de carrera (medido en PC)</span></div>
+    <div class="kpi"><b>~1 300</b><span>triángulos al PVR por frame: ~1 150 pista + 104 cielo + ~110 objetos + coches</span></div>
+    <div class="kpi"><b>16–28 fps</b><span>en consola, build 190de01 (antes del tercer paquete; sin medir el tercero)</span></div>
+  </div>
+  <div class="note">El frame de carrera se reparte, grosso modo, a mitades: <b>lógica del juego (L)</b> y <b>dibujo en CPU (D)</b>. El PVR y el CD no limitan (E = 0, C ≈ 0).</div>
+</section>
+
+<!-- ============ 2 ============ -->
+<section id="capas">
+  <h2>2 · Capas: quién hace qué</h2>
+  <p class="sub">Vista por capas del estado actual (As-Is). Las tres de arriba son código portable, sin cabeceras de KOS; solo <code>platform/dc</code> toca la consola.</p>
+
+  <div class="layer"><div class="l" style="background:var(--ps1)">Juego<small>gen/*.c · 3 674 funciones</small></div>
+    <div class="r">La lógica de EA, traducida de MIPS: física, IA, cámara, reglas de carrera, cálculo del HUD, drivers de sonido. Cada función es <code>f_XXXXXXXX(Cpu *c)</code>; los registros viven en <code>c-&gt;r[32]</code> y la memoria es un arreglo de 2 MB. Sin cambios respecto al original.</div></div>
+  <div class="layer"><div class="l" style="background:var(--sh4)">ps1rt<small>src/ps1rt · SH-4</small></div>
+    <div class="r">La «CPU virtual»: accesores de memoria (máscara <code>&amp; 0x1FFFFF</code>), <code>ps1_tick</code> en cada rama hacia atrás, interrupciones (root counter 128 Hz, VSync), <code>ps1_call</code> (HLE → hook → código recompilado → intérprete de respaldo), el <b>GTE</b> por software (<code>gte.c</code>, 672 líneas) y la BIOS HLE.</div></div>
+  <div class="layer"><div class="l" style="background:var(--host)">Host<small>src/host · SH-4</small></div>
+    <div class="r">Sustituye las librerías de PS1 (libgpu, libcd, libpad, libmcrd, SPU) y <b>graba el frame</b>: <code>game.c</code> (vista de carrera), <code>objects.c</code>, <code>cars.c</code>, <code>glows.c</code>, <code>skids.c</code>, <code>overlay.c</code> (2D/HUD), <code>pad.c</code> (frontera de frame), <code>files.c</code> (lectura del disco).</div></div>
+  <div class="layer"><div class="l" style="background:var(--rend)">Render<small>src/render · SH-4</small></div>
+    <div class="r">Portable: <code>track.c</code> (pista, cielo, objetos), <code>car.c</code>, <code>fx.c</code>, <code>texcache.c</code>. Convierte lo grabado en vértices de pantalla ya recortados, con <code>vmath.h</code> (FTRV/FSRRA).</div></div>
+  <div class="layer"><div class="l" style="background:var(--sh4)">platform/dc<small>KOS · SH-4</small></div>
+    <div class="r"><code>render.c</code> (1 598 líneas) manda los vértices a la <b>store queue</b> del PVR; también vídeo, mando (maple), VMU, películas y el puente al AICA (<code>aica_spu.c</code>).</div></div>
+  <div class="layer"><div class="l" style="background:var(--pvr)">Hardware<small>no es el SH-4</small></div>
+    <div class="r"><span class="tag t-pvr">PVR2</span> rasteriza por baldosas 32×32, Z-buffer, texturas, mezcla · <span class="tag t-aica">AICA + ARM7</span> mezcla las voces, DSP de reverb · <span class="tag t-io">GD-ROM / Maple / VMU</span></div></div>
+</section>
+
+<!-- ============ 3 ============ -->
+<section id="frame">
+  <h2>3 · Un frame de carrera, de punta a punta</h2>
+  <p class="sub">Todo ocurre en <b>un solo hilo</b>: el juego corre dentro de <code>ps1_call(ADDR_MAIN)</code> y no devuelve el control hasta la frontera de frame. Abre cada paso para ver el detalle.</p>
+
+  <div class="flow">
+    <div class="step"><div class="num" style="background:var(--ps1)">1</div><div class="body">
+      <details open><summary>El juego simula <span class="dim">(código recompilado, SH-4)</span></summary>
+        <p>Física de coches, IA, colisiones, cámara, reglas de carrera. Es la parte que viene del MIPS sin tocar. La física va atada al <b>root counter de 128 Hz</b>, no al frame: si el frame tarda 3 campos de vídeo, el juego ve 3 campos de reloj y simula lo que toca.</p>
+        <ul><li>Cada <code>jal</code> es una llamada C directa; cada <code>lw/sw</code> pasa por un accesor con una sola prueba (RAM y alineado).</li>
+        <li>Cada rama hacia atrás llama a <code>ps1_tick</code> (cuenta atrás de 32 bits en línea).</li>
+        <li>Los saltos indirectos van por <code>ps1_call</code> → <code>dispatch</code>.</li></ul>
+      </details></div></div>
+
+    <div class="step"><div class="num" style="background:var(--host)">2</div><div class="body">
+      <details open><summary>El juego pide la vista 3D → el host la <b>intercepta</b> <span class="dim">(<code>Render_RenderPlayerView</code>, 0x800B4024)</span></summary>
+        <p>Es una función HLE: nunca corre el código original. <code>race_view_logic</code> (<code>host/game.c</code>) llama, <b>anidadas</b>, a las partes del original que hay que ejecutar para que la RAM quede igual que en PS1, y anota el resultado. Detalle en la sección 6.</p>
+      </details></div></div>
+
+    <div class="step"><div class="num" style="background:var(--ps1)">3</div><div class="body">
+      <details><summary>El juego construye el HUD <span class="dim">(código original, grabado en <code>DrawOTag</code>)</span></summary>
+        <p>En carrera <b>no se sustituyen</b> los ayudantes del HUD: corre el código original y el host graba sus tablas de ordenación como cuadros 2D (<code>overlay.c</code>). Tiene oráculo: 4 769 frames de carrera idénticos a la referencia byte a byte.</p>
+      </details></div></div>
+
+    <div class="step"><div class="num" style="background:var(--host)">4</div><div class="body">
+      <details><summary>Frontera de frame: <code>host_frame_top</code> <span class="dim">(<code>host/pad.c</code>)</span></summary>
+        <p>Se alcanza en <code>systemtask</code>, arriba del bucle principal. En orden:</p>
+        <ul>
+          <li>Cuenta el frame; comprueba si está en pausa.</li>
+          <li><code>overlay_race_compose</code>: da la vuelta a las tablas del HUD (se tira la del mundo).</li>
+          <li><b>Avanza el reloj</b> al siguiente campo de 60 Hz y hasta el tiempo real, con un tope de 4 campos (sección 5). Aquí se encolan las interrupciones del root counter.</li>
+          <li><code>host_read_skids</code>: lee las marcas de neumático de la RAM.</li>
+          <li><code>poll_input</code> → <code>mando_lee</code> (maple → botones PS1) y <code>pad_write</code> escribe los buffers del pad en la RAM del juego.</li>
+          <li><code>host_build_textures</code>: convierte a ARGB1555 lo nuevo que el juego subió a la VRAM de PS1.</li>
+          <li><b><code>on_draw</code> = <code>render_frame</code></b>: el dibujo (sección 7).</li>
+          <li>Reinicia las listas del frame (<code>overlay_reset</code>, <code>views_n = 0</code>, destellos).</li>
+        </ul>
+      </details></div></div>
+
+    <div class="step"><div class="num" style="background:var(--pvr)">5</div><div class="body">
+      <details><summary>El PVR rasteriza <span class="dim">(en paralelo; el SH-4 ya está en el frame siguiente)</span></summary>
+        <p><code>pvr_scene_finish()</code> dispara el render. El SH-4 vuelve al paso 1 mientras el PVR dibuja. El siguiente <code>render_frame</code> hace <code>pvr_wait_ready()</code> antes de tocar la VRAM del PVR; esa espera es la <b>E</b> de la VMU y vale 0 hoy.</p>
+      </details></div></div>
+  </div>
+
+  <div class="note ok"><b>Detalle importante:</b> en carrera la frontera de frame es <code>systemtask</code>, que <i>no mueve el reloj</i> por sí misma. Si <code>host_frame_top</code> no lo avanza, el root counter no late y la física se congela. Fue el bug real de M1b.</div>
+</section>
+
+<!-- ============ 4 ============ -->
+<section id="logica">
+  <h2>4 · Cómo se ejecuta la lógica en el SH-4</h2>
+  <div class="cols">
+    <div class="card">
+      <h3 style="margin-top:0">Una instrucción MIPS, traducida</h3>
+<pre>/* lw t0, 8(a0)  →  */
+c-&gt;r[8] = ps1_r32(c, c-&gt;r[4] + 8);
+
+/* ps1_r32, en línea: */
+if (a está en RAM y alineada)     // una sola prueba
+    return *(u32*)(c-&gt;ram + (a &amp; 0x1FFFFF));
+else
+    return ps1_r32_lento(c, a);   // scratchpad / IO
+
+/* bne ... (rama hacia atrás) */
+ps1_tick(c);                      // cuenta atrás, 32 bits</pre>
+      <p class="dim" style="font-size:13px;margin:8px 0 0">Alrededor de 6 instrucciones SH-4 por instrucción MIPS (estimado en M8, sin medir con rigor).</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Camino de una llamada (<code>ps1_call</code>)</h3>
+      <ol style="margin:0;padding-left:20px;font-size:14px">
+        <li>¿Es una dirección <b>HLE</b>? (119) → la sustituye el host: libgpu, libcd, libpad, SPU, archivos, <code>Render_RenderPlayerView</code>.</li>
+        <li>¿Es un <b>hook</b>? (53) → pasa por <code>Cpu::call</code> para que el host la observe.</li>
+        <li>¿Hay función recompilada? → <code>f_XXXXXXXX(c)</code>.</li>
+        <li>Si no → <b>intérprete MIPS</b> de respaldo (0,5 entradas por frame: casi nunca).</li>
+      </ol>
+      <p class="dim" style="font-size:13px;margin:8px 0 0">231 <code>ps1_call</code> por frame, 103 de ellas fuera de la HLE (medido en PC).</p>
+    </div>
+  </div>
+
+  <h3>Qué hace el SH-4 «por debajo» del juego</h3>
+  <table>
+    <tr><th>Actividad</th><th>Por frame (medido en PC, sin tráfico)</th><th>Nota</th></tr>
+    <tr><td>Accesos a memoria</td><td>38 718 (r32 19 987 · w32 12 274 · r8 2 448 · r16 2 294 · w16 1 028 · w8 687)</td><td>El 18 % va por la ruta lenta (scratchpad y registros)</td></tr>
+    <tr><td>Entradas a función</td><td>2 139</td><td>Solo 455 de las 3 674 funciones entran en carrera</td></tr>
+    <tr><td>Ramas hacia atrás (<code>ps1_tick</code>)</td><td>2 894</td><td>Si se llega a <code>spin_limit</code> (20 000) sin pasar por el host, se deja correr el tiempo</td></tr>
+    <tr><td>Comandos del GTE</td><td>114</td><td>Proyección de la PS1 hecha por software en <code>gte.c</code></td></tr>
+    <tr><td>La más llamada</td><td><code>0x800E4F14</code> (multiplicación 16.16): 617 veces</td><td>Candidata a <code>dmuls.l</code> a mano</td></tr>
+  </table>
+  <div class="note">El 50 % de los accesos está en 9 funciones y el 73 % en 30. Por eso <code>hot_funcs.txt</code> lista 438 funciones (55 795 instrucciones MIPS) con el 99 % del peso: van a <code>-O2</code> y con los accesos en línea; el resto, a <code>-Os</code> para que quepa.</div>
+</section>
+
+<!-- ============ 5 ============ -->
+<section id="reloj">
+  <h2>5 · El reloj: por qué el juego va a su velocidad</h2>
+  <div class="card">
+    <svg viewBox="0 0 900 190" role="img" aria-label="Línea de tiempo de campos de vídeo y frames del juego">
+      <line x1="30" y1="60" x2="880" y2="60" stroke="var(--line)" stroke-width="2"/>
+      <!-- campos 60 Hz -->
+      <g stroke="var(--dim)" stroke-width="1">
+        <line x1="30" y1="52" x2="30" y2="68"/><line x1="130" y1="52" x2="130" y2="68"/><line x1="230" y1="52" x2="230" y2="68"/>
+        <line x1="330" y1="52" x2="330" y2="68"/><line x1="430" y1="52" x2="430" y2="68"/><line x1="530" y1="52" x2="530" y2="68"/>
+        <line x1="630" y1="52" x2="630" y2="68"/><line x1="730" y1="52" x2="730" y2="68"/><line x1="830" y1="52" x2="830" y2="68"/>
+      </g>
+      <text x="30" y="40" font-size="12" class="d">campo 60 Hz (16,7 ms) →</text>
+      <!-- frame 1 -->
+      <rect x="30" y="85" width="400" height="30" rx="6" fill="var(--sh4)" opacity=".85"/>
+      <text x="230" y="105" text-anchor="middle" font-size="12" fill="#fff" style="fill:#fff">frame N: tarda ~4 campos de tiempo real</text>
+      <rect x="430" y="85" width="200" height="30" rx="6" fill="var(--sh4)" opacity=".55"/>
+      <text x="530" y="105" text-anchor="middle" font-size="12" style="fill:#fff">frame N+1: 2 campos</text>
+      <text x="30" y="145" font-size="12.5">Al empezar el frame N+1 el juego ve avanzar <tspan font-weight="700">4 campos</tspan> de reloj (el tope) → simula 4 pasos de física.</text>
+      <text x="30" y="165" font-size="12.5" class="d">Si el frame tarda más de 4 campos, el excedente se descarta: por debajo de 15 fps el juego va más lento, no a saltos.</text>
+    </svg>
+  </div>
+  <ul>
+    <li><b>Unidad:</b> 1/1920 s. Cada <code>HOST_TICK</code> encola una interrupción del root counter de 128 Hz; cada <code>HOST_FIELD</code> (60 Hz), una devolución de VSync (limitada a 4 por salto).</li>
+    <li><b>Reloj real</b> (decisión de Jorge, 2026-10-27): el reloj del juego nunca adelanta al real. Si un frame es más rápido que un campo, <code>host_advance_to</code> hace <b>espera activa</b> hasta el tiempo real. Importa porque el driver de sonido rellena su stream según ese reloj.</li>
+    <li><b>Campos por frame (F):</b> en consola se mide ~3 (4,1–5,2 en la build 5830c91, ~3 en la 190de01). Más campos por frame = más pasos de física = más lógica por frame.</li>
+    <li><b>Sin tope artificial de fps:</b> corre lo que el hardware dé; el techo son los 60 Hz de la pantalla.</li>
+  </ul>
+  <div class="note">Efecto de realimentación (<b>inferido</b>, coherente con los datos): un frame lento hace que el siguiente simule más campos, lo que lo hace aún más lento. Por eso bajar L (lógica) rinde más de lo que parece.</div>
+</section>
+
+<!-- ============ 6 ============ -->
+<section id="captura">
+  <h2>6 · Captura de la vista: lo que el host le saca al juego</h2>
+  <p class="sub"><code>race_view_logic</code> se ejecuta una vez por vista (dos en pantalla partida). Es lógica real del juego, corrida <b>anidada</b>, más lecturas de la RAM. Nada de esto dibuja.</p>
+  <table>
+    <tr><th>#</th><th>Paso</th><th>Qué obtiene</th></tr>
+    <tr><td>1</td><td>Escribe vista y jugador en <code>ADDR_RENDER_VIEW</code></td><td>Donde el original espera encontrarlos</td></tr>
+    <tr><td>2</td><td><code>StartWorldView</code></td><td>Cámara, niebla y colores del entorno; deja el GTE programado</td></tr>
+    <tr><td>3</td><td><code>SetupBuildMat</code> + <code>WorldSetupMat</code></td><td>Matrices para <code>BWorld_OnyxBuildFacets</code></td></tr>
+    <tr><td>4</td><td><code>ChunkBuildList</code></td><td><b>Qué trozos de pista se ven</b> y con qué detalle (media 8,4, pico 18 por vista)</td></tr>
+    <tr><td>5</td><td>Tabla de luz de vértices</td><td>256 entradas, solo se relee si el puntero cambia</td></tr>
+    <tr><td>6</td><td><code>host_record_objects</code></td><td>Objetos del escenario visibles (media 46,1, máx. 92)</td></tr>
+    <tr><td>7</td><td><code>host_record_glows</code></td><td>Farolas, humo, clima y flare del sol, como cuadros 2D con su punto 3D</td></tr>
+    <tr><td>8</td><td><code>sky_read</code></td><td>Colores de la cúpula y la banda de horizonte</td></tr>
+    <tr><td>9</td><td>Captura <code>RaceView</code></td><td>Posición y matriz de cámara, proyección, rectángulo, lista de trozos + detalle; haz de faros si es de noche</td></tr>
+    <tr><td>10</td><td>HUD: <code>WrongWay</code>, <code>HudCalc</code></td><td>Los números: velocidad, marcha, tiempos, posición</td></tr>
+    <tr><td>11</td><td><code>host_record_cars</code> + <code>record_halos</code></td><td>Coches visibles (media 1,99, máx. 4) con 99 palabras de estado cada uno. <b>El orden (después del HUD) importa.</b></td></tr>
+  </table>
+  <div class="note"><b>Patrón que se repite:</b> ni objetos ni coches existen listos en la RAM del juego; los va <i>dibujando</i> y por el camino decide cuáles entran. El host corre esa rutina con un <b>hook interno</b> que, en vez de construir primitivas de PS1, <b>anota la decisión</b>. Los coches cuestan más grabarlos (código real del juego cada frame) que dibujarlos.</div>
+</section>
+
+<!-- ============ 7 ============ -->
+<section id="dibujo">
+  <h2>7 · El dibujo: <code>render_frame</code></h2>
+  <p class="sub">Orden exacto de <code>platform/dc/render.c:1468</code>. Las listas del PVR se abren en este orden: <b>PT</b> (punch-through, mundo con Z) → <b>TR</b> (translúcida: efectos y 2D).</p>
+
+  <svg viewBox="0 0 1000 330" role="img" aria-label="Orden de listas del PVR en un frame">
+    <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8z" fill="var(--dim)"/></marker></defs>
+    <rect x="10" y="10" width="980" height="62" rx="10" fill="var(--panel)" stroke="var(--line)"/>
+    <text x="24" y="34" font-size="13" font-weight="700">Preparación (SH-4)</text>
+    <text x="24" y="56" font-size="12.5" class="d">pvr_wait_ready → subir a la VRAM del PVR solo las texturas nuevas (store queue) → pvr_scene_begin → fondo = color del cénit</text>
+
+    <rect x="10" y="90" width="980" height="108" rx="10" fill="var(--panel)" stroke="var(--rend)" stroke-width="1.5"/>
+    <text x="24" y="114" font-size="13" font-weight="700">Lista PT — opaca con Z-buffer (el mundo)</text>
+    <g font-size="12.5" style="fill:#fff">
+      <rect x="24"  y="128" width="150" height="54" rx="7" fill="var(--rend)"/><text x="99"  y="150" text-anchor="middle" style="fill:#fff">① Cielo</text><text x="99"  y="168" text-anchor="middle" style="fill:#fff;font-size:11px">104 tri · sin escribir Z</text>
+      <rect x="190" y="128" width="190" height="54" rx="7" fill="var(--rend)"/><text x="285" y="150" text-anchor="middle" style="fill:#fff">② Pista</text><text x="285" y="168" text-anchor="middle" style="fill:#fff;font-size:11px">~1 150 tri · suelo, detalle, líneas</text>
+      <rect x="396" y="128" width="170" height="54" rx="7" fill="var(--rend)"/><text x="481" y="150" text-anchor="middle" style="fill:#fff">③ Objetos</text><text x="481" y="168" text-anchor="middle" style="fill:#fff;font-size:11px">~46 colocados · ~110 tri</text>
+      <rect x="582" y="128" width="170" height="54" rx="7" fill="var(--rend)"/><text x="667" y="150" text-anchor="middle" style="fill:#fff">④ Coches</text><text x="667" y="168" text-anchor="middle" style="fill:#fff;font-size:11px">~2 por vista · ~1 200 tri c/u</text>
+      <rect x="768" y="128" width="208" height="54" rx="7" fill="var(--panel2)" stroke="var(--line)"/><text x="872" y="150" text-anchor="middle" style="fill:var(--txt)">(showroom: solo front end)</text><text x="872" y="168" text-anchor="middle" style="fill:var(--dim);font-size:11px">coche 3D con reflejo y suelo</text>
+    </g>
+
+    <rect x="10" y="214" width="980" height="106" rx="10" fill="var(--panel)" stroke="var(--pvr)" stroke-width="1.5"/>
+    <text x="24" y="238" font-size="13" font-weight="700">Lista TR — translúcida, sin autosort (orden del pintor)</text>
+    <g font-size="12" style="fill:#fff">
+      <rect x="24"  y="250" width="110" height="58" rx="7" fill="var(--pvr)"/><text x="79"  y="272" text-anchor="middle" style="fill:#fff">Flare del sol</text><text x="79"  y="290" text-anchor="middle" style="fill:#fff;font-size:10.5px">sobre el cielo</text>
+      <rect x="144" y="250" width="130" height="58" rx="7" fill="var(--pvr)"/><text x="209" y="272" text-anchor="middle" style="fill:#fff">Reflejos (A, B)</text><text x="209" y="290" text-anchor="middle" style="fill:#fff;font-size:10.5px">A suma · B resta</text>
+      <rect x="284" y="250" width="170" height="58" rx="7" fill="var(--pvr)"/><text x="369" y="272" text-anchor="middle" style="fill:#fff">Efectos restados</text><text x="369" y="290" text-anchor="middle" style="fill:#fff;font-size:10.5px">sombras, marcas · 3 mezclas</text>
+      <rect x="464" y="250" width="130" height="58" rx="7" fill="var(--pvr)"/><text x="529" y="272" text-anchor="middle" style="fill:#fff">Destellos</text><text x="529" y="290" text-anchor="middle" style="fill:#fff;font-size:10.5px">farolas, halos, humo</text>
+      <rect x="604" y="250" width="100" height="58" rx="7" fill="var(--pvr)"/><text x="654" y="272" text-anchor="middle" style="fill:#fff">Clima</text><text x="654" y="290" text-anchor="middle" style="fill:#fff;font-size:10.5px">lluvia</text>
+      <rect x="714" y="250" width="262" height="58" rx="7" fill="var(--pvr)"/><text x="845" y="272" text-anchor="middle" style="fill:#fff">2D: HUD y overlay</text><text x="845" y="290" text-anchor="middle" style="fill:#fff;font-size:10.5px">cuadros en orden · 640×480 ← 320×240</text>
+    </g>
+  </svg>
+
+  <h3>Por qué esta forma</h3>
+  <ul>
+    <li><b>Mundo en PT y no en opaca:</b> las copas de los árboles tienen texels transparentes y la lista opaca no hace prueba de alfa (salía un fleco negro).</li>
+    <li><b>Lo sustractivo de PS1 (<code>B − F</code>)</b> no existe en el PVR. Se hace con <code>1 − ((1 − B) + F)</code>: invertir, sumar, invertir, tres mezclas del PVR. Es el modo 2 exacto, no una aproximación.</li>
+    <li><b>Los efectos y el 2D van con la profundidad probada</b> (<code>GEQUAL</code>, sin escribir) para que el mundo los tape.</li>
+    <li><b>Los destellos, halos y humo</b> son cuadros 2D que el propio juego construye alrededor de un punto del mundo; como la cámara es la del juego, caen donde los puso el original.</li>
+    <li><b>Texturas:</b> la VRAM de PS1 se espeja y <code>texcache.c</code> convierte solo el <i>rectángulo</i> que usan los UV (no la página entera) a ARGB1555. Persiste entre frames, se invalida por solape y expulsa la entrada más antigua. La pista lleva un atlas propio horneado; los coches expanden su pintura en el SH-4 al cargarse.</li>
+  </ul>
+</section>
+
+<!-- ============ 8 ============ -->
+<section id="vertice">
+  <h2>8 · El recorrido de un vértice de pista</h2>
+  <p class="sub">Es el bucle más caliente del dibujo. <code>track.c: malla()</code>, con FTRV desde el tercer paquete de M8.</p>
+
+  <svg viewBox="0 0 1000 150" role="img" aria-label="Pipeline de un vértice">
+    <g font-size="12" style="fill:#fff">
+      <rect x="5"   y="30" width="140" height="78" rx="8" fill="var(--rend)"/><text x="75"  y="55" text-anchor="middle" style="fill:#fff;font-weight:700">Por malla (1×)</text><text x="75"  y="75" text-anchor="middle" style="fill:#fff;font-size:11px">mv_matriz: vista × objeto</text><text x="75" y="91" text-anchor="middle" style="fill:#fff;font-size:11px">vm_carga → XMTRX</text>
+      <rect x="165" y="30" width="140" height="78" rx="8" fill="var(--sh4)"/><text x="235" y="55" text-anchor="middle" style="fill:#fff;font-weight:700">Por vértice</text><text x="235" y="75" text-anchor="middle" style="fill:#fff;font-size:11px">FTRV: x,y,z de cámara</text><text x="235" y="91" text-anchor="middle" style="fill:#fff;font-size:11px">1 vez por malla (cache gen)</text>
+      <rect x="325" y="30" width="130" height="78" rx="8" fill="var(--sh4)"/><text x="390" y="55" text-anchor="middle" style="fill:#fff;font-weight:700">Luz</text><text x="390" y="75" text-anchor="middle" style="fill:#fff;font-size:11px">color_sombra: tabla ×2</text><text x="390" y="91" text-anchor="middle" style="fill:#fff;font-size:11px">+ haz de faros (noche)</text>
+      <rect x="475" y="30" width="130" height="78" rx="8" fill="var(--sh4)"/><text x="540" y="55" text-anchor="middle" style="fill:#fff;font-weight:700">Proyección</text><text x="540" y="75" text-anchor="middle" style="fill:#fff;font-size:11px">FSRRA: 1/z</text><text x="540" y="91" text-anchor="middle" style="fill:#fff;font-size:11px">sx, sy; guard-band</text>
+      <rect x="625" y="30" width="130" height="78" rx="8" fill="var(--sh4)"/><text x="690" y="55" text-anchor="middle" style="fill:#fff;font-weight:700">Por cuadro</text><text x="690" y="75" text-anchor="middle" style="fill:#fff;font-size:11px">área en pantalla</text><text x="690" y="91" text-anchor="middle" style="fill:#fff;font-size:11px">cara oculta → descarta</text>
+      <rect x="775" y="30" width="105" height="78" rx="8" fill="var(--sh4)"/><text x="827" y="55" text-anchor="middle" style="fill:#fff;font-weight:700">Recorte</text><text x="827" y="75" text-anchor="middle" style="fill:#fff;font-size:11px">solo si hace</text><text x="827" y="91" text-anchor="middle" style="fill:#fff;font-size:11px">falta (z cercano)</text>
+      <rect x="895" y="30" width="100" height="78" rx="8" fill="var(--pvr)"/><text x="945" y="55" text-anchor="middle" style="fill:#fff;font-weight:700">Store queue</text><text x="945" y="75" text-anchor="middle" style="fill:#fff;font-size:11px">32 B por vértice</text><text x="945" y="91" text-anchor="middle" style="fill:#fff;font-size:11px">directo al PVR</text>
+    </g>
+    <g stroke="var(--dim)" stroke-width="1.5" fill="none"><path d="M145 69 H165"/><path d="M305 69 H325"/><path d="M455 69 H475"/><path d="M605 69 H625"/><path d="M755 69 H775"/><path d="M880 69 H895"/></g>
+    <text x="5" y="135" font-size="12" class="d">Lo normal (todo dentro, sin recortar): el cuadro sale como una tira de 4 vértices, no dos triángulos de 3. El recorte contra el plano cercano es el caso raro.</text>
+  </svg>
+
+  <div class="grid" style="margin-top:14px">
+    <div class="card" style="margin:0"><b>Dos buckets de trabajo</b><br><span class="dim" style="font-size:13.5px">La pista (≈ 9 de 10 triángulos) es transformación pura. Los coches añaden: matriz única modelo→cámara, sesgo de profundidad, mapa de reflejo por normal de vértice y expansión de la pintura al cargar.</span></div>
+    <div class="card" style="margin:0"><b>Por qué es barato en el PVR</b><br><span class="dim" style="font-size:13.5px">~1 300 triángulos de pista y objetos frente a ~50 000/frame que mueve un Dreamcast a 60 Hz. El PVR no es el cuello (E = 0): lo es el SH-4 que le prepara los vértices.</span></div>
+    <div class="card" style="margin:0"><b>Sin rasterizado en el SH-4</b><br><span class="dim" style="font-size:13.5px">Norma de arquitectura: lo que el PVR no hace (×2 de color, niebla, haz de faros, sustractivo) se calcula por vértice o con mezclas del PVR; nunca píxel a píxel en la CPU.</span></div>
+  </div>
+</section>
+
+<!-- ============ 9 ============ -->
+<section id="presupuesto">
+  <h2>9 · Presupuesto de tiempo por frame (consola real)</h2>
+  <p class="sub">La VMU muestra estas letras cada 2 s. Los valores son lecturas aproximadas de fotos de Jorge (build 190de01, antes del tercer paquete). La barra de abajo es <b>ilustrativa</b>: usa el centro de cada rango, no una captura de un frame real.</p>
+
+  <table>
+    <tr><th>Letra</th><th>Qué es</th><th>Lectura (ms/frame)</th></tr>
+    <tr><td><b>L</b></td><td>Lógica = J + C + A</td><td>30–50</td></tr>
+    <tr><td>&nbsp;&nbsp;J</td><td>Juego e interrupciones (el código recompilado)</td><td>21–30</td></tr>
+    <tr><td>&nbsp;&nbsp;C</td><td>Archivos y CD</td><td>~0</td></tr>
+    <tr><td>&nbsp;&nbsp;A</td><td>Audio (hilo de música, escrituras al AICA por el bus G2)</td><td>hasta 8</td></tr>
+    <tr><td><b>D</b></td><td>Dibujo en CPU (captura → vértices → PVR)</td><td>13–38</td></tr>
+    <tr><td><b>E</b></td><td>Espera al PVR</td><td>0</td></tr>
+    <tr><td>I / O</td><td>% del tiempo parado por fallo de caché de instrucciones / de datos</td><td>~18 % / ~13 %</td></tr>
+    <tr><td>F</td><td>Campos de vídeo por frame</td><td>~3</td></tr>
+  </table>
+
+  <div class="bar" aria-label="Barra ilustrativa de un frame">
+    <div style="width:44%;background:var(--ps1)">J ≈ 26 ms</div>
+    <div style="width:8%;background:var(--aica)">A ≈ 5</div>
+    <div style="width:3%;background:var(--io)" title="C ≈ 0"></div>
+    <div style="width:45%;background:var(--rend)">D ≈ 25 ms</div>
+  </div>
+  <div class="legend"><span><i style="background:var(--ps1)"></i>J juego</span><span><i style="background:var(--aica)"></i>A audio</span><span><i style="background:var(--rend)"></i>D dibujo en CPU</span><span>≈ 56 ms → ~18 fps</span></div>
+  <div class="note">Más o menos <b>el 30 % del tiempo</b> del SH-4 se va en esperar a memoria (I + O). Con 3,9 MB de código y 8 KB de I-cache, el patrón de acceso importa tanto como el número de instrucciones.</div>
+
+  <h3>Cómo ha ido el rendimiento</h3>
+  <table>
+    <tr><th>Paso (M8)</th><th>Flycast</th><th>Consola</th></tr>
+    <tr><td>Antes</td><td>25,50 fps</td><td>8–12 fps</td></tr>
+    <tr><td>1.º paquete: sin contadores ni pila de diagnóstico, tick en línea, sin diagnóstico en el CDI</td><td>30,26 fps</td><td>10,0–13,5 fps</td></tr>
+    <tr><td>2.º paquete: dibujo por malla, tiras de 4, <code>-O2</code> en render/ps1rt, accesores de una prueba</td><td>45,22 fps</td><td>16–28 fps (≈ 20 habitual)</td></tr>
+    <tr><td>3.º paquete: 438 funciones calientes en <code>-O2</code>, <code>restrict</code>, FTRV/FSRRA</td><td>48,30 fps</td><td><b>sin medir</b></td></tr>
+  </table>
+  <div class="note">Flycast con dynarec no modela las cachés del SH-4, así que <b>no sirve para juzgar</b> si FTRV o la caché ayudan. Solo se puede decidir en consola. El objetivo de M8 es ≥ 30 fps sostenidos.</div>
+</section>
+
+<!-- ============ 10 ============ -->
+<section id="fuera">
+  <h2>10 · Lo que <u>no</u> hace el SH-4</h2>
+  <div class="grid">
+    <div class="card" style="margin:0"><span class="tag t-pvr">PVR2</span>
+      <p style="margin:8px 0 0;font-size:14px">Rasterización por baldosas de 32×32, Z-buffer, filtrado y mezcla de texturas, sustractivo mediante las tres pasadas. También el <b>conversor YUV</b> de las películas.</p></div>
+    <div class="card" style="margin:0"><span class="tag t-aica">AICA + ARM7</span>
+      <p style="margin:8px 0 0;font-size:14px">Mezcla de voces: cada voz de EA es un canal del AICA y las muestras se suben ya como PCM. La música en stream va en anillos que un <b>hilo del SH-4</b> rellena cada ~20 ms (el «A»). La reverb la hace el <b>DSP</b> con un microprograma generado.</p></div>
+    <div class="card" style="margin:0"><span class="tag t-io">GD-ROM · Maple · VMU</span>
+      <p style="margin:8px 0 0;font-size:14px">Lecturas de datos (C ≈ 0 en carrera), mando y Jump Pack, y guardado archivo por archivo en un hilo aparte. El contador de fps se escribe en la pantalla de la VMU.</p></div>
+  </div>
+
+  <h3>Hilos en carrera</h3>
+  <table>
+    <tr><th>Hilo</th><th>Qué hace</th><th>¿Siempre?</th></tr>
+    <tr><td>Principal</td><td>Todo lo de las secciones 3–8</td><td>Sí</td></tr>
+    <tr><td><code>hilo_largas</code> (<code>aica_spu.c</code>)</td><td>Rellena los anillos de la música en stream, cada 20 ms, con un mutex compartido con el juego</td><td>Sí</td></tr>
+    <tr><td>Escritura de VMU</td><td>Guarda en la VMU sin parar el juego (~2 s en Flycast)</td><td>Solo al guardar</td></tr>
+    <tr><td>Diagnóstico (<code>diag_thread</code>)</td><td>Imprime contadores por el puerto serie cada 3 s</td><td><b>No</b> en los CDI; solo con <code>make dc SERIE=1</code></td></tr>
+  </table>
+</section>
+
+<!-- ============ 11 ============ -->
+<section id="cuellos">
+  <h2>11 · Dónde se va el tiempo y qué queda</h2>
+  <table>
+    <tr><th>Hallazgo</th><th>Estado</th></tr>
+    <tr><td>Cada <code>lw/sw</code> era un <code>jsr</code> con <code>-Os</code></td><td>Resuelto: accesores de una prueba; en línea en las calientes</td></tr>
+    <tr><td>Contadores y pila de diagnóstico activos en Dreamcast</td><td>Resuelto: compilados fuera</td></tr>
+    <tr><td><code>c-&gt;r[0]</code> leído de memoria; <code>switch (pc)</code> en toda entrada</td><td>Resuelto en el generador (constante; <code>pc == inicio</code> primero)</td></tr>
+    <tr><td>Vértices transformados una vez por cuadro que los usa, división por vértice</td><td>Resuelto: una vez por malla; FTRV + FSRRA <i>(sin medir en consola)</i></td></tr>
+    <tr><td><code>pvr_prim</code> por vértice, copia de 32 B desde la pila</td><td>Resuelto en la pista (directo a la store queue); queda en otros caminos</td></tr>
+    <tr><td>Grabar los coches (código real del juego cada frame)</td><td><b>Abierto</b>: es el mayor coste conocido de la grabación</td></tr>
+    <tr><td>Fallos de caché: I ≈ 18 %, O ≈ 13 %</td><td><b>Abierto</b>: orden de enlazado, tamaño del conjunto caliente</td></tr>
+    <tr><td>Multiplicación 16.16 (617 llamadas/frame) a <code>dmuls.l</code> a mano</td><td><b>Abierto</b></td></tr>
+    <tr><td>Realimentación: más campos por frame → más física por frame</td><td>Se corrige sola al subir los fps</td></tr>
+  </table>
+  <div class="note">La anomalía sin explicar de M8: el contador «en el borde de la RAM» da <code>9226602541604295332</code> en el informe de PC; está justo antes de <code>stack</code> en <code>Cpu</code> y alguien lo pisa. No afecta a la consola (los contadores están apagados) pero conviene averiguarlo.</div>
+  <p class="dim" style="margin-top:28px;font-size:13px">Fuentes: <code>dc/src/platform/dc/main.c</code>, <code>render.c</code>; <code>dc/src/host/pad.c</code>, <code>game.c</code>, <code>system.c</code>, <code>cars.c</code>; <code>dc/src/render/track.c</code>, <code>vmath.h</code>; <code>dc/src/ps1rt/cpu.c</code>; <code>docs/bitacora.md</code>; <code>docs/hitos/M2b.md</code>, <code>M2c.md</code>, <code>M8.md</code>. No he leído <code>car.c</code>, <code>fx.c</code>, <code>texcache.c</code> ni <code>gpu.c</code> línea a línea: lo que dicen esas piezas aquí viene de la bitácora y de los comentarios de <code>render.c</code>.</p>
+</section>
+
+</main>
+</body>
+</html>

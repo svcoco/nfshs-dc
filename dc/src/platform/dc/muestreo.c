@@ -35,12 +35,14 @@ extern const uint32_t  perfil_tab_n __attribute__((weak));
 
 #define HZ_MUESTREO  997u            /* primo: no va en fase con los 60 Hz ni con el reloj de KOS */
 #define MUESTRAS     40000u          /* unos 40 s */
-#ifdef NFSHS_SERIE
+#if defined(PERFIL_ESPERA_MS)
+#define ESPERA_MS    PERFIL_ESPERA_MS
+#elif defined(NFSHS_SERIE)
 #define ESPERA_MS    5000u           /* con guion, en Flycast, para el volcado de perfil_orden.py */
 #else
 #define ESPERA_MS    35000u          /* tras empezar la carrera: salta la carga y da tiempo a llegar al trafico */
 #endif
-#define TURNO_MS     4000u
+#define TURNO_MS     400u            /* 10 contadores: cada uno se mide 10 veces repartidas por los 40 s, no en un solo trozo */
 #define HILO_AJENO   0x80u
 
 static uint32_t s_pc[MUESTRAS];
@@ -76,6 +78,26 @@ static Evento s_ev[] = {
 };
 #define EVENTOS (sizeof s_ev / sizeof s_ev[0])
 
+/* Lo que cuenta PRFC1, repartido por secciones: en cada cambio de seccion (HOST_SEC) se lee el
+ * contador y la diferencia va a la seccion que termina. Exacto, sin depender del muestreo; lo de
+ * otros hilos e interrupciones que caiga en medio cuenta para la seccion en curso. */
+static uint64_t s_por_sec[EVENTOS][HSEC_N];
+static uint64_t s_ult;
+static unsigned s_e;
+
+void host_sec_cambia(unsigned n)
+{
+    if (s_activo) {
+        uint64_t v = perf_cntr_count(PRFC1);
+        unsigned s = host_seccion;
+
+        if (s < HSEC_N)
+            s_por_sec[s_e][s] += v - s_ult;
+        s_ult = v;
+    }
+    host_seccion = (unsigned char)n;
+}
+
 static void tick(irq_t src, irq_context_t *cxt, void *data)
 {
     (void)src;
@@ -92,6 +114,8 @@ static void evento_empieza(unsigned e)
 {
     perf_cntr_stop(PRFC1);
     perf_cntr_clear(PRFC1);
+    s_ult = 0;
+    s_e = e;
     perf_cntr_start(PRFC1, s_ev[e].ev, PMCR_COUNT_CPU_CYCLES);
 }
 
@@ -179,7 +203,7 @@ static void pct(char *o, size_t n, uint64_t parte, uint64_t todo)
 
 static void informe(uint64_t frames, uint64_t campos, uint64_t ms)
 {
-    enum { POR_PAGINA = 17, PAGINAS_TOP = 3 };
+    enum { POR_PAGINA = 17, PAGINAS_TOP = 3, PAGINAS_FIJAS = 3 };
     static uint32_t sec[HSEC_N];
     uint32_t i, ajenos = 0, juego = 0, sonido = 0, runtime = 0, nosim = 0;
     uint32_t nsim = &perfil_tab_n != NULL ? perfil_tab_n : 0u;
@@ -236,7 +260,7 @@ static void informe(uint64_t frames, uint64_t campos, uint64_t ms)
 #endif
 
     for (;;) {
-        unsigned total = 2u + PAGINAS_TOP;
+        unsigned total = PAGINAS_FIJAS + PAGINAS_TOP;
         uint64_t turnos = 0;
 
         pag = pag % total;
@@ -283,8 +307,33 @@ static void informe(uint64_t frames, uint64_t campos, uint64_t ms)
             /* si esto no es 0 y lo de arriba si, el contador no cuenta (Flycast no los modela) */
             snprintf(l, sizeof l, "contadores medidos %lu ms", (unsigned long)turnos);
             fila(0, l); s_fila++;
+        } else if (pag == 2u) {
+            /* por seccion y por frame: instrucciones (miles), ms de paro por cache de
+             * instrucciones, fallos de cache de instrucciones, ms de paro por cache de datos */
+            static const char *const CORTO[HSEC_N] = {
+                "juego", "vista", "g objetos", "g destellos", "cielo,vis,HUD", "g coches",
+                "frontera", "texturas PS1", "espera PVR", "d cielo", "d pista", "d objetos",
+                "d coches", "d translucido", "d HUD 2D", "d resto", "espera reloj",
+            };
+            enum { E_INS = 0, E_PARO_I = 2, E_PARO_D = 3, E_FALLO_I = 5 };
+            uint64_t fi = s_ev[E_INS].frames, fpi = s_ev[E_PARO_I].frames;
+            uint64_t fpd = s_ev[E_PARO_D].frames, ffi = s_ev[E_FALLO_I].frames;
+
+            fila(0, "seccion      Kinst/f  paroI  fallosI/f  paroD"); s_fila++;
+            for (i = 0; i < HSEC_N; i++) {
+                /* paro en decimas de ms por frame: ciclos / 20 000 (200 MHz) */
+                unsigned pi = fpi ? (unsigned)(s_por_sec[E_PARO_I][i] / 20000u / fpi) : 0u;
+                unsigned pd = fpd ? (unsigned)(s_por_sec[E_PARO_D][i] / 20000u / fpd) : 0u;
+
+                snprintf(l, sizeof l, "%-13s%7lu %3u.%u %10lu %3u.%u", CORTO[i],
+                         (unsigned long)(fi ? s_por_sec[E_INS][i] / 1000u / fi : 0u),
+                         pi / 10u, pi % 10u,
+                         (unsigned long)(ffi ? s_por_sec[E_FALLO_I][i] / ffi : 0u),
+                         pd / 10u, pd % 10u);
+                fila(0, l); s_fila++;
+            }
         } else if (orden != NULL) {
-            uint32_t ini = (pag - 2u) * 2u * POR_PAGINA, r;
+            uint32_t ini = (pag - PAGINAS_FIJAS) * 2u * POR_PAGINA, r;
 
             for (r = 0; r < 2u * POR_PAGINA; r++) {
                 uint32_t k;
@@ -340,6 +389,7 @@ void muestreo_frame(GameHost *h)
         return;
     }
     if (ahora - t_ev >= TURNO_MS) {
+        host_sec_cambia(host_seccion);   /* lo que va de la seccion en curso, a este turno */
         s_ev[e].cuenta += perf_cntr_count(PRFC1);
         s_ev[e].ms += ahora - t_ev;
         s_ev[e].frames += h->frames - f_ev;

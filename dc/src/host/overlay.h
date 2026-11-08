@@ -99,6 +99,13 @@ typedef struct {
     uint32_t frame_combos[256];
     uint32_t frame_combos_n;
     uint32_t frame_combos_max;
+    /* M8: tablas hash de las dos listas de arriba, para no recorrerlas en cada cuadro
+     * (era el 3 % del frame en carrera). Las del frame valen si su marca es frame_gen + 1. */
+    uint32_t combo_hk[512];
+    uint8_t  combo_hu[512];
+    uint32_t frame_hk[512];
+    uint32_t frame_hg[512];
+    uint32_t frame_gen;
 } Overlay;
 
 struct GameHost;

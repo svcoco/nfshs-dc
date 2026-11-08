@@ -439,3 +439,10 @@
 8010d4f0
 8010d584
 8010d89c
+# M8: los trozos del bucle de 8007fb70 que antes iban al interprete (C_EXTRA_STARTS en recomp.py)
+8007fc58
+80080004
+80080238
+80080250
+800802a8
+800802ec

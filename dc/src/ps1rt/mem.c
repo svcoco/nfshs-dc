@@ -217,3 +217,23 @@ uint32_t ps1_r32_x(Cpu *c, uint32_t a) { return ps1_r32(c, a); }
 void ps1_w8_x(Cpu *c, uint32_t a, uint32_t v)  { ps1_w8(c, a, v); }
 void ps1_w16_x(Cpu *c, uint32_t a, uint32_t v) { ps1_w16(c, a, v); }
 void ps1_w32_x(Cpu *c, uint32_t a, uint32_t v) { ps1_w32(c, a, v); }
+
+/* M8: diagnostico de accesos relativos a sp fuera de la RAM (ps1rt.h, PS1_PILA_MAL) */
+static struct { uint32_t f, a; uint64_t n; } s_pila[64];
+void ps1_pila_mal(Cpu *c, uint32_t a)
+{
+    uint32_t f = c->stack_depth ? c->stack[(c->stack_depth - 1u) % PS1_STACK_MAX] : 0u, i;
+    c->stack_off++;
+    for (i = 0; i < 64u; i++) {
+        if (s_pila[i].n == 0u) { s_pila[i].f = f; s_pila[i].a = a; }
+        if (s_pila[i].f == f) { s_pila[i].n++; return; }
+    }
+}
+void ps1_pila_informe(void);
+void ps1_pila_informe(void)
+{
+    uint32_t i;
+    for (i = 0; i < 64u && s_pila[i].n; i++)
+        printf("  pila fuera: funcion %08x  %llu accesos (primero a %08x)\n", (unsigned)s_pila[i].f,
+               (unsigned long long)s_pila[i].n, (unsigned)s_pila[i].a);
+}

@@ -382,8 +382,11 @@ void car_draw(const CarModel *m, const struct CarDraw *d, const struct RaceView 
         tono = 128u;
 
     /* Lo normal (carroceria y partes que se restan, sin espejo) va con UNA matriz, del modelo
-     * a la camara: la del coche por la de la vista. Las demas pasadas necesitan el mundo. */
-    directo = !reflejo && !d->mirror;
+     * a la camara: la del coche por la de la vista. Las demas pasadas necesitan el mundo.
+     * La carroceria del showroom tampoco va directa: su reflejo (CAR_PASS_ENV_SR) se prueba
+     * con DEPTHCMP_EQUAL contra ella y pasa por el mundo, asi que los dos tienen que hacer
+     * las mismas cuentas para dar la misma Z; si no, el reflejo sale a puntos y rayas. */
+    directo = !reflejo && !d->mirror && pasada != CAR_PASS_BODY;
     if (directo) {
         float dp[3];
         uint32_t f;

@@ -299,6 +299,20 @@ static float borde_guarda(const View *vw, const Cv *c, uint32_t b)
     }
 }
 
+/* Los planos de la banda de guarda (bits 0-3) y el cercano (bit 4) que dejan fuera a un punto
+ * en espacio de camara. */
+static inline uint32_t fuera_guarda(const View *vw, float x, float y, float z)
+{
+    float fx = x * vw->fx, fy = y * vw->fy;
+    uint32_t f = z < NEAR ? 0x10u : 0u;
+
+    if (fx + (vw->ox - GUARD_X0) * z < 0.0f) f |= 1u;
+    if ((GUARD_X1 - vw->ox) * z - fx < 0.0f) f |= 2u;
+    if ((vw->oy - GUARD_Y0) * z - fy < 0.0f) f |= 4u;
+    if ((GUARD_Y1 - vw->oy) * z + fy < 0.0f) f |= 8u;
+    return f;
+}
+
 static uint32_t recorta_guarda(const View *vw, const Cv *in, uint32_t n, Cv *out, uint32_t b)
 {
     uint32_t i, m = 0;
@@ -449,6 +463,28 @@ static uint32_t color_sombra(const uint32_t *light, uint32_t s)
     }
 }
 
+/* M8: la tabla de luz del frame ya convertida a ARGB doblado (luz_prepara), para no hacerlo
+ * en cada vertice. Vale para la tabla `s_luz_de`. */
+static uint32_t s_luz[256];
+static const uint32_t *s_luz_de;
+
+static void luz_prepara(const uint32_t *light)
+{
+    uint32_t i;
+
+    s_luz_de = light;
+    if (light != NULL)
+        for (i = 0; i < 256u; i++)
+            s_luz[i] = color_sombra(light, i);
+}
+
+static inline uint32_t luz_de(const uint32_t *light, uint32_t s)
+{
+    if (light == s_luz_de && light != NULL)
+        return s_luz[s & 0xFFu];
+    return color_sombra(light, s);
+}
+
 /* El haz de los faros de noche de la vista que se esta dibujando (ver NightBeam), o NULL.
  * Lo fija track_draw; solo lo usa la pista. */
 static const NightBeam *s_haz;
@@ -502,6 +538,7 @@ typedef struct {
     uint32_t argb;
     float sx, sy, iz;
     uint32_t ok;
+    uint32_t fuera;           /* fuera_guarda, solo si no esta `ok` (si lo esta, 0) */
 } MVert;
 
 #define MV_MAX 1024u
@@ -548,7 +585,7 @@ static inline void mv_calcula(MVert *o, const View *vw, const int16_t *v, const 
         w[2] = p[2] + (float)v[2] / 64.0f;
         s = sombra_haz(s_haz, w, s);
     }
-    o->argb = color_sombra(light, s);
+    o->argb = luz_de(light, s);
     o->ok = 0;
     if (o->z >= NEAR && !vw->recorta_y) {
         o->iz = vm_inv(o->z);
@@ -556,6 +593,7 @@ static inline void mv_calcula(MVert *o, const View *vw, const int16_t *v, const 
         o->sy = vw->oy - o->y * vw->fy * o->iz;
         o->ok = dentro_guarda(o->sx, o->sy);
     }
+    o->fuera = o->ok ? 0u : fuera_guarda(vw, o->x, o->y, o->z);
 }
 
 /* El doble del area en pantalla (la Y va hacia abajo): negativa si el triangulo mira a la
@@ -581,7 +619,9 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
                   const uint16_t *quads, uint32_t nq,
                   TrackEmit emit, void *user, TrackStats *st)
 {
-    float au = (float)t->atlas_w, av = (float)t->atlas_h;
+    /* M8: por el inverso, sin dividir 8 veces por cuadro (el atlas mide potencias de dos,
+     * asi que el resultado es el mismo) */
+    float au = 1.0f / (float)t->atlas_w, av = 1.0f / (float)t->atlas_h;
     float mm[3][3], tt[3];
     uint32_t q;
 
@@ -629,8 +669,8 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
                 mv_calcula(p, vw, verts + (size_t)vi * 4u, light, mm, tt, o, mat);
             }
             pv[k] = p;
-            u[k] = cu[e] / au;
-            v[k] = cvv[e] / av;
+            u[k] = cu[e] * au;
+            v[k] = cvv[e] * av;
         }
         dos = dos_caras || (m->flags & 1u) != 0u;
 
@@ -665,6 +705,17 @@ static void malla(const Track *t, const View *vw, const uint32_t *light,
                 st->espalda += 2u;
             }
             continue;
+        }
+
+        /* M8: entero fuera del mismo plano de la banda de guarda, o detras del cercano: no se
+         * ve (ver sky_quad), y no hace falta partirlo ni recortarlo */
+        {
+            uint32_t todos = 0x1Fu;
+
+            for (k = 0; k < 4u; k++)
+                todos &= pv[k]->fuera;
+            if (todos != 0u)
+                continue;
         }
 
         /* Los vertices del cuadro van en orden CICLICO alrededor de el, no en zigzag,
@@ -707,6 +758,7 @@ void track_draw(const Track *t, const struct RaceView *view, const uint32_t *lig
         memset(st, 0, sizeof(*st));
     view_init(&vw, view, sw, sh);
     s_haz = (view->beam != NULL && view->beam->on) ? view->beam : NULL;
+    luz_prepara(light);
 
     for (i = 0; i < view->chunks_n; i++) {
         int16_t id = view->chunk[i];
@@ -777,6 +829,7 @@ void objects_draw(const Track *t, const struct ObjectDraw *obj, uint32_t n,
     if (t->raw == NULL || t->models == 0u)
         return;
     view_init(&vw, view, sw, sh);
+    luz_prepara(light);
 
     for (i = 0; i < n; i++) {
         const struct ObjectDraw *o = &obj[i];
@@ -856,6 +909,16 @@ static void sky_quad(const View *vw, const Cv *q, const TrackMat *m,
                      TrackEmit emit, void *user, TrackStats *st)
 {
     Cv tri[3];
+    uint32_t todos = 0x1Fu, k;
+
+    /* M8: el cuadro entero fuera del mismo plano de la banda de guarda, o detras del plano
+     * cercano, no se ve: la banda es un cono convexo con la camara en el vertice, asi que
+     * si sus cuatro esquinas estan fuera del mismo plano, todo el cuadro lo esta. Casi toda
+     * la cupula cae fuera, y se ahorra partirla en triangulos y recortarlos uno a uno. */
+    for (k = 0; k < 4u; k++)
+        todos &= fuera_guarda(vw, q[k].x, q[k].y, q[k].z);
+    if (todos != 0u)
+        return;
 
     tri[0] = q[0]; tri[1] = q[1]; tri[2] = q[2];
     triangulo(vw, tri, m, emit, user, st);
@@ -877,8 +940,11 @@ void sky_draw(const Track *t, const struct SkyData *s, const struct RaceView *vi
     View vw;
     TrackMat m;
     Cv q[4];
+    Cv punto[85];             /* M8: los puntos de la cupula, girados una sola vez */
     uint32_t anillo, seg, k;
     float ky;
+    /* por el inverso: el atlas mide potencias de dos, asi que da lo mismo que dividir */
+    float iau = 1.0f / (float)t->atlas_w, iav = 1.0f / (float)t->atlas_h;
     int mas_alta = 1;
 
     if (st != NULL)
@@ -887,6 +953,12 @@ void sky_draw(const Track *t, const struct SkyData *s, const struct RaceView *vi
         return;
     view_init(&vw, view, sw, sh);
     memset(&m, 0, sizeof m);
+    for (k = 0; k < 85u; k++) {
+        const int16_t *v = s->dome[k];
+
+        /* radio 1000 -> 100, y la X espejada como todo lo demas */
+        sky_punto(&vw, &punto[k], -(float)v[0] * 0.1f, (float)v[1] * 0.1f, (float)v[2] * 0.1f);
+    }
 
     /* ---- la cupula ---- */
     for (anillo = 0; anillo < 4u; anillo++) {
@@ -909,12 +981,11 @@ void sky_draw(const Track *t, const struct SkyData *s, const struct RaceView *vi
                     r = &t->sky[forma];
             }
             for (k = 0; k < 4u; k++) {
-                const int16_t *v = s->dome[idx[k]];
                 const uint8_t *c = s->dome_rgb[idx[k]];
 
-                /* radio 1000 -> 100, y la X espejada como todo lo demas */
-                sky_punto(&vw, &q[k], -(float)v[0] * 0.1f, (float)v[1] * 0.1f,
-                          (float)v[2] * 0.1f);
+                q[k].x = punto[idx[k]].x;
+                q[k].y = punto[idx[k]].y;
+                q[k].z = punto[idx[k]].z;
                 if (r != NULL) {
                     /* el borde alto de la textura va en el anillo de arriba */
                     static const uint8_t esq[4] = { 0, 1, 1, 0 };  /* izquierda/derecha */
@@ -923,9 +994,8 @@ void sky_draw(const Track *t, const struct SkyData *s, const struct RaceView *vi
                     float iz = espejada ? (float)r->w - 0.5f : 0.5f;
                     float de = espejada ? 0.5f : (float)r->w - 0.5f;
 
-                    q[k].u = ((float)r->x + (esq[k] != 0u ? de : iz)) / (float)t->atlas_w;
-                    q[k].v = ((float)r->y + (alto[k] != 0u ? (float)r->h - 0.5f : 0.5f)) /
-                             (float)t->atlas_h;
+                    q[k].u = ((float)r->x + (esq[k] != 0u ? de : iz)) * iau;
+                    q[k].v = ((float)r->y + (alto[k] != 0u ? (float)r->h - 0.5f : 0.5f)) * iav;
                     q[k].argb = dobla(c);
                 } else {
                     q[k].u = 0.0f;
@@ -969,8 +1039,8 @@ void sky_draw(const Track *t, const struct SkyData *s, const struct RaceView *vi
 
             sky_punto(&vw, &q[k], -(float)s->ring[i][0] * ky,
                       arr[k] != 0u ? y1 : y0, (float)s->ring[i][1] * ky);
-            q[k].u = ((float)r->x + (pi[k] != 0u ? (float)r->w - 0.5f : 0.5f)) / (float)t->atlas_w;
-            q[k].v = ((float)r->y + (arr[k] != 0u ? 0.5f : (float)r->h - 0.5f)) / (float)t->atlas_h;
+            q[k].u = ((float)r->x + (pi[k] != 0u ? (float)r->w - 0.5f : 0.5f)) * iau;
+            q[k].v = ((float)r->y + (arr[k] != 0u ? 0.5f : (float)r->h - 0.5f)) * iav;
             q[k].argb = dobla(c);
         }
         sky_quad(&vw, q, &m, emit, user, st);

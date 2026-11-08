@@ -144,7 +144,14 @@ HLE_SET = set()
 #    heuristicas no reconocen (0x80107358: cinco instrucciones, sin marco, nadie la llama
 #    con jal; ver dc/src/ps1rt/interp.c).
 C_HLE_BODIES = {0x8004F12C, 0x8004F3B8}      # PSXDrawSquare, PSXDrawTransSquare
-C_EXTRA_STARTS = {0x80107358}
+# M8: el bucle de 0x8007fb70..0x8008031c salta a trozos que ninguna funcion cubre (0x80080004,
+# 0x800802a8) o entra por la mitad desde fuera (0x8007fc58, 0x80080238, 0x80080250, 0x800802ec): iba al
+# interprete, que era el ~1,2 % del frame en carrera (medido con NFSHS_INTERPLOG en la parrilla).
+# Van a los DOS backends: el interprete cuenta los ticks (ramas hacia atras) de otra forma que el
+# codigo generado, y si solo los compilara C, el test diferencial veria ticks distintos desde la
+# carrera, con RAM y registros identicos (decision de Jorge, 2026-11-07: regenerar la referencia).
+EXTRA_STARTS = {0x8007fc58, 0x80080004, 0x80080238, 0x80080250, 0x800802a8, 0x800802ec}
+C_EXTRA_STARTS = {0x80107358} | EXTRA_STARTS
 
 # Optional names transferred from the 1999 development build (tools/symmatch.py output).
 NAMES = {}
@@ -505,8 +512,31 @@ def cset(i, expr):
     return f'c->r[{i}] = {expr};'
 
 
+def _dest_reg(w):
+    """Registro que escribe una instruccion simple (None si ninguno)."""
+    op = w >> 26
+    if op == 0:
+        fn = w & 63
+        if fn in (0, 2, 3, 4, 6, 7, 16, 18) or 32 <= fn <= 43:
+            return (w >> 11) & 31
+        return None
+    if op == 16 and ((w >> 21) & 31) == 0:
+        return (w >> 16) & 31
+    if op in (8, 9, 10, 11, 12, 13, 14, 15, 32, 33, 34, 35, 36, 37, 38):
+        return (w >> 16) & 31
+    return None
+
+
 def gen_simple_c(w, pc):
-    """C para una instruccion que no es de control de flujo (None si lo es)."""
+    """C para una instruccion que no es de control de flujo (None si lo es). Si escribe sp con
+    algo que no sea `addiu sp, sp, n`, detras va PS1_PILA_SET (la pila puede cambiar de region)."""
+    code = _gen_simple_c(w, pc)
+    if code and _dest_reg(w) == 29 and not ((w >> 26) in (8, 9) and ((w >> 21) & 31) == 29):
+        code += ' PS1_PILA_SET();'
+    return code
+
+
+def _gen_simple_c(w, pc):
     op = w >> 26
     rs, rt, rd = (w >> 21) & 31, (w >> 16) & 31, (w >> 11) & 31
     sh, fn = (w >> 6) & 31, w & 63
@@ -556,16 +586,20 @@ def gen_simple_c(w, pc):
     if op == 14: return cset(rt, f'{cr(rs)} ^ {imm:#06x}u')
     if op == 15: return cset(rt, cu(imm << 16))
     addr = f'{cr(rs)} + {cu(s)}'
-    if op == 32: return cset(rt, f'(uint32_t)(int32_t)(int8_t)ps1_r8(c, {addr})')
-    if op == 33: return cset(rt, f'(uint32_t)(int32_t)(int16_t)ps1_r16(c, {addr})')
-    if op == 35: return cset(rt, f'ps1_r32(c, {addr})')
-    if op == 36: return cset(rt, f'(uint32_t)ps1_r8(c, {addr})')
-    if op == 37: return cset(rt, f'(uint32_t)ps1_r16(c, {addr})')
+    # M8: relativos a sp. La pila esta en RAM o en el scratchpad, alineada: en Dreamcast, base y
+    # mascara por funcion, sin prueba ni ruta lenta (ps1_r32k y companeras, ps1rt.h; en PC se
+    # comprueba que la base es la buena y se cuentan los desacuerdos)
+    k = 'k' if rs == 29 and op in (32, 33, 35, 36, 37, 40, 41, 43) else ''
+    if op == 32: return cset(rt, f'(uint32_t)(int32_t)(int8_t)ps1_r8{k}(c, {addr})')
+    if op == 33: return cset(rt, f'(uint32_t)(int32_t)(int16_t)ps1_r16{k}(c, {addr})')
+    if op == 35: return cset(rt, f'ps1_r32{k}(c, {addr})')
+    if op == 36: return cset(rt, f'(uint32_t)ps1_r8{k}(c, {addr})')
+    if op == 37: return cset(rt, f'(uint32_t)ps1_r16{k}(c, {addr})')
     if op == 34: return cset(rt, f'ps1_lwl(c, {addr}, {cr(rt)})')
     if op == 38: return cset(rt, f'ps1_lwr(c, {addr}, {cr(rt)})')
-    if op == 40: return f'ps1_w8(c, {addr}, (uint8_t){cr(rt)});'
-    if op == 41: return f'ps1_w16(c, {addr}, (uint16_t){cr(rt)});'
-    if op == 43: return f'ps1_w32(c, {addr}, {cr(rt)});'
+    if op == 40: return f'ps1_w8{k}(c, {addr}, (uint8_t){cr(rt)});'
+    if op == 41: return f'ps1_w16{k}(c, {addr}, (uint16_t){cr(rt)});'
+    if op == 43: return f'ps1_w32{k}(c, {addr}, {cr(rt)});'
     if op == 42: return f'ps1_swl(c, {addr}, {cr(rt)});'
     if op == 46: return f'ps1_swr(c, {addr}, {cr(rt)});'
     if op in (1, 2, 3, 4, 5, 6, 7):
@@ -764,6 +798,10 @@ def gen_function_c(f, known, comments=True):
     text = '\n'.join(out)
     if f in SCRATCH_SET:
         text = re.sub(r'\bps1_(r8|r16|r32|w8|w16|w32)\(', r'ps1_\1s(', text)
+    if 'PS1_PILA_SET' in text or re.search(r'\bps1_(r8|r16|r32|w8|w16|w32)k\(', text):
+        # base y mascara de la pila (ps1rt.h): se fijan al entrar, antes de saltar a la entrada
+        text = text.replace('    (void)t; (void)cnd; (void)off;\n',
+                            '    (void)t; (void)cnd; (void)off;\n    PS1_PILA_DECL;\n    PS1_PILA_SET();\n', 1)
     return text
 
 
@@ -1013,6 +1051,8 @@ if __name__ == '__main__':
     roots = all_starts() if '--all' in args else [int(x, 16) for x in args]
     if lang == 'c':
         roots = sorted(set(roots) | C_EXTRA_STARTS)
+    else:
+        roots = sorted(set(roots) | EXTRA_STARTS)
     funcs = collect(roots)
     known = set(funcs)
     collect_entry_points(funcs)

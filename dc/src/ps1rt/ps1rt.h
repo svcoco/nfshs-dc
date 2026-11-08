@@ -159,6 +159,7 @@ struct Cpu {
     uint32_t last_io;
     uint64_t misaligned;                 /* accesos desalineados a la RAM */
     uint64_t ram_edge;                   /* accesos que cruzan el tope de la RAM */
+    uint64_t stack_off;                  /* accesos relativos a sp fuera de la RAM o desalineados */
     uint32_t stack[PS1_STACK_MAX];       /* funciones recompiladas en curso */
     uint32_t stack_depth;
     uint32_t recent[16][2];              /* (direccion, retorno) de llamadas al host */
@@ -534,6 +535,42 @@ void     ps1_w32_x(Cpu *c, uint32_t a, uint32_t v);
 #define ps1_w8  ps1_w8_x
 #define ps1_w16 ps1_w16_x
 #define ps1_w32 ps1_w32_x
+#endif
+/* M8: accesos relativos a sp (la pila del juego). La pila esta en la RAM principal o en el scratchpad
+ * (el juego la pasa ahi en el dibujo, la fisica y el driver de sonido), nunca en IO, y siempre alineada.
+ * Cada funcion generada que la usa lleva una base y una mascara (pila_b, pila_m) que se fijan al entrar
+ * y cada vez que algo distinto de `addiu sp, sp, n` escribe sp (PS1_PILA_SET); el acceso es
+ * base + (dir & mascara), sin prueba ni ruta lenta.
+ * En Dreamcast (PS1_PILA_DIRECTA) va asi. En PC cada acceso comprueba que la base es la de la region
+ * de verdad y que el acceso esta alineado, cuenta los desacuerdos (stack_off) y hace el acceso normal:
+ * con la cuenta a 0 en el test diferencial, las dos formas hacen lo mismo. */
+#define PS1_PILA_DECL uint8_t *pila_b; uint32_t pila_m
+#define PS1_PILA_SET() do {                                                                 if (c->r[29] & 0x1F800000u) { pila_b = c->scratch; pila_m = 0x3FFu; }              else { pila_b = c->ram; pila_m = PS1_RAM_MASK; }                                } while (0)
+#if PS1_PILA_DIRECTA
+#define PS1_PILA(T, a) (*(T *)(pila_b + ((a) & pila_m)))
+#define ps1_r8k(c, a)     ((uint32_t)PS1_PILA(uint8_t, a))
+#define ps1_r16k(c, a)    ((uint32_t)PS1_PILA(ps1_u16a, a))
+#define ps1_r32k(c, a)    PS1_PILA(ps1_u32a, a)
+#define ps1_w8k(c, a, v)  ((void)(PS1_PILA(uint8_t, a) = (uint8_t)(v)))
+#define ps1_w16k(c, a, v) ((void)(PS1_PILA(ps1_u16a, a) = (uint16_t)(v)))
+#define ps1_w32k(c, a, v) ((void)(PS1_PILA(ps1_u32a, a) = (uint32_t)(v)))
+#else
+void ps1_pila_mal(Cpu *c, uint32_t a);
+static inline uint32_t ps1_pila_ok(Cpu *c, const uint8_t *b, uint32_t a, uint32_t n)
+{
+    int ok = (a & (n - 1u)) == 0u &&
+             (((a & 0x1F800000u) == 0u && b == c->ram) ||
+              ((a & 0x1FFFFC00u) == 0x1F800000u && b == c->scratch));
+    if (PS1_UNLIKELY(!ok))
+        ps1_pila_mal(c, a);
+    return a;
+}
+#define ps1_r8k(c, a)     ps1_r8(c, ps1_pila_ok(c, pila_b, a, 1u))
+#define ps1_r16k(c, a)    ps1_r16(c, ps1_pila_ok(c, pila_b, a, 2u))
+#define ps1_r32k(c, a)    ps1_r32(c, ps1_pila_ok(c, pila_b, a, 4u))
+#define ps1_w8k(c, a, v)  ps1_w8(c, ps1_pila_ok(c, pila_b, a, 1u), v)
+#define ps1_w16k(c, a, v) ps1_w16(c, ps1_pila_ok(c, pila_b, a, 2u), v)
+#define ps1_w32k(c, a, v) ps1_w32(c, ps1_pila_ok(c, pila_b, a, 4u), v)
 #endif
 #ifdef PS1_HOT
 static inline __attribute__((always_inline)) void ps1_mult_h(Cpu *c, uint32_t a, uint32_t b)

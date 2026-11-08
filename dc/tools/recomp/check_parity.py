@@ -54,7 +54,7 @@ RUST_TOKENS = [
 ]
 C_TOKENS = [
     (r'ps1_push\(c, (0x[0-9a-f]+)u\)', 'push:{}'),
-    (r'ps1_(r8|r16|r32|w8|w16|w32)s?\(c,', '{}'),
+    (r'ps1_(r8|r16|r32|w8|w16|w32)[sk]?\(c,', '{}'),
     (r'ps1_(lwl|lwr|swl|swr)\(c,', '{}'),
     (r'ps1_(mult|multu|div|divu)\(c,', '{}'),
     (r'ps1_gte\(c, (0x[0-9a-f]+)u\)', 'gte:{}'),
@@ -95,7 +95,7 @@ C_LEADER = re.compile(r'^L_([0-9a-f]{8}):$', re.M)
 
 
 def main():
-    funcs = recomp.collect(recomp.all_starts())
+    funcs = recomp.collect(sorted(set(recomp.all_starts()) | recomp.EXTRA_STARTS))   # los de los dos backends
     known = set(funcs)
     recomp.collect_entry_points(funcs)
     if LIMIT:

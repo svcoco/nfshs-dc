@@ -15,9 +15,10 @@ void ps1_panic(Cpu *c, const char *msg)
         fprintf(stderr, "  ticks=%llu  llamadas=%llu  interpretadas=%llu\n",
                 (unsigned long long)c->ticks, (unsigned long long)c->calls,
                 (unsigned long long)c->interpreted);
-        fprintf(stderr, "  io=%llu (ultimo %#x)  desalineados=%llu  borde=%llu\n",
+        fprintf(stderr, "  io=%llu (ultimo %#x)  desalineados=%llu  borde=%llu  pila fuera=%llu\n",
                 (unsigned long long)c->io_accesses, (unsigned)c->last_io,
-                (unsigned long long)c->misaligned, (unsigned long long)c->ram_edge);
+                (unsigned long long)c->misaligned, (unsigned long long)c->ram_edge,
+                (unsigned long long)c->stack_off);
         n = c->stack_depth < PS1_STACK_MAX ? c->stack_depth : PS1_STACK_MAX;
         fprintf(stderr, "  pila (%u):", (unsigned)c->stack_depth);
         for (i = n; i > 0 && i + 12u > n; i--)

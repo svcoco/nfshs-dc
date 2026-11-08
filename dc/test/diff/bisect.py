@@ -14,7 +14,8 @@ import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     '..', '..', '..'))
-OUT = os.path.join(ROOT, 'dc', 'test', 'diff', 'out')
+# NFSHS_DIFF_DIR lleva los volcados a otro disco: el de 40 000 frames ocupa ~7 GB
+OUT = os.environ.get('NFSHS_DIFF_DIR') or os.path.join(ROOT, 'dc', 'test', 'diff', 'out')
 C_EXE = os.path.join(ROOT, 'dc', 'build', 'nfshs-dc')
 RUST_EXE = os.path.join(ROOT, 'target', 'release', 'nfshs.exe')
 PAGE = 4096

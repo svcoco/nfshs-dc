@@ -62,7 +62,9 @@ enum {
 };
 #ifdef NFSHS_PERFIL
 extern volatile unsigned char host_seccion;
-#define HOST_SEC(n) (host_seccion = (unsigned char)(n))
+/* Cambia de seccion y anota en la que termina lo que conto el contador del SH-4 (muestreo.c) */
+void host_sec_cambia(unsigned n);
+#define HOST_SEC(n) host_sec_cambia((unsigned)(n))
 #else
 #define HOST_SEC(n) ((void)0)
 #endif

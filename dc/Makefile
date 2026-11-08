@@ -138,7 +138,7 @@ DCBUILD   := $(BUILD)/dc
 # eleccion definitiva se decide midiendo ms/frame (docs/hitos/M1b.md, seccion 1).
 DCFLAGS   := -std=c11 -Os -fwrapv -fno-strict-aliasing -Wall -Wextra
 # Solo el juego, no las pruebas unitarias (que comprueban los contadores): M8.
-DCFAST    := -DPS1_STACK=0 -DPS1_FAST_TICK=1
+DCFAST    := -DPS1_STACK=0 -DPS1_FAST_TICK=1 -DPS1_PILA_DIRECTA=1
 DCTEST_OBJS := $(DCBUILD)/run_tests.o $(DCBUILD)/test_main.o                $(patsubst src/ps1rt/%.c,$(DCBUILD)/%.o,$(PS1RT_SRCS))
 
 dc-check:
@@ -223,6 +223,13 @@ CPPFLAGS += -DNFSHS_PERFIL
 endif
 DCPBUILD := $(BUILD)/dcp
 
+# El codigo generado caliente (hot_XX.c), con sus flags. GENHOT=-Os lo deja como el resto, para comparar.
+GENHOT ?= -O2
+# Cuanto espera el muestreador tras entrar en carrera (ms); por omision, el de muestreo.c.
+ifdef PERFIL_ESPERA
+CPPFLAGS += -DPERFIL_ESPERA_MS=$(PERFIL_ESPERA)u
+endif
+
 # El orden de .text sale de un perfil (tools/recomp/perfil_orden.py). ORDEN= lo quita, para comparar.
 ORDEN ?= tools/recomp/orden_text.ld
 ifneq ($(wildcard $(ORDEN)),)
@@ -245,7 +252,7 @@ dc-perfil-enlaza:
 # El C generado no se recompila aqui: lo hace dc-gen, que son 71 unidades y tarda.
 dc-gen: dc-check $(GEN)/parts.mk
 	@mkdir -p $(DCBUILD)/gen $(TMPDIR)
-	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(DCFAST) -DPS1_EXT_ACCESS -ffunction-sections $(GENFLAGS)" HOTFLAGS="-O2" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
+	@$(MAKE) --no-print-directory -f tools/genobj.mk 	    CC="$(KOS_BASE)/../sh-elf/bin/sh-elf-gcc -ml -m4-single" 	    CFLAGS="$(DCFLAGS) $(DCFAST) -DPS1_EXT_ACCESS -ffunction-sections $(GENFLAGS)" HOTFLAGS="$(GENHOT)" CPPFLAGS="$(CPPFLAGS)" 	    GEN="$(GEN)" OBJDIR="$(DCBUILD)/gen"
 
 $(DCBUILD)/nfshs.elf: dc-check dc-gen $(DC_OBJS)
 	$(KOS_CC_W) $(DC_OBJS) $(DCBUILD)/gen/*.o $(DCSILENCIO) $(DCORDEN) -o $@

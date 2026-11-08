@@ -106,6 +106,10 @@ void tex_begin_frame(TexCache *tc)
     }
 }
 
+/* M8: la ultima entrada encontrada. Los cuadros seguidos suelen ir con la misma pagina y
+ * paleta, y asi no se recorre la tabla en cada uno (tex_find era el 1,3 % del frame). */
+static uint32_t s_ultima;
+
 void tex_need(TexCache *tc, uint16_t tpage, uint16_t clut, const uint16_t uv[4][2])
 {
     uint32_t i, k;
@@ -119,11 +123,17 @@ void tex_need(TexCache *tc, uint16_t tpage, uint16_t clut, const uint16_t uv[4][
         if (uv[k][1] > v1) v1 = uv[k][1];
     }
 
-    for (i = 0; i < tc->n; i++)
-        if (tc->e[i].tpage == tpage && tc->e[i].clut == clut) {
-            e = &tc->e[i];
-            break;
-        }
+    i = s_ultima;
+    if (i < tc->n && tc->e[i].tpage == tpage && tc->e[i].clut == clut) {
+        e = &tc->e[i];
+    } else {
+        for (i = 0; i < tc->n; i++)
+            if (tc->e[i].tpage == tpage && tc->e[i].clut == clut) {
+                e = &tc->e[i];
+                s_ultima = i;
+                break;
+            }
+    }
     if (e == NULL) {
         if (tc->n < TEX_MAX) {
             e = &tc->e[tc->n++];
@@ -238,11 +248,16 @@ void tex_subido(TexCache *tc)
 
 const TexEntry *tex_find(const TexCache *tc, uint16_t tpage, uint16_t clut)
 {
-    uint32_t i;
+    uint32_t i = s_ultima;
 
+    /* cada pagina y paleta tiene una sola entrada (tex_need no las repite) */
+    if (i < tc->n && tc->e[i].tpage == tpage && tc->e[i].clut == clut)
+        return tc->e[i].lista ? &tc->e[i] : NULL;
     for (i = 0; i < tc->n; i++)
-        if (tc->e[i].tpage == tpage && tc->e[i].clut == clut && tc->e[i].lista)
-            return &tc->e[i];
+        if (tc->e[i].tpage == tpage && tc->e[i].clut == clut) {
+            s_ultima = i;
+            return tc->e[i].lista ? &tc->e[i] : NULL;
+        }
     return NULL;
 }
 

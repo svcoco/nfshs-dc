@@ -439,6 +439,9 @@ int main(int argc, char **argv)
     if (s_sndapi != NULL)
         fclose(s_sndapi);
     host_report(&host, &cpu);
+    /* M8: tiene que ser 0 para que los accesos directos a la pila de Dreamcast sean equivalentes */
+    printf("accesos a la pila fuera de la RAM o desalineados: %llu\n", (unsigned long long)cpu.stack_off);
+    { void ps1_pila_informe(void); ps1_pila_informe(); }
     if (getenv("NFSHS_INTERPLOG") != NULL) {
         printf("\n=== entradas al interprete, por direccion ===\n");
         ps1_interp_report(stdout, 40);

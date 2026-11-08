@@ -11,35 +11,54 @@ void overlay_reset(Overlay *o)
     if (o->frame_combos_n > o->frame_combos_max)
         o->frame_combos_max = o->frame_combos_n;
     o->frame_combos_n = 0;
+    o->frame_gen++;
     o->n = 0;
+}
+
+#define COMBO_HASH 512u   /* el doble de las listas: la sonda lineal siempre acaba */
+
+static inline uint32_t combo_hash(uint32_t key)
+{
+    return (key * 2654435761u) >> 23;   /* 9 bits */
 }
 
 /* Anota la combinacion de pagina y paleta, para dimensionar la cache de texturas. */
 static void note_combo(Overlay *o, uint16_t tpage, uint16_t clut)
 {
     uint32_t key = ((uint32_t)tpage << 16) | clut;
-    uint32_t i;
+    uint32_t i = combo_hash(key);
 
-    for (i = 0; i < o->combos_n; i++)
-        if (o->combos[i] == key)
+    while (o->combo_hu[i]) {
+        if (o->combo_hk[i] == key)
             return;
-    if (o->combos_n >= sizeof(o->combos) / sizeof(o->combos[0]))
+        i = (i + 1u) & (COMBO_HASH - 1u);
+    }
+    if (o->combos_n >= sizeof(o->combos) / sizeof(o->combos[0])) {
         o->combos_lost++;
-    else
-        o->combos[o->combos_n++] = key;
+        return;
+    }
+    o->combos[o->combos_n++] = key;
+    o->combo_hk[i] = key;
+    o->combo_hu[i] = 1;
 }
 
 /* Lo mismo, pero solo de este frame. */
 static void note_frame_combo(Overlay *o, uint16_t tpage, uint16_t clut)
 {
     uint32_t key = ((uint32_t)tpage << 16) | clut;
-    uint32_t i;
+    uint32_t marca = o->frame_gen + 1u;
+    uint32_t i = combo_hash(key);
 
-    for (i = 0; i < o->frame_combos_n; i++)
-        if (o->frame_combos[i] == key)
+    while (o->frame_hg[i] == marca) {
+        if (o->frame_hk[i] == key)
             return;
-    if (o->frame_combos_n < sizeof(o->frame_combos) / sizeof(o->frame_combos[0]))
+        i = (i + 1u) & (COMBO_HASH - 1u);
+    }
+    if (o->frame_combos_n < sizeof(o->frame_combos) / sizeof(o->frame_combos[0])) {
         o->frame_combos[o->frame_combos_n++] = key;
+        o->frame_hk[i] = key;
+        o->frame_hg[i] = marca;
+    }
 }
 
 void overlay_push(GameHost *h, const int16_t pts[4][2], const uint32_t colours[4],

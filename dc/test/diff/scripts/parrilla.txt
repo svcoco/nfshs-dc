@@ -1,0 +1,59 @@
+# Una carrera con la PARRILLA COMPLETA (M8): la escena pesada para medir el rendimiento.
+#
+# Como carrera_completa.txt (single race por Alemania, comprando el SLK), pero en
+# [race setup] se elige "full grid" (DOWN x2) en vez de "solo": salen 7 rivales. Eso
+# anade la pantalla [skill level] (beginner), y por eso todo lo de despues va 140 frames
+# mas tarde que en carrera_completa.txt. Pantallas comprobadas con --textlog y screens.py:
+#   [race type] single race · [race setup] full grid · [skill level] beginner
+#   [track select] landstrasse, continue · [car garage] -> car dealer (comprar el SLK) -> race
+# En carrera NO hay piloto automatico: se mantiene el acelerador (CROSS) desde el 1 301.
+1 -
+20 0x0010
+26 -
+36 0x0010
+42 -
+60 0x4000
+66 -
+100 0x0040
+106 -
+130 0x4000
+136 -
+200 0x0040
+206 -
+230 0x0040
+236 -
+280 0x4000
+286 -
+500 0x4000
+506 -
+640 0x4000
+646 -
+700 0x0040
+706 -
+720 0x0040
+726 -
+740 0x4000
+746 -
+800 0x4000
+806 -
+860 0x0040
+866 -
+880 0x0040
+886 -
+900 0x4000
+906 -
+1000 0x0080
+1006 -
+1040 0x4000
+1046 -
+1120 0x1000
+1126 -
+1200 0x1000
+1206 -
+1260 0x0010
+1266 -
+1280 0x0010
+1286 -
+1300 0x4000
+1301 0x4000
+#end 6000

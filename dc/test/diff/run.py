@@ -22,7 +22,8 @@ def print(*a, **k):      # salida sin buffer, para que el orden con los hijos se
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     '..', '..', '..'))
-OUT = os.path.join(ROOT, 'dc', 'test', 'diff', 'out')
+# NFSHS_DIFF_DIR lleva los volcados a otro disco: el de 40 000 frames ocupa ~7 GB
+OUT = os.environ.get('NFSHS_DIFF_DIR') or os.path.join(ROOT, 'dc', 'test', 'diff', 'out')
 C_EXE = os.path.join(ROOT, 'dc', 'build', 'nfshs-dc')
 RUST_EXE = os.path.join(ROOT, 'target', 'release', 'nfshs.exe')
 HDR = 20
@@ -59,7 +60,7 @@ def run(cmd, env_extra, log, etiqueta):
     with open(log, 'w', encoding='utf-8', errors='replace') as fh:
         r = subprocess.run(cmd, cwd=ROOT, env=env, stdout=fh,
                            stderr=subprocess.STDOUT, timeout=1800)
-    print(f'  {etiqueta}: codigo {r.returncode}, registro en {os.path.relpath(log, ROOT)}')
+    print(f'  {etiqueta}: codigo {r.returncode}, registro en {log if os.path.splitdrive(log)[0].lower() != os.path.splitdrive(ROOT)[0].lower() else os.path.relpath(log, ROOT)}')
     return r.returncode
 
 

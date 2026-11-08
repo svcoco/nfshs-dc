@@ -226,6 +226,10 @@ static int a_la_banda(float *x0, float *y0, float *x1, float *y1)
 static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackMat *m)
 {
     int cielo = s_fase == FASE_CIELO;
+    /* M8: en locales. Las escrituras a la store queue van por un float *, y sin esto el
+     * compilador relee los seis globales en cada vertice por si se pisaron. */
+    const float zmul = cielo ? 0.0f : s_zmul, zadd = cielo ? 0.0001f : s_zadd;
+    const float umul = s_umul, uadd = s_uadd, vmul = s_vmul, vadd = s_vadd;
     uint32_t k;
 
     (void)user;
@@ -245,9 +249,9 @@ static void pista_emite(void *user, const TrackVert *v, uint32_t n, const TrackM
          * la cupula (radio 100) escribia su 1/w y tapaba todo lo que hubiera mas alla de 100 m:
          * las colinas, los arboles lejanos y los edificios, que aparecian de golpe al acercarse.
          * Flycast hace lo mismo; el raster de PC, no. */
-        pv->z = cielo ? 0.0001f : v[i].z * s_zmul + s_zadd;
-        pv->u = v[i].u * s_umul + s_uadd;
-        pv->v = v[i].v * s_vmul + s_vadd;
+        pv->z = v[i].z * zmul + zadd;
+        pv->u = v[i].u * umul + uadd;
+        pv->v = v[i].v * vmul + vadd;
         pv->argb = v[i].argb;
         pv->oargb = 0;
         pvr_dr_commit(pv);
@@ -910,7 +914,7 @@ static int recorta(float *x0, float *y0, float *x1, float *y1,
  * del tacometro es una linea inclinada que el HUD recorta a su esfera de 28x28, y sin
  * recortarla se salia por debajo. Sutherland-Hodgman contra los cuatro bordes del
  * rectangulo, interpolando UV y color: de un cuadro salen hasta 8 vertices. */
-typedef struct { float x, y, z, u, v, a, r, g, b; } P2;
+typedef struct { float x, y, z, u, v, a, r, g, b; uint32_t argb; } P2;
 
 static void p2_mezcla(P2 *o, const P2 *p, const P2 *q, float s)
 {
@@ -923,6 +927,7 @@ static void p2_mezcla(P2 *o, const P2 *p, const P2 *q, float s)
     o->r = p->r + (q->r - p->r) * s;
     o->g = p->g + (q->g - p->g) * s;
     o->b = p->b + (q->b - p->b) * s;
+    o->argb = 0u;   /* interpolado: se calcula de a, r, g, b (p2_argb) */
 }
 
 /* Recorta contra un borde: eje 0 = x, 1 = y; `max` dice si el borde es el de arriba. */
@@ -957,6 +962,8 @@ static int p2_recorta(P2 *pol, int n, const Rect *c)
 
 static uint32_t p2_argb(const P2 *p)
 {
+    if (p->argb != 0u)
+        return p->argb;
     uint32_t a = (uint32_t)(p->a + 0.5f), r = (uint32_t)(p->r + 0.5f);
     uint32_t g = (uint32_t)(p->g + 0.5f), b = (uint32_t)(p->b + 0.5f);
 
@@ -1074,6 +1081,7 @@ static void destello_quad(GameHost *h, const OverlayQuad *q, float sx, float sy,
             pol[k].r = (float)((col >> 16) & 0xFFu);
             pol[k].g = (float)((col >> 8) & 0xFFu);
             pol[k].b = (float)(col & 0xFFu);
+            pol[k].argb = col;
             fuera |= pol[k].x < s_banda.x0 || pol[k].x > s_banda.x1 ||
                      pol[k].y < s_banda.y0 || pol[k].y > s_banda.y1;
         }
@@ -1241,16 +1249,11 @@ static void dibuja_2d(GameHost *h, const OverlayQuad *q, const Rect *clip, float
         static const int per[4] = { 0, 1, 3, 2 };
 
         for (k = 0; k < 4; k++) {
-            uint32_t c = color_de(q, per[k], q->semi);
-
             pol[k].x = px[per[k]];
             pol[k].y = py[per[k]];
             pol[k].u = pu[per[k]];
             pol[k].v = pv[per[k]];
-            pol[k].a = (float)(c >> 24);
-            pol[k].r = (float)((c >> 16) & 0xFFu);
-            pol[k].g = (float)((c >> 8) & 0xFFu);
-            pol[k].b = (float)(c & 0xFFu);
+            pol[k].argb = color_de(q, per[k], q->semi);
         }
         npol = 4;
     }
@@ -1270,6 +1273,15 @@ static void dibuja_2d(GameHost *h, const OverlayQuad *q, const Rect *clip, float
         if (bx1 < clip->x0 || bx0 > clip->x1 || by1 < clip->y0 || by0 > clip->y1)
             return;                      /* entero fuera */
         if (bx0 < clip->x0 || bx1 > clip->x1 || by0 < clip->y0 || by1 > clip->y1) {
+            /* el color en float solo hace falta para interpolarlo en el recorte */
+            for (k = 0; k < 4; k++) {
+                uint32_t c = pol[k].argb;
+
+                pol[k].a = (float)(c >> 24);
+                pol[k].r = (float)((c >> 16) & 0xFFu);
+                pol[k].g = (float)((c >> 8) & 0xFFu);
+                pol[k].b = (float)(c & 0xFFu);
+            }
             npol = p2_recorta(pol, 4, clip);
             if (npol < 3)
                 return;
@@ -1295,21 +1307,37 @@ static void dibuja_2d(GameHost *h, const OverlayQuad *q, const Rect *clip, float
         }
     }
 
-    if (e != NULL)
-        pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
-                         PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
-                         e->w, e->h,
-                         (pvr_ptr_t)((uint8_t *)tex_vram + e->offset * 2u),
-                         PVR_FILTER_NONE);
-    else
-        pvr_poly_cxt_col(&cxt, PVR_LIST_TR_POLY);
-    /* orden del pintor: sin escritura de profundidad; con `prueba`, solo donde no hay un
-     * coche del showroom delante (ver el showroom) */
-    cxt.depth.comparison = prueba ? PVR_DEPTHCMP_GEQUAL : PVR_DEPTHCMP_ALWAYS;
-    cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
-    cxt.gen.culling = PVR_CULLING_NONE;
-    modo_mezcla(&cxt, q->semi, q->abr);
-    pvr_poly_compile(&hdr, &cxt);
+    /* M8: la cabecera solo depende de la textura, la mezcla y `prueba`; los cuadros seguidos
+     * suelen repetirla, asi que se guarda la ultima compilada (se sigue mandando cada vez) */
+    {
+        static pvr_poly_hdr_t ult;
+        static uint32_t ult_tex = 0xFFFFFFFFu, ult_tam, ult_modo;
+        uint32_t tex = e != NULL ? e->offset : 0xFFFFFFFEu;
+        uint32_t tam = e != NULL ? ((uint32_t)e->w << 16) | e->h : 0u;
+        uint32_t modo = (q->semi ? 1u : 0u) | ((uint32_t)q->abr << 1) | (prueba ? 16u : 0u);
+
+        if (tex != ult_tex || tam != ult_tam || modo != ult_modo) {
+            if (e != NULL)
+                pvr_poly_cxt_txr(&cxt, PVR_LIST_TR_POLY,
+                                 PVR_TXRFMT_ARGB1555 | PVR_TXRFMT_NONTWIDDLED,
+                                 e->w, e->h,
+                                 (pvr_ptr_t)((uint8_t *)tex_vram + e->offset * 2u),
+                                 PVR_FILTER_NONE);
+            else
+                pvr_poly_cxt_col(&cxt, PVR_LIST_TR_POLY);
+            /* orden del pintor: sin escritura de profundidad; con `prueba`, solo donde no
+             * hay un coche del showroom delante (ver el showroom) */
+            cxt.depth.comparison = prueba ? PVR_DEPTHCMP_GEQUAL : PVR_DEPTHCMP_ALWAYS;
+            cxt.depth.write = PVR_DEPTHWRITE_DISABLE;
+            cxt.gen.culling = PVR_CULLING_NONE;
+            modo_mezcla(&cxt, q->semi, q->abr);
+            pvr_poly_compile(&ult, &cxt);
+            ult_tex = tex;
+            ult_tam = tam;
+            ult_modo = modo;
+        }
+        hdr = ult;
+    }
     pvr_prim(&hdr, sizeof(hdr));
 
     /* El poligono va como tira en zigzag: p0, p1, p(n-1), p2, p(n-2)... que para un
